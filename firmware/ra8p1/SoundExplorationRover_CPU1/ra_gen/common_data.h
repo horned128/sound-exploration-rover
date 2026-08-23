@@ -3,9 +3,51 @@
 #define COMMON_DATA_H_
 #include <stdint.h>
 #include "bsp_api.h"
+#include "r_icu.h"
+#include "r_external_irq_api.h"
 #include "r_ioport.h"
 #include "bsp_pin_cfg.h"
 FSP_HEADER
+/** External IRQ on ICU Instance. */
+extern const external_irq_instance_t g_encoder_left_b_irq;
+
+/** Access the ICU instance using these structures when calling API functions directly (::p_api is not used). */
+extern icu_instance_ctrl_t g_encoder_left_b_irq_ctrl;
+extern const external_irq_cfg_t g_encoder_left_b_irq_cfg;
+
+#ifndef jga25_encoder_left_b_callback
+void jga25_encoder_left_b_callback(external_irq_callback_args_t *p_args);
+#endif
+/** External IRQ on ICU Instance. */
+extern const external_irq_instance_t g_encoder_left_a_irq;
+
+/** Access the ICU instance using these structures when calling API functions directly (::p_api is not used). */
+extern icu_instance_ctrl_t g_encoder_left_a_irq_ctrl;
+extern const external_irq_cfg_t g_encoder_left_a_irq_cfg;
+
+#ifndef jga25_encoder_left_a_callback
+void jga25_encoder_left_a_callback(external_irq_callback_args_t *p_args);
+#endif
+/** External IRQ on ICU Instance. */
+extern const external_irq_instance_t g_encoder_right_b_irq;
+
+/** Access the ICU instance using these structures when calling API functions directly (::p_api is not used). */
+extern icu_instance_ctrl_t g_encoder_right_b_irq_ctrl;
+extern const external_irq_cfg_t g_encoder_right_b_irq_cfg;
+
+#ifndef jga25_encoder_right_b_callback
+void jga25_encoder_right_b_callback(external_irq_callback_args_t *p_args);
+#endif
+/** External IRQ on ICU Instance. */
+extern const external_irq_instance_t g_encoder_right_a_irq;
+
+/** Access the ICU instance using these structures when calling API functions directly (::p_api is not used). */
+extern icu_instance_ctrl_t g_encoder_right_a_irq_ctrl;
+extern const external_irq_cfg_t g_encoder_right_a_irq_cfg;
+
+#ifndef jga25_encoder_right_a_callback
+void jga25_encoder_right_a_callback(external_irq_callback_args_t *p_args);
+#endif
 #define IOPORT_CFG_NAME g_bsp_pin_cfg
 #define IOPORT_CFG_OPEN R_IOPORT_Open
 #define IOPORT_CFG_CTRL g_ioport_ctrl

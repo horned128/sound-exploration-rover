@@ -1,8 +1,14 @@
-#include "hal_data.h"
+/** =================================================================*
+ * @file   hal_entry.c
+ * @brief  CPU0のμT-Kernel起動入口
+ * ================================================================= */
+#include "hal_data.h"                                       /* FSP生成のHAL/BSPインスタンス、周辺機器設定、型定義 */
 
-void hal_entry(void)
-{
-    void knl_start_mtkernel(void);
+/** =================================================================*
+ * @brief  μT-Kernel起動
+ * ================================================================= */
+void hal_entry(void) {
+    void knl_start_mtkernel(void); /* μT-Kernel起動関数の宣言 */
 
     knl_start_mtkernel();
 }

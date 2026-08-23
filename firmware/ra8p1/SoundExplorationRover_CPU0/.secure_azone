@@ -111,6 +111,7 @@
             <slot name="P006.CPU0" secure="true"/>
             <slot name="P008.CPU0" secure="true"/>
             <slot name="P009.CPU0" secure="true"/>
+            <slot name="P011.CPU0" secure="true"/>
             <slot name="P012.CPU0" secure="true"/>
             <slot name="P013.CPU0" secure="true"/>
         </peripheral>
@@ -124,6 +125,7 @@
             <slot name="P106.CPU0" secure="true"/>
             <slot name="P107.CPU0" secure="true"/>
             <slot name="P109.CPU0" secure="true"/>
+            <slot name="P110.CPU0" secure="true"/>
             <slot name="P111.CPU0" secure="true"/>
             <slot name="P112.CPU0" secure="true"/>
             <slot name="P113.CPU0" secure="true"/>
@@ -159,14 +161,13 @@
             <slot name="P404.CPU0" secure="true"/>
             <slot name="P405.CPU0" secure="true"/>
             <slot name="P406.CPU0" secure="true"/>
-            <slot name="P407.CPU0" secure="true"/>
             <slot name="P408.CPU0" secure="true"/>
             <slot name="P411.CPU0" secure="true"/>
+            <slot name="P413.CPU0" secure="true"/>
             <slot name="P414.CPU0" secure="true"/>
             <slot name="P415.CPU0" secure="true"/>
         </peripheral>
         <peripheral name="PORT5.CPU0" group="PORT">
-            <slot name="P500.CPU0" secure="true"/>
             <slot name="P501.CPU0" secure="true"/>
             <slot name="P502.CPU0" secure="true"/>
             <slot name="P503.CPU0" secure="true"/>
@@ -185,6 +186,8 @@
         </peripheral>
         <peripheral name="PORT6.CPU0" group="PORT">
             <slot name="P600.CPU0" secure="true"/>
+            <slot name="P602.CPU0" secure="true"/>
+            <slot name="P603.CPU0" secure="true"/>
             <slot name="P606.CPU0" secure="true"/>
             <slot name="P607.CPU0" secure="true"/>
             <slot name="P608.CPU0" secure="true"/>
@@ -217,10 +220,11 @@
             <slot name="P806.CPU0" secure="true"/>
             <slot name="P807.CPU0" secure="true"/>
             <slot name="P808.CPU0" secure="true"/>
+            <slot name="P809.CPU0" secure="true"/>
+            <slot name="P810.CPU0" secure="true"/>
+            <slot name="P811.CPU0" secure="true"/>
             <slot name="P812.CPU0" secure="true"/>
             <slot name="P813.CPU0" secure="true"/>
-            <slot name="P814.CPU0" secure="true"/>
-            <slot name="P815.CPU0" secure="true"/>
         </peripheral>
         <peripheral name="PORT9.CPU0" group="PORT">
             <slot name="P902.CPU0" secure="true"/>
@@ -286,6 +290,7 @@
         </peripheral>
         <peripheral name="PORTD.CPU0" group="PORT">
             <slot name="PD00.CPU0" secure="true"/>
+            <slot name="PD01.CPU0" secure="true"/>
             <slot name="PD02.CPU0" secure="true"/>
             <slot name="PD03.CPU0" secure="true"/>
             <slot name="PD07.CPU0" secure="true"/>

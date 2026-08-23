@@ -4,8 +4,8 @@
 
 # IDE and OS-local files
 **/*.launch
-**/*.jlink
-**/JLinkLog.log
+**/.settings/com.renesas.cdt.ddsc.settingseditor.prefs
+**/ra_cfg.txt
 .DS_Store
 Thumbs.db
 desktop.ini
@@ -31,7 +31,13 @@ desktop.ini
 **/*.su
 **/*.gcno
 **/*.gcda
+**/*.jlink
+**/JLinkLog.log
 **/makefile
 **/objects.mk
 **/sources.mk
 **/subdir.mk
+
+# Coding Agent
+.agents/*
+skills-lock.json

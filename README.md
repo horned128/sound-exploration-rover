@@ -68,6 +68,8 @@ sound-exploration-rover/
 
 `firmware/ra8p1/`をe² studioのワークスペースとして使用します。
 
+DS3225MGとJGA25-370をCPU0から指令し、CPU1でPWM・エンコーダ制御するサンプルと配線は、[EK-RA8P1 アクチュエータ制御サンプル](firmware/ra8p1/README.md)を参照してください。
+
 | プロジェクト | 内容 |
 |---|---|
 | `SoundExplorationRover` | マルチコア構成をまとめるソリューション |

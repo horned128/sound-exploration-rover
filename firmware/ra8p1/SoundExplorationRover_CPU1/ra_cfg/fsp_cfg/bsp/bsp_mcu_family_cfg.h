@@ -163,10 +163,10 @@
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 8) /* ULPT1 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 9) /* ULPT0 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 15) /* GPT COMMON */ | \
-            (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 18) /* GPT13 */ | \
-            (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 19) /* GPT12 */ | \
-            (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 20) /* GPT11 */ | \
-            (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 21) /* GPT10 */ | \
+            (((1 > 0) ? 0U : 1U) << 18) /* GPT13 */ | \
+            (((1 > 0) ? 0U : 1U) << 19) /* GPT12 */ | \
+            (((1 > 0) ? 0U : 1U) << 20) /* GPT11 */ | \
+            (((1 > 0) ? 0U : 1U) << 21) /* GPT10 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 27) /* GPT4 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 28) /* GPT3 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 29) /* GPT2 */ | \
@@ -271,16 +271,16 @@
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 8U) /* External IRQ8 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 9U) /* External IRQ9 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 10U) /* External IRQ10 */ | \
-            (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 11U) /* External IRQ11 */ | \
+            (((1 > 0) ? 0U : 1U) << 11U) /* External IRQ11 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 12U) /* External IRQ12 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 13U) /* External IRQ13 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 14U) /* External IRQ14 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 15U) /* External IRQ15 */ | \
-            (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 16U) /* External IRQ16 */ | \
+            (((1 > 0) ? 0U : 1U) << 16U) /* External IRQ16 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 17U) /* External IRQ17 */ | \
-            (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 18U) /* External IRQ18 */ | \
+            (((1 > 0) ? 0U : 1U) << 18U) /* External IRQ18 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 19U) /* External IRQ19 */ | \
-            (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 20U) /* External IRQ20 */ | \
+            (((1 > 0) ? 0U : 1U) << 20U) /* External IRQ20 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 21U) /* External IRQ21 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 22U) /* External IRQ22 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 23U) /* External IRQ23 */ | \
