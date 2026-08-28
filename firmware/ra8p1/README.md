@@ -1,6 +1,6 @@
 # EK-RA8P1 アクチュエータ制御
 
-CPU0がReSpeaker/XIAOからUSBで音響観測を受けて短距離の音源追従目標を生成し、CPU1がPWM出力とエンコーダ処理を担当します。この文書は主にアクチュエータ配線と単体確認を扱います。全体構造は[RA8P1ソフトウェア設計書](../../docs/ra8p1/ARCHITECTURE.md)、USB接続、音響protocol、DoA校正、音源追従試験は[ReSpeaker統合設計](../../docs/ra8p1/RESPEAKER_INTEGRATION.md)を参照してください。
+CPU0がReSpeaker/XIAOからUSBで音響観測を受けて短距離の音源追従目標を生成し、CPU1がPWM出力とエンコーダ処理を担当します。この文書は主にアクチュエータ配線と単体確認を扱います。全体構造は[ローバー ファームウェア設計書](../../docs/firmware/ARCHITECTURE.md)、USB接続、音響protocol、DoA校正、音源追従試験は[ReSpeaker統合設計](../../docs/firmware/RESPEAKER_INTEGRATION.md)を参照してください。
 
 ```text
 CPU0 / Cortex-M85 / μT-Kernel
@@ -74,7 +74,7 @@ EK-RA8P1は既定でSW4-4がOFFで、Arduinoヘッダが切り離されていま
 
 ピン設定を変更した後はCPU0/CPU1 projectをRefreshし、CPU0、CPU1の順にGenerate Project Contentを実行し、両プロジェクトをCleanしてから両方をBuildします。書き込みには`SoundExplorationRover Debug_Multicore Launch Group`を使います。この構成はCPU0の`Debug/SoundExplorationRover_CPU0.elf`とCPU1の`Debug/SoundExplorationRover_CPU1.elf`を組で読み込むため、別フォルダーに残った古いSRECを個別選択しないでください。
 
-現行RA8P1 sourceは手動の完全compile/linkとSREC生成まで成功していますが、CPU0の古い`Debug` make metadataには新規sourceが未列挙です。実機へ書き込む前に上記のRefresh、Generate、Clean Buildを必ず実行してください。XIAO ESP32S3側はESP-IDF未導入のため実build前です。検証結果とsizeは[RA8P1ソフトウェア設計書のビルド節](../../docs/ra8p1/ARCHITECTURE.md#11-ビルド生成書き込み)を参照してください。
+現行RA8P1 sourceは手動の完全compile/linkとSREC生成まで成功していますが、CPU0の古い`Debug` make metadataには新規sourceが未列挙です。実機へ書き込む前に上記のRefresh、Generate、Clean Buildを必ず実行してください。XIAO ESP32S3側はESP-IDF未導入のため実build前です。検証結果とsizeは[ローバー ファームウェア設計書のビルド節](../../docs/firmware/ARCHITECTURE.md#11-ビルド生成書き込み)を参照してください。
 
 サーボの赤線は外部安定化電源+4.8～6.8 V、黒線は外部電源GNDへ接続し、外部電源GNDとEK-RA8P1のGNDを共通化します。
 
@@ -115,7 +115,7 @@ EK-RA8P1 J18-6/7 GND ----+
 
 A相だけでも指令方向を前提に速度の大きさは測れますが、逆転判定と4逓倍カウントにはA/B両方が必要です。本ソフトは左右ともA/Bの両相を両エッジ割り込みで読み取ります。未配線の入力を浮かせると誤カウントするため、エンコーダを接続しない状態で走行させないでください。
 
-購入品は300 RPM品であり、旧100 RPM品を仮定した2024 count/revは使用できません。出力軸2回転で約1800カウントを実測したため、`JGA25_ENCODER_COUNTS_PER_REV=900`として100 msごとに左右のRPMを算出します。より正確な値が必要な場合は、出力軸10回転の平均で再校正します。測定方法は[JGA25-370 12 V・300 RPM仕様書](../../hardware/actuator/docs/jga25-370-12v-300rpm.md)を参照してください。
+購入品は300 RPM品であり、旧100 RPM品を仮定した2024 count/revは使用できません。出力軸2回転で約1800カウントを実測したため、`JGA25_ENCODER_COUNTS_PER_REV=900`として100 msごとに左右のRPMを算出します。より正確な値が必要な場合は、出力軸10回転の平均で再校正します。測定方法は[JGA25-370 12 V・300 RPM仕様書](../../hardware/actuator/spec/jga25-370-12v-300rpm.md)を参照してください。
 
 `g_jga25_left_encoder_count`と`g_jga25_right_encoder_count`は、左右とも前進で増加し、後進で減少する4逓倍累積カウントです。`g_jga25_left_rpm_x10`と`g_jga25_right_rpm_x10`も同じ符号規則の推定RPMの10倍であり、`-1234`は後進方向の`-123.4 RPM`を表します。CPU1は100 msごとの実測RPMを使い、指令開始から150 ms後にPWMを比例補正して左右の速度差を抑えます。
 
@@ -150,7 +150,7 @@ RPWMとLPWMは同じ側で同時にHighにせず、同じ側では1方向のPWM�
 
 初回は車輪を浮かせ、モーター電源を電流制限付きにします。USB linkと音響観測が成立するまでCPU0はemergency stopを維持します。成立後は停止して音を聴き、一定条件を満たした方向へservoを500 ms整定し、左右+60 RPM相当で300 msだけ前進して500 ms停止します。
 
-USB接続だけの試験、静止音響試験、DoA座標校正、車輪を浮かせたアクチュエータ試験、接地試験の順序は[ReSpeaker統合設計の「安全な導入・検証順」](../../docs/ra8p1/RESPEAKER_INTEGRATION.md#8-安全な導入検証順)に従ってください。目標RPMは20 kHz PWMの基本値とし、代表エンコーダで左右差だけを補正します。
+USB接続だけの試験、静止音響試験、DoA座標校正、車輪を浮かせたアクチュエータ試験、接地試験の順序は[ReSpeaker統合設計の「安全な導入・検証順」](../../docs/firmware/RESPEAKER_INTEGRATION.md#8-安全な導入検証順)に従ってください。目標RPMは20 kHz PWMの基本値とし、代表エンコーダで左右差だけを補正します。
 
 ### CPU0状態LED
 

@@ -6,12 +6,12 @@ Sound Exploration Roverで使用する購入アクチュエータの記録です
 
 | 区分 | 製品 | 購入した仕様 | 購入先 | 個別仕様書 |
 |---|---|---|---|---|
-| DCギヤードモーター | JGA25-370、エンコーダ付き | 12 V、300 RPM | [AliExpress 商品番号 1005008515616137](https://ja.aliexpress.com/item/1005008515616137.html) | [jga25-370-12v-300rpm.md](docs/jga25-370-12v-300rpm.md) |
-| デジタルサーボ | DS3225MG、25 kgf·cm級 | 180° | [AliExpress 商品番号 1005005073143851](https://ja.aliexpress.com/item/1005005073143851.html) | [ds3225mg-180deg.md](docs/ds3225mg-180deg.md) |
+| DCギヤードモーター | JGA25-370、エンコーダ付き | 12 V、300 RPM | [AliExpress 商品番号 1005008515616137](https://ja.aliexpress.com/item/1005008515616137.html) | [jga25-370-12v-300rpm.md](spec/jga25-370-12v-300rpm.md) |
+| デジタルサーボ | DS3225MG、25 kgf·cm級 | 180° | [AliExpress 商品番号 1005005073143851](https://ja.aliexpress.com/item/1005005073143851.html) | [ds3225mg-180deg.md](spec/ds3225mg-180deg.md) |
 
 購入仕様の確認日：2026-08-17（JGA25-370を100 RPMから300 RPMへ訂正）
 
-ホイールはD軸へ樹脂リムを直接取り付ける `rim.stl` ではなく、[12 mm真鍮六角ハブの選定・取付手順](docs/jga25-wheel-hub-adapter.md)に従って `rim_hexagonal.stl` を使用します。
+ホイールはD軸へ樹脂リムを直接取り付ける `rim.stl` ではなく、[12 mm真鍮六角ハブの選定・取付手順](spec/jga25-wheel-hub-adapter.md)に従って `rim_hexagonal.stl` を使用します。
 
 ## 情報の扱い
 

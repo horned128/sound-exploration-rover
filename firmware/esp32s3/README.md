@@ -39,7 +39,7 @@ XVF3800ファームウェアを書き込むときは3.5 mmジャック側のXVF3
 
 Wi-Fiを使う場合は、先に`main/app_config.h`の`APP_WIFI_SSID`、`APP_WIFI_PASSWORD`、`APP_UDP_DESTINATION_IPV4`を設定します。宛先IPv4はUDPを待ち受けるPCのアドレスです。空文字のままならWi-Fiを開始せず、USB音響機能だけが動作します。実際の認証情報はGitへcommitしないでください。PC側の待受はNmap Ncatなら`ncat -u -l 5005`、OpenBSD系netcatなら`nc -u -l 5005`です。
 
-通常はリポジトリ直下のVS Codeワークスペースを開き、`ESP32: Build`または`ESP32: Upload`タスクを使います。PlatformIO設定は`platformio.ini`にあり、Espressif32 6.13.0、ESP-IDF 5.5.3、`seeed_xiao_esp32s3`を固定しています。全体の操作は[VS Code統合開発手順](../../docs/ra8p1/VSCODE_WORKFLOW.md)を参照してください。
+通常はリポジトリ直下のVS Codeワークスペースを開き、`ESP32: Build`または`ESP32: Upload`タスクを使います。PlatformIO設定は`platformio.ini`にあり、Espressif32 6.13.0、ESP-IDF 5.5.3、`seeed_xiao_esp32s3`を固定しています。全体の操作は[VS Code統合開発手順](../../docs/firmware/VSCODE_WORKFLOW.md)を参照してください。
 
 ESP-IDFを直接使用する場合は、ESP-IDFターミナルでこのディレクトリへ移動して実行します。
 

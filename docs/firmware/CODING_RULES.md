@@ -1,13 +1,13 @@
 # コーディングルール
 
-RA8P1プロジェクト（`SoundExplorationRover_CPU0` / `SoundExplorationRover_CPU1`）のユーザーコードに適用するコーディング規約です。
+`firmware/`配下のCファームウェアにおけるユーザーコードへ適用するコーディング規約です。
 
 対象範囲は、主に次のディレクトリです。
 
 ```text
-firmware/ra8p1/SoundExplorationRover_CPU0/src/
-firmware/ra8p1/SoundExplorationRover_CPU1/src/
-firmware/ra8p1/common/
+firmware/**/src/
+firmware/**/main/
+firmware/**/common/
 ```
 
 ## 基本方針
@@ -16,8 +16,8 @@ firmware/ra8p1/common/
 - コメントは日本語で簡潔に書く。
 - コードの内容をそのまま言い換えるだけのコメントは書かない。
 - 仕様や処理を変更した場合は、関連するコメントも同時に更新する。
-- 単位、対象CPU、IPCの意味、タイムアウトなど、誤解しやすい情報は明記する。
-- FSP/e² studioの生成コードには、原則としてユーザーコメントを追加・編集しない。
+- 単位、対象プロセッサ、IPCなどの通信の意味、タイムアウトなど、誤解しやすい情報は明記する。
+- FSP/e² studioなど、SDKまたはIDEが生成するコードには、原則としてユーザーコメントを追加・編集しない。
 
 ## ファイルヘッダ
 
@@ -26,7 +26,7 @@ firmware/ra8p1/common/
 ```c
 /** =================================================================*
  * @file   main.c
- * @brief  CPU0アプリケーション初期化
+ * @brief  ファームウェアアプリケーション初期化
  * @author hino.a
  * @date   2026-08
  * ================================================================= */
@@ -40,7 +40,7 @@ firmware/ra8p1/common/
 `@brief`は、説明口調の文章ではなく、ファイルが提供する機能を一目で識別できる動詞または名詞の形にします。
 
 ```c
- * @brief  CPU0アプリケーション初期化
+ * @brief  ファームウェアアプリケーション初期化
  * @brief  アクチュエータ指令送信
  * @brief  エンコーダカウント取得
 ```
@@ -48,7 +48,7 @@ firmware/ra8p1/common/
 次のような説明口調は避けます。
 
 ```c
- * @brief  CPU0アプリケーションを初期化します。
+ * @brief  ファームウェアアプリケーションを初期化します。
  * @brief  アクチュエータ指令を送信する関数です。
 ```
 
@@ -58,9 +58,9 @@ firmware/ra8p1/common/
 
 ```c
 /** =================================================================*
- * @brief  CPU0アプリケーション初期化
- * @details CPU1を起動し、IPC経由で操舵指令を周期送信する。
- * @return μT-Kernelへ返す終了コード
+ * @brief  ファームウェアアプリケーション初期化
+ * @details 制御対象を初期化し、IPC経由で制御指令を周期送信する。
+ * @return 実行環境へ返す終了コード
  * ================================================================= */
 EXPORT INT usermain(void) {
 ```
@@ -75,8 +75,8 @@ EXPORT INT usermain(void) {
 関数内部では、必要な箇所だけ通常コメントを使用します。
 
 ```c
-/* CPU1が安全出力とIPC受信割込みを初期化する時間を確保する。 */
-tk_dly_tsk(CPU0_ACTUATOR_STARTUP_DELAY_MS);
+/* 制御側が安全出力とIPC受信割込みを初期化する時間を確保する。 */
+delay_ms(CONTROL_STARTUP_DELAY_MS);
 ```
 
 次のように、明らかな代入やループの各行へコメントを付ける必要はありません。
@@ -92,16 +92,17 @@ command.left_target_rpm = 0;
 複数の`#include`は空行を挟まず連続して記載し、コメントの開始位置を揃えます。
 
 ```c
-#include "hal_data.h"                       /* FSP生成のHAL/BSPインスタンス、周辺機器設定、型定義 */
-#include <tk/tkernel.h>                     /* μT-Kernelのタスク制御API、型定義、共通定義 */
-#include "../cpu0_config.h"                 /* CPU0の起動待ち時間、指令周期、操舵角試験値 */
-#include "../ipc/actuator_ipc_client.h"     /* CPU0からCPU1へ指令を送るIPCクライアントAPIとメッセージ型 */
+#include "hal_data.h"                       /* SDK生成のHAL/BSPインスタンス、周辺機器設定、型定義 */
+#include "app_config.h"                     /* アプリケーションの起動待ち時間、指令周期、制御設定 */
+#include "control_client.h"                 /* 制御対象へ指令を送る通信クライアントAPIとメッセージ型 */
 ```
 
 コメントには、ヘッダの提供元または用途を記載します。コード部分が60桁以内なら、コメントを同じ行の61桁目から記載します。
 
 ## コメント位置と行幅
 
+- 通常のCコードは、120桁以内であれば可読性のために改行しない。70～80桁程度での機械的な折り返しは行わない。
+- 120桁を超える場合だけ、意味の区切りが分かる位置で改行し、継続行は一段インデントする。
 - 関数外の`#include`、関数宣言、`extern`、ファイルスコープ変数などの行末コメントは、コメント開始位置を61桁目に揃える。
 - コメントを除いたコード部分が60桁を超える場合は、行末コメントを置かず、通常コメントを直前の行へ移す。
 - 複数行のファイルスコープ変数コメントは、従来どおり宣言直前の`/**< ... */`形式とする。
@@ -112,13 +113,13 @@ command.left_target_rpm = 0;
 `extern`変数は、宣言行の末尾に簡易的なDoxygenコメントを1行で記載します。
 
 ```c
-extern bsp_leds_t g_bsp_leds;               /**< BSPが管理するLED構成情報 */
+extern bsp_leds_t g_bsp_leds;                /**< BSPが管理するLED構成情報 */
 ```
 
 実体の定義場所や所有者が重要な場合は、短く補足します。
 
 ```c
-extern bsp_leds_t g_bsp_leds;               /**< BSP/FSP生成コードが管理するLED構成情報 */
+extern bsp_leds_t g_bsp_leds;                /**< BSP/SDK生成コードが管理するLED構成情報 */
 ```
 
 ## static変数
@@ -135,11 +136,11 @@ static bsp_io_level_t level = BSP_IO_LEVEL_LOW; /* 次回出力するLEDレベ�
 ファイルスコープの配列など、宣言が複数行になる`static`変数は、宣言の前の行へ`/**< ... */`形式のコメントを置きます。
 
 ```c
-/**< IPC経由で送信する操舵角試験値（単位: 度） */
-static int16_t const steering_test_sequence_deg[] = {
-    CPU0_STEERING_TEST_CENTER_DEG,
-    CPU0_STEERING_TEST_LEFT_DEG,
-    CPU0_STEERING_TEST_RIGHT_DEG,
+/**< IPC経由で送信する制御値試験列 */
+static int16_t const control_test_sequence[] = {
+    CONTROL_TEST_CENTER,
+    CONTROL_TEST_MINIMUM,
+    CONTROL_TEST_MAXIMUM,
 };
 ```
 
@@ -149,24 +150,24 @@ static int16_t const steering_test_sequence_deg[] = {
 
 ```c
 /* モジュール定数 */
-/**< IPC経由で送信する操舵角試験値（単位: 度） */
-static int16_t const steering_test_sequence_deg[] = {
-    CPU0_STEERING_TEST_CENTER_DEG,
-    CPU0_STEERING_TEST_LEFT_DEG,
-    CPU0_STEERING_TEST_RIGHT_DEG,
+/**< IPC経由で送信する制御値試験列 */
+static int16_t const control_test_sequence[] = {
+    CONTROL_TEST_CENTER,
+    CONTROL_TEST_MINIMUM,
+    CONTROL_TEST_MAXIMUM,
 };
 ```
 
 `static`だけの可変状態は、これまでどおり使用範囲が最小になる場所へ置きます。関数専用の状態は関数内、複数の関数で共有する状態はファイルスコープとします。
 
-ファイルスコープの`static const`は、同じ`.c`ファイル内からだけ参照でき、他のファイルへ公開されません。CPU0・CPU1で共有する定数は、必要に応じて共有ヘッダへ定義します。
+ファイルスコープの`static const`は、同じ`.c`ファイル内からだけ参照でき、他のファイルへ公開されません。複数のプロセッサまたはコンポーネントで共有する定数は、必要に応じて共有ヘッダへ定義します。
 
 ## 関数宣言
 
 関数宣言はDoxygen形式にせず、宣言行の末尾に1行の通常コメントを付けます。
 
 ```c
-EXPORT INT usermain(void); /* CPU0アプリケーション初期化 */
+int app_main(void); /* ファームウェアアプリケーション初期化 */
 ```
 
 関数の詳しい説明は、実装側のDoxygenコメントへ記載します。
@@ -174,15 +175,15 @@ EXPORT INT usermain(void); /* CPU0アプリケーション初期化 */
 関数名と引数リストの開き括弧の間にはスペースを入れません。
 
 ```c
-static void cpu0_led_toggle(void) {
-    cpu0_led_toggle();
+static void status_led_toggle(void) {
+    status_led_toggle();
 }
 ```
 
 次のような書式は使用しません。
 
 ```c
-static void cpu0_led_toggle (void)
+static void status_led_toggle (void)
 ```
 
 ## 中括弧
@@ -221,8 +222,8 @@ static uint16_t const limits[] = {
 staticでないローカル変数は、処理の理解に必要な場合だけ通常コメントを付けます。
 
 ```c
-fsp_err_t err = actuator_ipc_client_init(); /* IPC初期化・送信APIの戻り値 */
-actuator_command_t command = actuator_command_make_safe(); /* CPU1へ送信する指令 */
+int err = control_client_init(); /* IPC初期化・送信APIの戻り値 */
+control_command_t command = control_command_make_safe(); /* 制御対象へ送信する指令 */
 ```
 
 型名や変数名だけで役割が明らかな場合は、コメントを省略します。
@@ -231,7 +232,7 @@ actuator_command_t command = actuator_command_make_safe(); /* CPU1へ送信す�
 
 次のような、実装意図や安全条件に関わる内容を優先してコメントします。
 
-- CPU0/CPU1間の責務分担
+- 複数のプロセッサまたはコンポーネント間の責務分担
 - IPCメッセージの意味、送信順序、コミット条件
 - 起動待ち、周期処理、タイムアウト
 - 緊急停止、フェイルセーフ、出力制限
@@ -242,7 +243,7 @@ actuator_command_t command = actuator_command_make_safe(); /* CPU1へ送信す�
 
 ## 生成コードとの境界
 
-次の領域はFSP/e² studioの生成対象です。ユーザー処理やコメントを直接書き込まず、`src/`配下のユーザーコードから利用します。
+SDKまたはIDEが生成する領域は、ユーザー処理やコメントを直接書き込まず、各プロジェクトのユーザーソース配下から利用します。FSP/e² studioプロジェクトでは次が該当します。
 
 ```text
 ra/
@@ -251,7 +252,7 @@ ra_gen/
 configuration.xml
 ```
 
-ユーザーコードの入口やアプリケーション処理は、各CPUプロジェクトの`src/`配下へ配置します。
+ユーザーコードの入口やアプリケーション処理は、各ファームウェアプロジェクトの`src/`、`main/`などのユーザーソース配下へ配置します。
 
 ## 作成時の確認項目
 
@@ -259,6 +260,7 @@ configuration.xml
 - [ ] `@brief`は説明口調ではなく、機能を示す短い動詞・名詞になっている。
 - [ ] 関数実装には必要な`@details`、`@param`、`@return`だけを付けている。
 - [ ] `#include`と関数宣言は1行の通常コメントになっている。
+- [ ] 通常のCコードを、120桁以内で機械的に折り返していない。
 - [ ] 関数外の行末コメントは61桁目から始まっている。
 - [ ] コード部分が60桁を超える行は、コメントを直前の行へ移している。
 - [ ] ファイルヘッダの終了行の直後に空行を置いていない。
@@ -271,4 +273,4 @@ configuration.xml
 - [ ] 中括弧はK&Rスタイルで、開き中括弧を宣言・制御文と同じ行に置いている。
 - [ ] 関数内部のコメントは必要最低限で、Doxygen形式を使っていない。
 - [ ] 生成コードを直接変更していない。
-- [ ] コメントの単位・CPU・IPC仕様・安全条件が実装と一致している。
+- [ ] コメントの単位・対象プロセッサ・通信仕様・安全条件が実装と一致している。
