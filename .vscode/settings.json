@@ -1,0 +1,11 @@
+{
+  "cmake.configureOnOpen": false,
+  "files.eol": "\r\n",
+  "files.exclude": {
+    "**/.pio": true,
+    "**/Debug": true,
+    "**/Release": true,
+    "**/build": true,
+    "**/managed_components": true
+  }
+}

@@ -38,6 +38,12 @@ static rover_motion_target_t command_target = {
     .actuator_enable = false,
     .emergency_stop = true,
 };
+static rover_motion_target_t command_last_sent_target = {
+    .left_target_rpm = 0,
+    .right_target_rpm = 0,
+    .actuator_enable = false,
+    .emergency_stop = true,
+};
 
 volatile uint32_t g_cpu0_command_sequence;                 /**< 最終送信シーケンス */
 volatile uint32_t g_cpu0_command_send_count;               /**< 正常送信回数 */
@@ -61,6 +67,7 @@ cpu0_fault_t cpu0_command_task_create(void) {
         .actuator_enable = false,
         .emergency_stop = true,
     };
+    command_last_sent_target = command_target;
     g_cpu0_command_sequence = 0U;
     g_cpu0_command_send_count = 0U;
     g_cpu0_command_last_error = FSP_SUCCESS;
@@ -154,6 +161,33 @@ ER cpu0_command_set_target(const rover_motion_target_t * p_target) {
 }
 
 /** =================================================================*
+ * @brief  最新指令状態取得
+ * @param[out] p_snapshot 最新指令と経過時間
+ * @return μT-Kernelエラーコード
+ * ================================================================= */
+ER cpu0_command_snapshot_get(cpu0_command_snapshot_t * p_snapshot) {
+    if (NULL == p_snapshot) {
+        return E_PAR;
+    }
+    if (command_mutex_id <= 0) {
+        return E_NOEXS;
+    }
+
+    ER err = tk_loc_mtx(command_mutex_id, TMO_POL);
+    if (E_OK != err) {
+        return err;
+    }
+
+    p_snapshot->target = command_target;
+    p_snapshot->last_sent_target = command_last_sent_target;
+    p_snapshot->target_age_ms = command_target_age_ms;
+    p_snapshot->target_stale =
+        command_target_age_ms >= CPU0_COMMAND_TARGET_TIMEOUT_MS;
+    err = tk_unl_mtx(command_mutex_id);
+    return err;
+}
+
+/** =================================================================*
  * @brief  最新指令スナップショット送信
  * @details 4サーボと左右モーターを1つのIPCフレームとして同時commitする。
  * ================================================================= */
@@ -212,6 +246,23 @@ static void cpu0_command_send_latest(void) {
         (void) cpu0_think_report_fault(CPU0_FAULT_IPC_SEND);
     } else {
         g_cpu0_command_send_count++;
+        ER const sent_lock_err = tk_loc_mtx(command_mutex_id,
+                                             TMO_FEVR);
+        if (E_OK == sent_lock_err) {
+            command_last_sent_target.left_target_rpm =
+                command.left_target_rpm;
+            command_last_sent_target.right_target_rpm =
+                command.right_target_rpm;
+            command_last_sent_target.actuator_enable =
+                0U != command.actuator_enable;
+            command_last_sent_target.emergency_stop =
+                0U != command.emergency_stop;
+            for (uint32_t i = 0U; i < ACTUATOR_SERVO_COUNT; i++) {
+                command_last_sent_target.servo_target_deg[i] =
+                    command.servo_target_deg[i];
+            }
+            (void) tk_unl_mtx(command_mutex_id);
+        }
         if (clear_emergency_latch) {
             command_emergency_reset_pending = false;
         } else if (target.emergency_stop) {

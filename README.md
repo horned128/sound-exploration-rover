@@ -35,7 +35,9 @@ STEPファイルとSTLファイルはGit LFSの対象です。Gitサブモジュ
 sound-exploration-rover/
 ├── docs/                       ドキュメント類
 ├── firmware/
-│   └── ra8p1/                  EK-RA8P1用e² studioワークスペース
+│   ├── common/                 MCU間で共有する通信protocol
+│   ├── ra8p1/                  EK-RA8P1用e² studioワークスペース
+│   └── esp32s3/ XIAO ESP32S3用ESP-IDF project
 └── hardware/
     ├── actuator/               使用アクチュエータの仕様
     ├── papaya-addon/
@@ -66,14 +68,15 @@ sound-exploration-rover/
 
 ## ファームウェア
 
-`firmware/ra8p1/`をe² studioのワークスペースとして使用します。
+通常の編集、ビルド、書き込み、デバッグは、リポジトリ直下の`SoundExplorationRover.code-workspace`をVS Codeで開いて行います。FSP Solution、ピン、クロック、スタックを変更するときは`firmware/ra8p1/`をe² studioのワークスペースとして使用します。
 
-DS3225MGとJGA25-370をCPU0から指令し、CPU1でPWM・エンコーダ制御するサンプルと配線は、[EK-RA8P1 アクチュエータ制御サンプル](firmware/ra8p1/README.md)を参照してください。
+VS Codeの初期設定とCPU0/CPU1/XIAOの操作は[VS Code統合開発手順](docs/ra8p1/VSCODE_WORKFLOW.md)を参照してください。全体の責務、CPU0/CPU1タスク、IPC、アクチュエータは[RA8P1ソフトウェア設計書](docs/ra8p1/ARCHITECTURE.md)、ReSpeaker/XIAOのUSB接続、protocol、DoA校正、音源追従の検証順は[ReSpeaker統合設計](docs/ra8p1/RESPEAKER_INTEGRATION.md)を参照してください。従来の配線とアクチュエータ単体確認は[EK-RA8P1 アクチュエータ制御](firmware/ra8p1/README.md)に残しています。
 
 | プロジェクト | 内容 |
 |---|---|
 | `SoundExplorationRover` | マルチコア構成をまとめるソリューション |
 | `SoundExplorationRover_CPU0` | CPU0向けプロジェクト |
 | `SoundExplorationRover_CPU1` | CPU1向けプロジェクト |
+| `esp32s3` | XVF3800連携、USB CDC音響frontend |
 
 共有する`.project`、`.cproject`、FSP設定、ソースコードはGit管理の対象です。`.metadata/`、`Debug/`、`Release/`、`build/`、起動設定、ログ、ELFなどのローカル生成物は管理しません。

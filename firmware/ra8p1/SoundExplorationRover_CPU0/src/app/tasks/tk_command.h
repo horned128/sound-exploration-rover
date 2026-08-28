@@ -20,10 +20,19 @@ typedef struct st_rover_motion_target {
     bool emergency_stop;
 } rover_motion_target_t;
 
+typedef struct st_cpu0_command_snapshot {
+    rover_motion_target_t target;
+    rover_motion_target_t last_sent_target;
+    uint32_t target_age_ms;
+    bool target_stale;
+} cpu0_command_snapshot_t;
+
 cpu0_fault_t cpu0_command_task_create(void);               /* 指令タスクと共有資源の生成 */
 cpu0_fault_t cpu0_command_task_start(void);                /* 指令タスク開始 */
 void cpu0_command_task_delete(void);                       /* 指令タスクと共有資源の解放 */
 ER cpu0_command_set_target(const rover_motion_target_t * p_target); /* 最新目標更新 */
+ER cpu0_command_snapshot_get(
+    cpu0_command_snapshot_t * p_snapshot);                /* 最新指令状態取得 */
 
 extern volatile uint32_t g_cpu0_command_sequence;          /**< 最終送信シーケンス（Live Watch用） */
 extern volatile uint32_t g_cpu0_command_send_count;        /**< 正常送信回数（Live Watch用） */

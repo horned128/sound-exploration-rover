@@ -3,6 +3,7 @@
  * @brief  CPU0独立タスクの初期化
  * ================================================================= */
 #include "tk_init.h"                                      /* CPU0タスク初期化API */
+#include "tk_audio.h"                                     /* 音響タスク生成・開始API */
 #include "tk_command.h"                                   /* 指令タスク生成・開始API */
 #include "tk_think.h"                                     /* 思考タスク生成・開始API */
 #include "../../cpu0_config.h"                            /* 初期化タスク優先度、スタック */
@@ -44,7 +45,7 @@ cpu0_fault_t cpu0_tasks_init(void) {
 
 /** =================================================================*
  * @brief  CPU0初期化タスク本体
- * @details 全共有資源と子タスクを生成後、指令、思考の順で開始し自己削除する。
+ * @details 全共有資源と子タスクを生成後、指令、音響、思考の順で開始し自己削除する。
  * ================================================================= */
 static void cpu0_init_task(INT stacd, void * exinf) {
     (void) stacd;
@@ -61,8 +62,24 @@ static void cpu0_init_task(INT stacd, void * exinf) {
         cpu0_think_halt(fault);
     }
 
+    fault = cpu0_audio_task_create();
+    if (CPU0_FAULT_NONE != fault) {
+        cpu0_command_task_delete();
+        cpu0_think_task_delete();
+        cpu0_think_halt(fault);
+    }
+
     fault = cpu0_command_task_start();
     if (CPU0_FAULT_NONE != fault) {
+        cpu0_audio_task_delete();
+        cpu0_command_task_delete();
+        cpu0_think_task_delete();
+        cpu0_think_halt(fault);
+    }
+
+    fault = cpu0_audio_task_start();
+    if (CPU0_FAULT_NONE != fault) {
+        cpu0_audio_task_delete();
         cpu0_command_task_delete();
         cpu0_think_task_delete();
         cpu0_think_halt(fault);
@@ -70,6 +87,7 @@ static void cpu0_init_task(INT stacd, void * exinf) {
 
     fault = cpu0_think_task_start();
     if (CPU0_FAULT_NONE != fault) {
+        cpu0_audio_task_delete();
         cpu0_command_task_delete();
         cpu0_think_task_delete();
         cpu0_think_halt(fault);

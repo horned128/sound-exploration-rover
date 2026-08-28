@@ -1,0 +1,36 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "renesas-hardware",
+      "request": "launch",
+      "name": "RA8P1 CPU0 (J-Link OB)",
+      "target": {
+        "device": "R7KA8P1KF_CPU0",
+        "deviceFamily": "RA",
+        "debuggerType": "SEGGERJLINKARM"
+      }
+    },
+    {
+      "type": "renesas-hardware",
+      "request": "launch",
+      "name": "RA8P1 CPU1 Program / Standalone Debug (J-Link OB)",
+      "target": {
+        "device": "R7KA8P1KF_CPU1",
+        "deviceFamily": "RA",
+        "debuggerType": "SEGGERJLINKARM"
+      }
+    },
+    {
+      "type": "renesas-hardware",
+      "request": "launch",
+      "name": "RA8P1 CPU1 Attach (J-Link OB)",
+      "target": {
+        "device": "R7KA8P1KF_CPU1",
+        "deviceFamily": "RA",
+        "debuggerType": "SEGGERJLINKARM",
+        "hotPlug": true
+      }
+    }
+  ]
+}

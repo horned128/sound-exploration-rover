@@ -1,14 +1,16 @@
 # EK-RA8P1 アクチュエータ制御
 
-CPU0から円軌道の制御指令を出し、CPU1がPWM出力とエンコーダ処理を担当します。
+CPU0がReSpeaker/XIAOからUSBで音響観測を受けて短距離の音源追従目標を生成し、CPU1がPWM出力とエンコーダ処理を担当します。この文書は主にアクチュエータ配線と単体確認を扱います。全体構造は[RA8P1ソフトウェア設計書](../../docs/ra8p1/ARCHITECTURE.md)、USB接続、音響protocol、DoA校正、音源追従試験は[ReSpeaker統合設計](../../docs/ra8p1/RESPEAKER_INTEGRATION.md)を参照してください。
 
 ```text
 CPU0 / Cortex-M85 / μT-Kernel
   usermain() ──> tk_init
                   ├─ tk_command (priority 6 / 50 ms)
                   │    └─ 4サーボ＋左右モーターを1フレームでIPC送信
+                  ├─ tk_audio   (priority 8 / 1 ms poll)
+                  │    └─ USB HCDC受信・音響snapshot
                   └─ tk_think   (priority 10 / 100 ms)
-                       ├─ 円軌道の目標生成
+                       ├─ 停止聴取型の音源追従目標
                        └─ 青・緑LEDによる状態／fault表示
                                       │
                                       v 意味ベースの32 bitメッセージ列
@@ -21,7 +23,7 @@ CPU1 / Cortex-M33 / bare metal
                          └─ FSP生成インスタンス / BSP API
 ```
 
-FSPのIPC FIFOは4段、1要素32 bitです。上位8 bitをメッセージID、下位24 bitをペイロードとして使います。CPU0側は送信専用なのでIPC割り込みを使わず、CPU1側だけIPC受信割り込みとコールバックを有効にしています。CPU間の相互関係、起動順序、IPC、安全状態、FSP生成コードとの境界は[RA8P1ソフトウェア設計書](../../docs/ra8p1/ARCHITECTURE.md)を参照してください。
+FSPのIPC FIFOは4段、1要素32 bitです。上位8 bitをメッセージID、下位24 bitをペイロードとして使います。CPU0側は送信専用なのでIPC割り込みを使わず、CPU1側だけIPC受信割り込みとコールバックを有効にしています。
 
 ## 現在の動作
 
@@ -34,7 +36,7 @@ CPU1は4輪操舵サーボ、左右BTS7960、左右代表エンコーダを起�
 
 購入時の仕様表記は100 rpmですが、今回の実機確認では約300 rpmを測定したため、開ループ換算上限を300 rpmへ変更しています。この値が無負荷測定である場合、車体搭載時の速度・トルクは別途確認してください。
 
-CPU0はCPU1を起動し、ワンショットの`tk_init`を`tk_cre_tsk()`で生成します。`tk_init`は独立した`tk_think`と`tk_command`をそれぞれ`tk_cre_tsk()`で生成・開始してから自己削除します。`tk_think`は直進保持、円軌道操舵、円走行の順に目標を生成します。モーター指令のRPMは、閉ループ速度制御ではなくオープンループPWM換算値です。
+CPU0はCPU1を起動し、ワンショットの`tk_init`を`tk_cre_tsk()`で生成します。`tk_init`は独立した`tk_command`、`tk_audio`、`tk_think`をそれぞれ`tk_cre_tsk()`で生成し、この順で開始してから自己削除します。`tk_think`は停止中の音響観測が閾値と方向安定条件を満たした場合だけ、短時間の操舵・前進目標を生成します。CPU1は左右代表エンコーダの実測RPMを使い、左右別にPWMを比例補正します。
 
 `tk_command`は高優先度の50 ms周期で最新目標を読み、FR、FL、RR、RLと左右モーターの6指示値を1つのIPCスナップショットとして送信します。思考目標が500 ms途絶した場合は緊急停止へ切り替えます。
 
@@ -70,7 +72,9 @@ EK-RA8P1は既定でSW4-4がOFFで、Arduinoヘッダが切り離されていま
 
 ### CPU0/CPU1の書き込み
 
-ピン設定を変更した後はCPU0、CPU1の順にGenerate Project Contentを実行し、両プロジェクトをCleanしてから両方をBuildします。書き込みには`SoundExplorationRover Debug_Multicore Launch Group`を使います。この構成はCPU0の`Debug/SoundExplorationRover_CPU0.elf`とCPU1の`Debug/SoundExplorationRover_CPU1.elf`を組で読み込むため、別フォルダーに残った古いSRECを個別選択しないでください。
+ピン設定を変更した後はCPU0/CPU1 projectをRefreshし、CPU0、CPU1の順にGenerate Project Contentを実行し、両プロジェクトをCleanしてから両方をBuildします。書き込みには`SoundExplorationRover Debug_Multicore Launch Group`を使います。この構成はCPU0の`Debug/SoundExplorationRover_CPU0.elf`とCPU1の`Debug/SoundExplorationRover_CPU1.elf`を組で読み込むため、別フォルダーに残った古いSRECを個別選択しないでください。
+
+現行RA8P1 sourceは手動の完全compile/linkとSREC生成まで成功していますが、CPU0の古い`Debug` make metadataには新規sourceが未列挙です。実機へ書き込む前に上記のRefresh、Generate、Clean Buildを必ず実行してください。XIAO ESP32S3側はESP-IDF未導入のため実build前です。検証結果とsizeは[RA8P1ソフトウェア設計書のビルド節](../../docs/ra8p1/ARCHITECTURE.md#11-ビルド生成書き込み)を参照してください。
 
 サーボの赤線は外部安定化電源+4.8～6.8 V、黒線は外部電源GNDへ接続し、外部電源GNDとEK-RA8P1のGNDを共通化します。
 
@@ -113,7 +117,7 @@ A相だけでも指令方向を前提に速度の大きさは測れますが、�
 
 購入品は300 RPM品であり、旧100 RPM品を仮定した2024 count/revは使用できません。出力軸2回転で約1800カウントを実測したため、`JGA25_ENCODER_COUNTS_PER_REV=900`として100 msごとに左右のRPMを算出します。より正確な値が必要な場合は、出力軸10回転の平均で再校正します。測定方法は[JGA25-370 12 V・300 RPM仕様書](../../hardware/actuator/docs/jga25-370-12v-300rpm.md)を参照してください。
 
-`g_jga25_left_encoder_count`と`g_jga25_right_encoder_count`は、左右とも前進で増加し、後進で減少する4逓倍累積カウントです。`g_jga25_left_rpm_x10`と`g_jga25_right_rpm_x10`も同じ符号規則の推定RPMの10倍であり、`-1234`は後進方向の`-123.4 RPM`を表します。実測RPMは状態取得に使用し、PWM制御はオープンループです。
+`g_jga25_left_encoder_count`と`g_jga25_right_encoder_count`は、左右とも前進で増加し、後進で減少する4逓倍累積カウントです。`g_jga25_left_rpm_x10`と`g_jga25_right_rpm_x10`も同じ符号規則の推定RPMの10倍であり、`-1234`は後進方向の`-123.4 RPM`を表します。CPU1は100 msごとの実測RPMを使い、指令開始から150 ms後にPWMを比例補正して左右の速度差を抑えます。
 
 最終的に6台すべての速度を個別に閉ループ制御する場合は、6組（A/B計12入力）と6チャンネルのモーター駆動、または各側のエンコーダ値を集約する外部回路が必要です。現行の左右2台のBTS7960構成では、まず左右代表2組で十分です。
 
@@ -138,19 +142,15 @@ DCモーターをEK-RA8P1へ直接接続してはいけません。左右それ�
 
 電源はArduino電源コネクタJ18から分岐できますが、電圧を混在させないでください。BTS7960のVCCはモジュール仕様で5 Vが要求される場合が多いため、仕様が3.3 V対応と明記されていない限りJ18-5（+5 V）へ接続します。左右2台のBTS7960のVCCをそこから分岐し、左右代表エンコーダのVCCはJ18-4（+3.3 V）から分岐します。4機器のGNDはJ18-6またはJ18-7から分岐して共通化します。J18-4とJ18-5は接続せず、エンコーダ出力が3.3 Vを超えないことを確認してください。BTS7960のVCC電流がEK-RA8P1の電源容量を超える場合は、外部の安定化5 V電源を使い、GNDだけを共通化します。
 
-RPWMとLPWMは同じ側で同時にHighにせず、同じ側では1方向のPWMだけを出します。現在の実機配線では、論理正RPM（前進）を左右ともLPWMへ変換します。負RPM（後退）は左右ともRPWMへ変換します。前後基準の設定は`MOTOR_CHASSIS_FORWARD_SIGN`、左右個別の補正は`MOTOR_LEFT_MOUNT_SIGN`、`MOTOR_RIGHT_MOUNT_SIGN`です。P602/P603はPmod2へ接続し、Octo-SPI（OSPI0）のP100～P106、P800～P804とは別のOSPI1系ピンを使用しています。BTS7960のVCC、EK-RA8P1、外部モーター電源は必ずGNDを共通化します。
+RPWMとLPWMは同じ側で同時にHighにせず、同じ側では1方向のPWMだけを出します。現在の実機配線では、論理正RPM（前進）を左右ともRPWMへ変換します。負RPM（後退）は左右ともLPWMへ変換します。前後基準の設定は`MOTOR_CHASSIS_FORWARD_SIGN`、左右個別の補正は`MOTOR_LEFT_MOUNT_SIGN`、`MOTOR_RIGHT_MOUNT_SIGN`です。P602/P603はPmod2へ接続し、Octo-SPI（OSPI0）のP100～P106、P800～P804とは別のOSPI1系ピンを使用しています。BTS7960のVCC、EK-RA8P1、外部モーター電源は必ずGNDを共通化します。
 
-左右RPM指令は実測回転数をフィードバックせず、PWMデューティへ換算します。そのため、同じ指令でもモーター個体差、ギア・ハブの抵抗、タイヤ荷重、BTS7960や配線の電圧降下によって実回転数は一致しません。特に20%付近の低デューティでは静止摩擦の影響が大きく、片側の速度差が目立ちます。
+左右RPM指令は基本PWMデューティへ換算した後、各側の代表エンコーダ実測RPMとの差を比例補正します。右側の無負荷速度差は`MOTOR_RIGHT_DUTY_SCALE_PERMILLE=750`で初期デューティを下げ、比例補正で目標RPMへ追従させます。補正量は±250 permille、最終デューティは0～700 permilleに制限されるため、エンコーダ未接続や機械抵抗が大きい場合にも無制限には上がりません。左右各3台を1台のBTS7960へ並列接続しているため、補正対象は各側の代表モーターであり、3台個別の速度一致は保証しません。左右RPMがともに0の停止指令では、ランプダウンを待たずPWMと共通ENを即時に停止します。
 
-## 円走行の動作確認
+## 音源追従の動作確認
 
-1. 最初は車輪を浮かせ、モーター電源を電流制限付きにする。
-2. CPU0、CPU1の両方を書き込んでリセットする。
-3. 約0.3秒後までにサーボPWMが有効になり、直進位置を保持する。
-4. 約1.5秒後に前輪-45度、後輪+45度へ操舵する。
-5. 約3.0秒後に左右+100 RPM相当でモーターが同時にソフトスタートする。
+初回は車輪を浮かせ、モーター電源を電流制限付きにします。USB linkと音響観測が成立するまでCPU0はemergency stopを維持します。成立後は停止して音を聴き、一定条件を満たした方向へservoを500 ms整定し、左右+60 RPM相当で300 msだけ前進して500 ms停止します。
 
-目標値はRPMという名前ですが、現在は20 kHz PWMへのオープンループ換算値です。円軌道は`CPU0_CIRCLE_LEFT_RPM`、`CPU0_CIRCLE_RIGHT_RPM`、`CPU0_CIRCLE_STEERING_DEG`で調整します。現在はソフトウェア上の安全限界である±45度を使うため、リンク機構が干渉する場合は角度を小さくしてください。
+USB接続だけの試験、静止音響試験、DoA座標校正、車輪を浮かせたアクチュエータ試験、接地試験の順序は[ReSpeaker統合設計の「安全な導入・検証順」](../../docs/ra8p1/RESPEAKER_INTEGRATION.md#8-安全な導入検証順)に従ってください。目標RPMは20 kHz PWMの基本値とし、代表エンコーダで左右差だけを補正します。
 
 ### CPU0状態LED
 
@@ -158,15 +158,17 @@ RPWMとLPWMは同じ側で同時にHighにせず、同じ側では1方向のPWM�
 
 | LED表示 | 意味 |
 |---|---|
-| 青: 500 msごとに反転 | 直進位置へ原点合わせ中 |
-| 青: 100 msごとに反転 | 円軌道の操舵位置へ移動中 |
-| 青: 点灯 | 円走行中 |
-| 緑: 1秒ごとに100 ms点灯 | `tk_think`が正常に周期実行中 |
+| 青: 500 msごとに反転、緑: 消灯 | USB link待ち・safe stop |
+| 青: 1秒ごとに100 ms点灯 | 停止して音を聴取中 |
+| 青: 125 msごとに反転 | 目標方向へservo整定中 |
+| 青: 点灯 | 300 msの短距離移動中 |
+| 青: 250 msごとに反転 | settleまたはcooldown中 |
+| 緑: 1秒ごとに100 ms点灯 | link待ち以外で`tk_think`が周期実行中 |
 | 緑: 点灯＋青: 回数点滅 | CPU0 fault。青の点滅回数がfault番号 |
 | 赤: 500 msごとに反転 | CPU1正常heartbeat |
 | 赤: 約50 msごとに反転 | CPU1でFSP/driverエラー発生 |
 
-CPU0 fault番号は、1回がタスク生成／開始、2回がIPC初期化、3回がIPC送信、4回が思考目標タイムアウト、5回が目標共有失敗です。
+CPU0 fault番号は、1回がタスク生成／開始、2回がIPC初期化、3回がIPC送信、4回が思考目標タイムアウト、5回がUSB初期化、6回が目標共有失敗です。
 
 CPU1をデバッグして、次の変数をLive Watchへ追加すると確認しやすくなります。
 
@@ -184,12 +186,20 @@ CPU0では次の変数をLive Watchへ追加します。
 
 | 変数 | 内容 |
 |---|---|
-| `g_cpu0_think_state` | 原点合わせ、円軌道操舵、円走行、fault |
+| `g_cpu0_think_state` | link待ち、聴取、servo整定、短距離移動、settle、cooldown、fault |
 | `g_cpu0_think_cycle_count` | 思考タスクの実行回数 |
+| `g_cpu0_think_observation_sequence` | 思考で最後に使用した音響観測sequence |
+| `g_cpu0_think_observation_watchdog_ms` | 同じ観測sequenceが続いた時間。300 msでlink無効、未成立時は`UINT32_MAX` |
 | `g_cpu0_fault_flags` | CPU0でラッチした異常ビット |
 | `g_cpu0_command_sequence` | 最終IPCシーケンス番号 |
 | `g_cpu0_command_send_count` | 正常にcommitした指令数 |
 | `g_cpu0_command_last_error` | 最後のIPC FSPエラー |
+| `g_cpu0_audio_usb_configured` | HCDC deviceの列挙状態 |
+| `g_cpu0_audio_hello_received` | 音響frontendとのHELLO成立 |
+| `g_cpu0_audio_frame_count` | 正常な音響frame受信数 |
+| `g_cpu0_audio_crc_error_count` | CRC異常frame数 |
+| `g_cpu0_audio_observation_age_ms` | 最新音響観測からの経過時間 |
+| `g_cpu0_audio_observation` | 最新DoA、level、peak、VAD、状態、flags |
 
 回転方向やカウント符号が意図と逆なら、モーターのOUT1/OUT2、A/B相、またはソフトウェアの符号規約のいずれか一つだけを入れ替えます。
 
@@ -197,27 +207,31 @@ CPU0では次の変数をLive Watchへ追加します。
 
 | ファイル | 役割 |
 |---|---|
+| `../common/acoustic_protocol.h/.c` | XIAO ESP32S3とCPU0で共有するUSB音響protocol |
 | `common/ipc_message.h` | 両CPU共通のコマンド型と32 bit通信形式 |
 | `SoundExplorationRover_CPU0/src/app/main.c` | CPU1起動とCPU0タスク群の起動 |
 | `SoundExplorationRover_CPU0/src/app/tasks/tk_init.c` | 独立タスクの資源生成、`tk_cre_tsk()`、開始、失敗時の後処理 |
-| `SoundExplorationRover_CPU0/src/app/tasks/tk_think.c` | 円軌道の目標生成、青・緑LED、CPU0 faultラッチ |
+| `SoundExplorationRover_CPU0/src/app/tasks/tk_audio.c` | HCDC event、frame検証、最新音響snapshot |
+| `SoundExplorationRover_CPU0/src/app/tasks/tk_think.c` | 音響snapshot取得、目標展開、青・緑LED、CPU0 faultラッチ |
+| `SoundExplorationRover_CPU0/src/app/control/sound_follow_controller.c` | 停止聴取型の音源追従状態機械 |
 | `SoundExplorationRover_CPU0/src/app/tasks/tk_command.c` | 最新目標の共有、期限監視、全アクチュエータのIPC一括送信 |
 | `SoundExplorationRover_CPU0/src/ipc/` | CPU0側IPCコマンド送信 |
 | `SoundExplorationRover_CPU1/src/app/` | CPU1初期化、周期処理、フェイルセーフ |
 | `SoundExplorationRover_CPU1/src/drivers/` | DCモーター、エンコーダ、サーボとFSP/BSP APIの呼び出し |
 | `SoundExplorationRover_CPU1/src/ipc/` | CPU1側IPCコマンド受信・コミット |
-| `SoundExplorationRover_CPU0/src/cpu0_config.h` | CPU0周期、優先度、円軌道、LED設定 |
+| `SoundExplorationRover_CPU0/src/cpu0_config.h` | CPU0周期、優先度、音量/DoA/移動、LED設定 |
 | `SoundExplorationRover_CPU1/src/cpu1_config.h` | ピン、周期、制限値、安全タイムアウト |
 | `SoundExplorationRover_CPU1/src/hal_entry.c` | 生成コードとユーザーアプリを接続する入口 |
 
 ### CPU0タスク一覧
 
-`tk_init`は起動時だけ動く独立カーネルタスクです。共有資源を作成し、`tk_command`と`tk_think`を個別に生成・開始した後、`tk_exd_tsk()`で自己削除します。3タスクはそれぞれ`tk_cre_tsk()`で生成され、別々のスタックと優先度を持ちます。
+`tk_init`は起動時だけ動く独立カーネルタスクです。共有資源を作成し、`tk_command`、`tk_audio`、`tk_think`を個別に生成し、この順で開始した後、`tk_exd_tsk()`で自己削除します。4タスクはそれぞれ`tk_cre_tsk()`で生成され、別々のスタックと優先度を持ちます。
 
 | ファイル | カーネルタスク | 優先度 | 周期・待ち | 役割 |
 |---|---|---:|---|---|
 | `tk_init.c` | `cpu0_init_task` | 5 | 起動時に1回 | 共有資源と子タスクを生成・開始後に自己削除 |
 | `tk_command.c` | `cpu0_command_task` | 6 | 50 ms | CPU1へ6出力分の最新目標を送信 |
-| `tk_think.c` | `cpu0_think_task` | 10 | 100 ms | 円軌道目標、LED、faultラッチ |
+| `tk_audio.c` | `cpu0_audio_task` | 8 | 1 ms poll | USB HCDC受信、frame parser、音響snapshot |
+| `tk_think.c` | `cpu0_think_task` | 10 | 100 ms | 音源追従目標、LED、faultラッチ |
 
 IPCの構成方法と、送信側は割り込み不要・受信側はコールバックが必要という条件は、Renesasの[Getting Started with IPC on Dual Core MCU](https://www.renesas.com/en/document/apn/getting-started-ipc-dual-core-mcu)に準拠しています。

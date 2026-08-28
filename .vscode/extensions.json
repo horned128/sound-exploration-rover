@@ -1,0 +1,12 @@
+{
+  "recommendations": [
+    "ms-vscode.cmake-tools",
+    "ms-vscode.cpptools",
+    "platformio.platformio-ide",
+    "renesaselectronicscorporation.renesas-build-utilities",
+    "renesaselectronicscorporation.renesas-debug",
+    "renesaselectronicscorporation.renesas-memory-usage-view",
+    "renesaselectronicscorporation.renesas-platform",
+    "renesaselectronicscorporation.renesas-smart-manual"
+  ]
+}

@@ -295,6 +295,13 @@
             <slot name="PD03.CPU0" secure="true"/>
             <slot name="PD07.CPU0" secure="true"/>
         </peripheral>
+        <peripheral name="USB_FS.CPU0" security="s"/>
+        <peripheral name="USB_HS.CPU0" security="s"/>
+        <peripheral name="ICU.CPU0">
+            <slot name="IRQ0.CPU0" secure="true"/>
+            <slot name="IRQ1.CPU0" secure="true"/>
+            <slot name="IRQ2.CPU0" secure="true"/>
+        </peripheral>
         <peripheral name="GPT9.CPU1" group="GPT" security="s"/>
         <peripheral name="GPT10.CPU1" group="GPT" security="s"/>
         <peripheral name="GPT7.CPU1" group="GPT" security="s"/>
@@ -516,6 +523,11 @@
             <assign group="PORT" peripheral="PORTD.PD02"/>
             <assign group="PORT" peripheral="PORTD.PD03"/>
             <assign group="PORT" peripheral="PORTD.PD07"/>
+            <assign peripheral="USB_FS"/>
+            <assign peripheral="USB_HS"/>
+            <assign peripheral="ICU.IRQ0"/>
+            <assign peripheral="ICU.IRQ1"/>
+            <assign peripheral="ICU.IRQ2"/>
         </zone>
     </zones>
 </azone>

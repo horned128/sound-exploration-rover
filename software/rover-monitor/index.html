@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rover Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-dark: #121212;
+            --panel-bg: #1e1e1e;
+            --text-main: #e0e0e0;
+            --text-muted: #888;
+            --border: #333;
+            --accent: #007acc;
+            --ok: #4caf50;
+            --warn: #ff9800;
+            --error: #f44336;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 16px;
+            background-color: var(--panel-bg);
+            border-bottom: 1px solid var(--border);
+            height: 40px;
+            flex-shrink: 0;
+        }
+        .header h1 { margin: 0; font-size: 18px; color: var(--accent); }
+        .status-badge { padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .bg-ok { background-color: rgba(76, 175, 80, 0.2); color: var(--ok); }
+        .bg-error { background-color: rgba(244, 67, 54, 0.2); color: var(--error); }
+
+        .main-container {
+            display: flex;
+            flex: 1;
+            padding: 10px;
+            gap: 10px;
+            overflow: hidden;
+        }
+
+        /* サイドバー */
+        .sidebar {
+            width: 320px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+        .sidebar::-webkit-scrollbar { width: 6px; }
+        .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        .panel { background-color: var(--panel-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
+        .panel-title { margin: 0 0 8px 0; font-size: 12px; color: var(--text-muted); text-transform: uppercase; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+        .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; font-size: 13px; }
+        .data-label { color: var(--text-muted); }
+        .data-value { font-family: monospace; text-align: right; font-weight: bold; }
+        
+        .val-ok { color: var(--ok); }
+        .val-warn { color: var(--warn); }
+        .val-error { color: var(--error); }
+        .val-blue { color: #2196f3; }
+
+        /* 右側：グラフエリア (絶対配置を廃止して Flexboxベースに) */
+        .charts-area {
+            flex: 1;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-content: flex-start;
+        }
+
+        .chart-box {
+            width: calc(50% - 5px);
+            height: calc(50% - 5px);
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 10px;
+            box-sizing: border-box;
+            position: relative;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+        }
+        .chart-box:hover { border-color: var(--accent); }
+        .chart-box::after {
+            content: "🔍 Click to Focus";
+            position: absolute; top: 5px; right: 10px; font-size: 10px; color: var(--text-muted); opacity: 0; transition: opacity 0.2s;
+        }
+        .chart-box:hover::after { opacity: 1; }
+        .chart-container { flex: 1; position: relative; width: 100%; height: 100%; }
+
+        /* フォーカスモード時のレイアウト変更 */
+        .charts-area.focus-mode .chart-box {
+            display: none; /* 基本は全て非表示 */
+        }
+        .charts-area.focus-mode .chart-box.focused {
+            display: flex; /* フォーカスされたものだけ表示 */
+            width: 100%;
+            height: 100%;
+            cursor: default;
+            border-color: var(--accent);
+        }
+        .charts-area.focus-mode .chart-box.focused::after { content: ""; } /* hoverテキストを消す */
+        
+        .btn-close {
+            display: none; position: absolute; top: 10px; right: 10px; background: var(--accent); color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer; z-index: 20; font-weight: bold;
+        }
+        .chart-box.focused .btn-close { display: block; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Rover Monitor</h1>
+        <span id="wsStatus" class="status-badge bg-error">WebSocket: Disconnected</span>
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="panel">
+                <h3 class="panel-title">System & USB</h3>
+                <div class="data-grid">
+                    <span class="data-label">ESP Time</span><span class="data-value" id="val_esp_ms">0 ms</span>
+                    <span class="data-label">CPU Valid</span><span class="data-value" id="val_cpu_valid">-</span>
+                    <span class="data-label">CPU Age</span><span class="data-value" id="val_cpu_age">0 ms</span>
+                    <span class="data-label">USB Mounted</span><span class="data-value" id="val_usb_mounted">-</span>
+                    <span class="data-label">USB Drops</span><span class="data-value" id="val_usb_drops">0</span>
+                    <span class="data-label">USB State</span><span class="data-value" id="val_usb_state">0</span>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3 class="panel-title">Network & UDP</h3>
+                <div class="data-grid">
+                    <span class="data-label">Wi-Fi</span><span class="data-value" id="val_wifi_conn">-</span>
+                    <span class="data-label">RSSI</span><span class="data-value" id="val_wifi_rssi">0 dBm</span>
+                    <span class="data-label">Reconnects</span><span class="data-value" id="val_wifi_recon">0</span>
+                    <span class="data-label">UDP Sent</span><span class="data-value" id="val_udp_sent">0</span>
+                    <span class="data-label">UDP Errors</span><span class="data-value" id="val_udp_err">0</span>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3 class="panel-title">Command & Think</h3>
+                <div class="data-grid">
+                    <span class="data-label">E-Stop</span><span class="data-value" id="val_estop">-</span>
+                    <span class="data-label">Enable</span><span class="data-value" id="val_enable">-</span>
+                    <!-- 状態表示を強化 -->
+                    <span class="data-label">Think State</span><span class="data-value" id="val_think_state" style="font-size: 11px;">UNKNOWN</span>
+                    
+                    <span class="data-label">Link Ready</span><span class="data-value" id="val_link_ready">-</span>
+                    <span class="data-label">Faults</span><span class="data-value" id="val_faults">0</span>
+                    <span class="data-label">Last Error</span><span class="data-value" id="val_last_err">0</span>
+                    <span class="data-label">Servos (deg)</span><span class="data-value" id="val_servos" style="font-size:11px;">[0,0,0,0]</span>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3 class="panel-title">Audio</h3>
+                <div class="data-grid">
+                    <span class="data-label">VAD</span><span class="data-value" id="val_vad">-</span>
+                    <span class="data-label">Level</span><span class="data-value" id="val_aud_level">0 dBFS</span>
+                    <span class="data-label">Peak</span><span class="data-value" id="val_aud_peak">0 dBFS</span>
+                    <span class="data-label">XVF Status</span><span class="data-value" id="val_xvf">0</span>
+                    <span class="data-label">CRC Errors</span><span class="data-value" id="val_aud_crc">0</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="charts-area">
+            <div class="chart-box" id="box-rpm">
+                <button class="btn-close">Close</button>
+                <div class="chart-container"><canvas id="rpmChart"></canvas></div>
+            </div>
+            <div class="chart-box" id="box-steer">
+                <button class="btn-close">Close</button>
+                <div class="chart-container"><canvas id="steerChart"></canvas></div>
+            </div>
+            <div class="chart-box" id="box-audio">
+                <button class="btn-close">Close</button>
+                <div class="chart-container"><canvas id="audioChart"></canvas></div>
+            </div>
+            <div class="chart-box" id="box-net">
+                <button class="btn-close">Close</button>
+                <div class="chart-container"><canvas id="netChart"></canvas></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // =====================================
+        // Think State のマッピング定義
+        // (列挙型の順序が異なる場合はここを調整)
+        // =====================================
+        const THINK_STATES = {
+            0: "WAIT_LINK",
+            1: "LISTEN",
+            2: "STEER_PREP",
+            3: "MOVE_STEP",
+            4: "SETTLE",
+            5: "COOLDOWN",
+            6: "FAULT"
+        };
+
+        function getThinkStateClass(stateCode) {
+            switch(stateCode) {
+                case 0: return 'val-warn';  // WAIT_LINK: 黄色
+                case 1: return 'val-blue';  // LISTEN: 青色
+                case 2: return 'val-ok';    // STEER_PREP: 緑
+                case 3: return 'val-ok';    // MOVE_STEP: 緑
+                case 4: return 'val-ok';    // SETTLE: 緑
+                case 5: return 'val-warn';  // COOLDOWN: 黄色
+                case 6: return 'val-error'; // FAULT: 赤
+                default: return '';
+            }
+        }
+
+        const MAX_POINTS = 200;
+        Chart.defaults.color = '#888';
+        Chart.defaults.borderColor = '#333';
+
+        function createChart(ctx, title, yMin, yMax, datasets) {
+            return new Chart(ctx, {
+                type: 'line',
+                data: { labels: Array(MAX_POINTS).fill(''), datasets: datasets },
+                options: {
+                    responsive: true, maintainAspectRatio: false, animation: false,
+                    plugins: { title: { display: true, text: title, color: '#e0e0e0', font: { size: 14 } }, legend: { labels: { color: '#e0e0e0', boxWidth: 12 } } },
+                    scales: { x: { display: false }, y: { min: yMin, max: yMax, grid: { color: '#333' } } },
+                    elements: { point: { radius: 0 }, line: { tension: 0.2, borderWidth: 2 } }
+                }
+            });
+        }
+
+        const rpmChart = createChart(document.getElementById('rpmChart').getContext('2d'), 'Motors RPM (Left/Right)', null, null, [
+            { label: 'Left RPM', borderColor: '#f44336', data: Array(MAX_POINTS).fill(0) },
+            { label: 'Right RPM', borderColor: '#2196f3', data: Array(MAX_POINTS).fill(0) }
+        ]);
+        const steerChart = createChart(document.getElementById('steerChart').getContext('2d'), 'Think Steering & Audio DoA (deg)', -180, 360, [
+            { label: 'Steering', borderColor: '#4caf50', data: Array(MAX_POINTS).fill(0) },
+            { label: 'Audio DoA', borderColor: '#ff9800', data: Array(MAX_POINTS).fill(0), borderDash: [5, 5] }
+        ]);
+        const audioChart = createChart(document.getElementById('audioChart').getContext('2d'), 'Audio Level (dBFS)', -100, 0, [
+            { label: 'Level', borderColor: '#9c27b0', data: Array(MAX_POINTS).fill(-100) },
+            { label: 'Peak', borderColor: '#e91e63', data: Array(MAX_POINTS).fill(-100) }
+        ]);
+        const netChart = createChart(document.getElementById('netChart').getContext('2d'), 'Network (RSSI)', -100, -30, [
+            { label: 'RSSI', borderColor: '#00bcd4', data: Array(MAX_POINTS).fill(-100) }
+        ]);
+
+        // =====================================
+        // フォーカス機能 (CSS display 切り替え方式に改善)
+        // =====================================
+        const chartsArea = document.querySelector('.charts-area');
+        
+        document.querySelectorAll('.chart-box').forEach(box => {
+            box.addEventListener('click', function(e) {
+                if (e.target.classList.contains('btn-close')) return;
+                if (!this.classList.contains('focused')) {
+                    this.classList.add('focused');
+                    chartsArea.classList.add('focus-mode');
+                    // DOMの描画完了直後にリサイズをかける
+                    requestAnimationFrame(() => {
+                        Object.values(Chart.instances).forEach(c => c.resize());
+                    });
+                }
+            });
+        });
+
+        document.querySelectorAll('.btn-close').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const box = this.parentElement;
+                box.classList.remove('focused');
+                chartsArea.classList.remove('focus-mode');
+                requestAnimationFrame(() => {
+                    Object.values(Chart.instances).forEach(c => c.resize());
+                });
+            });
+        });
+
+        // =====================================
+        // WebSocket & データ更新
+        // =====================================
+        function updateChartData(chart, newValues) {
+            chart.data.datasets.forEach((dataset, i) => {
+                dataset.data.push(newValues[i]);
+                dataset.data.shift();
+            });
+            chart.update('none');
+        }
+
+        function setVal(id, text, stateClass = null) {
+            const el = document.getElementById(id);
+            if(el) {
+                el.innerText = text;
+                el.className = 'data-value ' + (stateClass || '');
+            }
+        }
+
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${wsProtocol}//${window.location.host}/ws`);
+        const wsStatus = document.getElementById('wsStatus');
+
+        ws.onopen = () => { wsStatus.textContent = 'WS Connected'; wsStatus.className = 'status-badge bg-ok'; };
+        ws.onclose = () => { wsStatus.textContent = 'WS Disconnected'; wsStatus.className = 'status-badge bg-error'; };
+
+        ws.onmessage = (event) => {
+            const d = JSON.parse(event.data);
+
+            updateChartData(rpmChart, [d.command?.left_rpm || 0, d.command?.right_rpm || 0]);
+            updateChartData(steerChart, [d.think?.steering_deg || 0, d.audio?.doa_deg || 0]);
+            updateChartData(audioChart, [(d.audio?.level_dbfs_x100||0)/100, (d.audio?.peak_dbfs_x100||0)/100]);
+            updateChartData(netChart, [d.wifi?.rssi_dbm || -100]);
+
+            setVal('val_esp_ms', `${d.esp_ms} ms`);
+            setVal('val_cpu_valid', d.cpu_valid ? 'TRUE' : 'FALSE', d.cpu_valid ? 'val-ok' : 'val-error');
+            setVal('val_cpu_age', `${d.cpu_age_ms} ms`);
+            setVal('val_usb_mounted', d.usb?.mounted ? 'YES' : 'NO', d.usb?.mounted ? 'val-ok' : 'val-warn');
+            setVal('val_usb_drops', d.usb?.rx_drops, d.usb?.rx_drops > 0 ? 'val-error' : '');
+            setVal('val_usb_state', d.usb?.state);
+
+            setVal('val_wifi_conn', d.wifi?.connected ? 'UP' : 'DOWN', d.wifi?.connected ? 'val-ok' : 'val-error');
+            setVal('val_wifi_rssi', `${d.wifi?.rssi_dbm} dBm`, d.wifi?.rssi_dbm < -80 ? 'val-warn' : 'val-ok');
+            setVal('val_wifi_recon', d.wifi?.reconnects, d.wifi?.reconnects > 0 ? 'val-warn' : '');
+            setVal('val_udp_sent', d.udp?.sent);
+            setVal('val_udp_err', d.udp?.errors, d.udp?.errors > 0 ? 'val-error' : '');
+
+            setVal('val_estop', d.command?.emergency_stop ? 'ACTIVE' : 'SAFE', d.command?.emergency_stop ? 'val-error' : 'val-ok');
+            setVal('val_enable', d.command?.enable ? 'ON' : 'OFF', d.command?.enable ? 'val-ok' : 'val-warn');
+            
+            // 状態名の解決と色付け
+            const stateCode = d.think?.state;
+            const stateName = THINK_STATES[stateCode] ?? `UNKNOWN (${stateCode})`;
+            setVal('val_think_state', stateName, getThinkStateClass(stateCode));
+            
+            setVal('val_link_ready', d.think?.link_ready ? 'YES' : 'NO', d.think?.link_ready ? 'val-ok' : 'val-warn');
+            setVal('val_faults', d.think?.faults, d.think?.faults > 0 ? 'val-error' : '');
+            setVal('val_last_err', d.command?.last_error, d.command?.last_error !== 0 ? 'val-error' : '');
+            setVal('val_servos', `[${d.command?.servo_deg?.join(',')}]`);
+
+            setVal('val_vad', d.audio?.vad ? 'DETECTED' : 'NONE', d.audio?.vad ? 'val-ok' : '');
+            setVal('val_aud_level', `${(d.audio?.level_dbfs_x100/100).toFixed(1)} dB`);
+            setVal('val_aud_peak', `${(d.audio?.peak_dbfs_x100/100).toFixed(1)} dB`);
+            setVal('val_xvf', d.audio?.xvf_status);
+            setVal('val_aud_crc', d.audio?.crc_errors, d.audio?.crc_errors > 0 ? 'val-error' : '');
+        };
+    </script>
+</body>
+</html>

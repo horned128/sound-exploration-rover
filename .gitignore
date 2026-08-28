@@ -38,6 +38,20 @@ desktop.ini
 **/sources.mk
 **/subdir.mk
 
+# ESP-IDF generated state
+**/managed_components/
+**/sdkconfig
+**/sdkconfig.*
+!**/sdkconfig.defaults
+**/.pio/
+
+# VS Code-managed e2 studio headless workspace
+/.vscode/.e2studio-headless/
+
 # Coding Agent
 .agents/*
 skills-lock.json
+
+# Dust which software made by Pyhton emit
+*.log
+*.pyc

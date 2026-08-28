@@ -45,7 +45,7 @@
 #define SERVO_DIRECTION_RR                  (1)
 #define SERVO_DIRECTION_RL                  (1)
 
-/* 左右BTS7960の20 kHzオープンループ制御設定。 */
+/* 左右BTS7960の20 kHz PWMおよび代表エンコーダ速度補正設定。 */
 #define JGA25_TARGET_RPM_MAX                 (300)
 #define JGA25_ENCODER_COUNTS_PER_REV         (900U)
 #define JGA25_SPEED_SAMPLE_PERIOD_MS         (100U)
@@ -59,10 +59,10 @@
 #define MOTOR_LEFT_LPWM_OUTPUT               (GPT_IO_PIN_GTIOCB) /* P602 / GPT7B */
 #define MOTOR_RIGHT_LPWM_OUTPUT              (GPT_IO_PIN_GTIOCA) /* P603 / GPT7A */
 /*
- * 正のRPMはローバー前進を表す。現在の実機配線では左右ともLPWMが前進である。
+ * 正のRPMはローバー前進を表す。現在の実機配線では左右ともRPWMが前進である。
  * モーター配線や取付けを変更した場合は、左右個別の符号で吸収する。
  */
-#define MOTOR_CHASSIS_FORWARD_SIGN          (-1)
+#define MOTOR_CHASSIS_FORWARD_SIGN          (+1)
 #define MOTOR_LEFT_MOUNT_SIGN               (+1)
 #define MOTOR_RIGHT_MOUNT_SIGN              (+1)
 #define MOTOR_LEFT_FORWARD_SIGN             (MOTOR_CHASSIS_FORWARD_SIGN * MOTOR_LEFT_MOUNT_SIGN)
@@ -73,6 +73,13 @@
 #define MOTOR_PWM_MAX_DUTY_PERMILLE         (700)
 #define MOTOR_PWM_RAMP_PER_MS               (2)
 #define MOTOR_PWM_UPDATE_PERIOD_MS          (5U)
+/* 右側の無負荷速度差を補正する初期デューティ比。速度フィードバックで追従する。 */
+#define MOTOR_LEFT_DUTY_SCALE_PERMILLE      (1000U)
+#define MOTOR_RIGHT_DUTY_SCALE_PERMILLE     (750U)
+#define MOTOR_SPEED_FEEDBACK_ENABLE         (1U)
+#define MOTOR_SPEED_FEEDBACK_START_DELAY_MS (150U)
+#define MOTOR_SPEED_FEEDBACK_KP_PERMILLE_PER_RPM (2)
+#define MOTOR_SPEED_FEEDBACK_MAX_CORRECTION_PERMILLE (250)
 
 /*
  * エンコーダ入力は左右の代表モーターを1組ずつ測定する。
