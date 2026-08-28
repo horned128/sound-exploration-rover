@@ -19,14 +19,11 @@ static int32_t g_right_speed_previous_count;                /**< 右速度算出
 
 /**< A/B相の遷移量テーブル（4逓倍） */
 static int8_t const encoder_transition_delta[16] = {
-     0,  1, -1,  0,
-    -1,  0,  0,  1,
-     1,  0,  0, -1,
-     0, -1,  1,  0,
+    0, 1, -1, 0, -1, 0, 0, 1, 1, 0, 0, -1, 0, -1, 1, 0,
 };
 
 /** =================================================================*
- * @brief  A/B相を読み取りカウントを更新
+ * @brief  A/B相カウント更新
  * @param[in] left trueなら左代表モーター、falseなら右代表モーター
  * ================================================================= */
 static void encoder_update(bool left) {
@@ -43,8 +40,7 @@ static void encoder_update(bool left) {
     uint8_t const current_ab = (uint8_t) (((uint8_t) level_a << 1U) | (uint8_t) level_b);
     uint8_t * p_previous_ab = left ? &g_left_encoder_previous_ab : &g_right_encoder_previous_ab;
     uint8_t const transition = (uint8_t) (((*p_previous_ab) << 2U) | current_ab);
-    int8_t const forward_sign = left ? JGA25_ENCODER_LEFT_FORWARD_SIGN :
-                                       JGA25_ENCODER_RIGHT_FORWARD_SIGN;
+    int8_t const forward_sign = left ? JGA25_ENCODER_LEFT_FORWARD_SIGN : JGA25_ENCODER_RIGHT_FORWARD_SIGN;
     int32_t const delta = (int32_t) encoder_transition_delta[transition] * forward_sign;
     if (left) {
         g_jga25_left_encoder_count += delta;
@@ -61,9 +57,7 @@ static void encoder_update(bool left) {
  * @param[out] p_rpm_x10 10倍RPM出力
  * @param[in] elapsed_ms サンプル経過時間（単位: ms）
  * ================================================================= */
-static void encoder_speed_update(int32_t count,
-                                 int32_t * p_previous_count,
-                                 volatile int32_t * p_rpm_x10,
+static void encoder_speed_update(int32_t count, int32_t * p_previous_count, volatile int32_t * p_rpm_x10,
                                  uint32_t elapsed_ms) {
     int32_t const delta = count - *p_previous_count;
     int64_t const numerator = (int64_t) delta * 600000LL;
@@ -73,7 +67,7 @@ static void encoder_speed_update(int32_t count,
 }
 
 /** =================================================================*
- * @brief  エンコーダを初期化
+ * @brief  エンコーダ初期化
  * @return FSPエラーコード
  * ================================================================= */
 fsp_err_t encoder_init(void) {
@@ -106,28 +100,24 @@ fsp_err_t encoder_init(void) {
     g_left_speed_previous_count = 0;
     g_right_speed_previous_count = 0;
 
-    err = g_encoder_left_a_irq.p_api->open(g_encoder_left_a_irq.p_ctrl,
-                                           g_encoder_left_a_irq.p_cfg);
+    err = g_encoder_left_a_irq.p_api->open(g_encoder_left_a_irq.p_ctrl, g_encoder_left_a_irq.p_cfg);
     if (FSP_SUCCESS == err) {
         err = g_encoder_left_a_irq.p_api->enable(g_encoder_left_a_irq.p_ctrl);
     }
     if (FSP_SUCCESS == err) {
-        err = g_encoder_left_b_irq.p_api->open(g_encoder_left_b_irq.p_ctrl,
-                                               g_encoder_left_b_irq.p_cfg);
+        err = g_encoder_left_b_irq.p_api->open(g_encoder_left_b_irq.p_ctrl, g_encoder_left_b_irq.p_cfg);
     }
     if (FSP_SUCCESS == err) {
         err = g_encoder_left_b_irq.p_api->enable(g_encoder_left_b_irq.p_ctrl);
     }
     if (FSP_SUCCESS == err) {
-        err = g_encoder_right_a_irq.p_api->open(g_encoder_right_a_irq.p_ctrl,
-                                                g_encoder_right_a_irq.p_cfg);
+        err = g_encoder_right_a_irq.p_api->open(g_encoder_right_a_irq.p_ctrl, g_encoder_right_a_irq.p_cfg);
     }
     if (FSP_SUCCESS == err) {
         err = g_encoder_right_a_irq.p_api->enable(g_encoder_right_a_irq.p_ctrl);
     }
     if (FSP_SUCCESS == err) {
-        err = g_encoder_right_b_irq.p_api->open(g_encoder_right_b_irq.p_ctrl,
-                                                g_encoder_right_b_irq.p_cfg);
+        err = g_encoder_right_b_irq.p_api->open(g_encoder_right_b_irq.p_ctrl, g_encoder_right_b_irq.p_cfg);
     }
     if (FSP_SUCCESS == err) {
         err = g_encoder_right_b_irq.p_api->enable(g_encoder_right_b_irq.p_ctrl);
@@ -142,13 +132,9 @@ fsp_err_t encoder_init(void) {
 void encoder_housekeeping_1ms(void) {
     g_speed_elapsed_ms++;
     if (g_speed_elapsed_ms >= JGA25_SPEED_SAMPLE_PERIOD_MS) {
-        encoder_speed_update(g_jga25_left_encoder_count,
-                             &g_left_speed_previous_count,
-                             &g_jga25_left_rpm_x10,
+        encoder_speed_update(g_jga25_left_encoder_count, &g_left_speed_previous_count, &g_jga25_left_rpm_x10,
                              g_speed_elapsed_ms);
-        encoder_speed_update(g_jga25_right_encoder_count,
-                             &g_right_speed_previous_count,
-                             &g_jga25_right_rpm_x10,
+        encoder_speed_update(g_jga25_right_encoder_count, &g_right_speed_previous_count, &g_jga25_right_rpm_x10,
                              g_speed_elapsed_ms);
         g_speed_elapsed_ms = 0U;
     }
@@ -170,7 +156,7 @@ static int16_t encoder_rpm_from_x10(volatile int32_t const * p_rpm_x10) {
 }
 
 /** =================================================================*
- * @brief  左代表モーター累積カウントを取得
+ * @brief  左代表モーター累積カウント取得
  * @return 累積カウント
  * ================================================================= */
 int32_t encoder_left_count_get(void) {
@@ -178,7 +164,7 @@ int32_t encoder_left_count_get(void) {
 }
 
 /** =================================================================*
- * @brief  右代表モーター累積カウントを取得
+ * @brief  右代表モーター累積カウント取得
  * @return 累積カウント
  * ================================================================= */
 int32_t encoder_right_count_get(void) {
@@ -186,7 +172,7 @@ int32_t encoder_right_count_get(void) {
 }
 
 /** =================================================================*
- * @brief  左代表モーター回転数を取得
+ * @brief  左代表モーター回転数取得
  * @return 回転数（単位: RPM）
  * ================================================================= */
 int16_t encoder_left_rpm_get(void) {
@@ -194,7 +180,7 @@ int16_t encoder_left_rpm_get(void) {
 }
 
 /** =================================================================*
- * @brief  右代表モーター回転数を取得
+ * @brief  右代表モーター回転数取得
  * @return 回転数（単位: RPM）
  * ================================================================= */
 int16_t encoder_right_rpm_get(void) {
@@ -202,7 +188,7 @@ int16_t encoder_right_rpm_get(void) {
 }
 
 /** =================================================================*
- * @brief  左A相割込みを処理
+ * @brief  左A相割込み処理
  * @param[in] p_args FSP外部IRQコールバック情報
  * ================================================================= */
 void jga25_encoder_left_a_callback(external_irq_callback_args_t * p_args) {
@@ -211,7 +197,7 @@ void jga25_encoder_left_a_callback(external_irq_callback_args_t * p_args) {
 }
 
 /** =================================================================*
- * @brief  左B相割込みを処理
+ * @brief  左B相割込み処理
  * @param[in] p_args FSP外部IRQコールバック情報
  * ================================================================= */
 void jga25_encoder_left_b_callback(external_irq_callback_args_t * p_args) {
@@ -220,7 +206,7 @@ void jga25_encoder_left_b_callback(external_irq_callback_args_t * p_args) {
 }
 
 /** =================================================================*
- * @brief  右A相割込みを処理
+ * @brief  右A相割込み処理
  * @param[in] p_args FSP外部IRQコールバック情報
  * ================================================================= */
 void jga25_encoder_right_a_callback(external_irq_callback_args_t * p_args) {
@@ -229,7 +215,7 @@ void jga25_encoder_right_a_callback(external_irq_callback_args_t * p_args) {
 }
 
 /** =================================================================*
- * @brief  右B相割込みを処理
+ * @brief  右B相割込み処理
  * @param[in] p_args FSP外部IRQコールバック情報
  * ================================================================= */
 void jga25_encoder_right_b_callback(external_irq_callback_args_t * p_args) {

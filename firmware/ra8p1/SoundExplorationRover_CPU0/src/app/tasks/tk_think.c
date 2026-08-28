@@ -1,34 +1,30 @@
 /** =================================================================*
  * @file   tk_think.c
- * @brief  音響観測から走行目標を生成するCPU0思考タスク
+ * @brief  CPU0音源追従思考タスク
  * ================================================================= */
-#include "tk_think.h"                                    /* CPU0思考タスクAPI */
-#include "tk_audio.h"                                    /* 最新音響状態取得API */
-#include "tk_command.h"                                  /* 最新アクチュエータ目標更新API */
-#include "../control/sound_follow_controller.h"          /* 音源追従状態機械 */
-#include "../../cpu0_config.h"                           /* 思考周期、LED設定 */
-#include "hal_data.h"                                    /* BSP LED情報、ピンAPI */
+#include "tk_think.h"                                       /* CPU0思考タスクAPI */
+#include "../../cpu0_config.h"                              /* 思考周期、LED設定 */
+#include "../control/sound_follow_controller.h"             /* 音源追従状態機械 */
+#include "hal_data.h"                                       /* BSP LED情報、ピンAPI */
+#include "tk_audio.h"                                       /* 最新音響状態取得API */
+#include "tk_command.h"                                     /* 最新アクチュエータ目標更新API */
 
-extern bsp_leds_t g_bsp_leds;                             /**< BSPのLED構成情報 */
+extern bsp_leds_t g_bsp_leds;                               /**< BSPのLED構成情報 */
 
-static void cpu0_think_task(INT stacd, void * exinf);      /* 思考タスク本体 */
-static ER cpu0_think_publish_target(
-    const sound_follow_output_t * p_output);               /* 追従指令の4輪展開 */
-static void cpu0_think_led_write(
-    bool blue_on,
-    bool green_on);                                       /* 2LED一括更新 */
-static uint32_t cpu0_think_fault_code(
-    uint32_t fault_flags);                                /* LED表示用異常番号 */
-static void cpu0_think_led_update(
-    uint32_t state_elapsed_ms,
-    uint32_t heartbeat_elapsed_ms,
-    uint32_t fault_elapsed_ms);                           /* 状態LED更新 */
+static void cpu0_think_task(INT stacd, void * exinf);       /* 思考タスク本体 */
+static ER cpu0_think_publish_target(const sound_follow_output_t * p_output); /* 追従指令の4輪展開 */
+static void cpu0_think_led_write(bool blue_on, bool green_on); /* 2LED一括更新 */
+static uint32_t cpu0_think_fault_code(uint32_t fault_flags);/* LED表示用異常番号 */
+/* 状態LED更新 */
+static void cpu0_think_led_update(uint32_t state_elapsed_ms, uint32_t heartbeat_elapsed_ms, uint32_t fault_elapsed_ms);
 
+/**< 他タスクからの異常通知を集約するイベントフラグ設定 */
 static T_CFLG const think_fault_flag_config = {
     .flgatr = TA_TFIFO | TA_WSGL,
     .iflgptn = 0U,
 };
 
+/**< 音源追従判断を行う思考タスク設定 */
 static T_CTSK const think_task_config = {
     .exinf = NULL,
     .tskatr = TA_HLNG | TA_RNG3,
@@ -38,22 +34,22 @@ static T_CTSK const think_task_config = {
     .bufptr = NULL,
 };
 
-static ID think_task_id;                                  /**< 思考タスクID */
-static ID think_fault_flag_id;                            /**< CPU0異常イベントフラグID */
-static bool think_task_started;                           /**< 思考タスク開始状態 */
+static ID think_task_id;                                    /**< 思考タスクID */
+static ID think_fault_flag_id;                              /**< CPU0異常イベントフラグID */
+static bool think_task_started;                             /**< 思考タスク開始状態 */
 
-volatile cpu0_think_state_t g_cpu0_think_state;          /**< 現在の思考状態 */
-volatile uint32_t g_cpu0_think_cycle_count;               /**< 思考周期実行回数 */
-volatile uint32_t g_cpu0_think_observation_sequence;      /**< 最終判断観測sequence */
-volatile uint32_t g_cpu0_think_observation_watchdog_ms;   /**< 観測更新停止時間 */
-volatile bool g_cpu0_think_link_ready;                    /**< 音響リンク判断 */
-volatile bool g_cpu0_think_new_observation;               /**< 新規観測判断 */
-volatile int16_t g_cpu0_think_steering_deg;               /**< 操舵判断値 */
-volatile int16_t g_cpu0_think_left_rpm;                   /**< 左RPM判断値 */
-volatile int16_t g_cpu0_think_right_rpm;                  /**< 右RPM判断値 */
-volatile bool g_cpu0_think_actuator_enable;               /**< 出力許可判断 */
-volatile bool g_cpu0_think_emergency_stop;                /**< 非常停止判断 */
-volatile uint32_t g_cpu0_fault_flags;                     /**< CPU0異常ラッチ */
+volatile cpu0_think_state_t g_cpu0_think_state;             /**< 現在の思考状態 */
+volatile uint32_t g_cpu0_think_cycle_count;                 /**< 思考周期実行回数 */
+volatile uint32_t g_cpu0_think_observation_sequence;        /**< 最終判断観測sequence */
+volatile uint32_t g_cpu0_think_observation_watchdog_ms;     /**< 観測更新停止時間 */
+volatile bool g_cpu0_think_link_ready;                      /**< 音響リンク判断 */
+volatile bool g_cpu0_think_new_observation;                 /**< 新規観測判断 */
+volatile int16_t g_cpu0_think_steering_deg;                 /**< 操舵判断値 */
+volatile int16_t g_cpu0_think_left_rpm;                     /**< 左RPM判断値 */
+volatile int16_t g_cpu0_think_right_rpm;                    /**< 右RPM判断値 */
+volatile bool g_cpu0_think_actuator_enable;                 /**< 出力許可判断 */
+volatile bool g_cpu0_think_emergency_stop;                  /**< 非常停止判断 */
+volatile uint32_t g_cpu0_fault_flags;                       /**< CPU0異常ラッチ */
 
 /** =================================================================*
  * @brief  思考タスクと異常イベント生成
@@ -151,8 +147,7 @@ ER cpu0_think_report_fault(cpu0_fault_t fault) {
  * @param[in] p_output 音源追従状態機械の出力
  * @return μT-Kernelエラーコード
  * ================================================================= */
-static ER cpu0_think_publish_target(
-    const sound_follow_output_t * p_output) {
+static ER cpu0_think_publish_target(const sound_follow_output_t * p_output) {
     if (NULL == p_output) {
         return E_PAR;
     }
@@ -164,14 +159,15 @@ static ER cpu0_think_publish_target(
         .emergency_stop = p_output->emergency_stop,
     };
 
-    int16_t const front_steering_deg = (int16_t) (
-        CPU0_STEERING_SERVO_OUTPUT_SIGN * p_output->steering_deg);
-    target.servo_target_deg[0] = front_steering_deg;       /* FR */
-    target.servo_target_deg[1] = front_steering_deg;       /* FL */
-    target.servo_target_deg[2] =
-        (int16_t) -front_steering_deg;                     /* RR */
-    target.servo_target_deg[3] =
-        (int16_t) -front_steering_deg;                     /* RL */
+    int16_t const front_steering_deg = (int16_t) (CPU0_STEERING_SERVO_OUTPUT_SIGN * p_output->steering_deg);
+    /* FR */
+    target.servo_target_deg[0] = front_steering_deg;
+    /* FL */
+    target.servo_target_deg[1] = front_steering_deg;
+    /* RR */
+    target.servo_target_deg[2] = (int16_t) -front_steering_deg;
+    /* RL */
+    target.servo_target_deg[3] = (int16_t) -front_steering_deg;
 
     return cpu0_command_set_target(&target);
 }
@@ -188,12 +184,10 @@ static void cpu0_think_led_write(bool blue_on, bool green_on) {
     }
 
     R_BSP_PinAccessEnable();
-    R_BSP_PinWrite(
-        (bsp_io_port_pin_t) leds.p_leds[CPU0_THINK_BLUE_LED_INDEX],
-        blue_on ? BSP_IO_LEVEL_HIGH : BSP_IO_LEVEL_LOW);
-    R_BSP_PinWrite(
-        (bsp_io_port_pin_t) leds.p_leds[CPU0_THINK_GREEN_LED_INDEX],
-        green_on ? BSP_IO_LEVEL_HIGH : BSP_IO_LEVEL_LOW);
+    R_BSP_PinWrite((bsp_io_port_pin_t) leds.p_leds[CPU0_THINK_BLUE_LED_INDEX],
+                   blue_on ? BSP_IO_LEVEL_HIGH : BSP_IO_LEVEL_LOW);
+    R_BSP_PinWrite((bsp_io_port_pin_t) leds.p_leds[CPU0_THINK_GREEN_LED_INDEX],
+                   green_on ? BSP_IO_LEVEL_HIGH : BSP_IO_LEVEL_LOW);
     R_BSP_PinAccessDisable();
 }
 
@@ -203,8 +197,7 @@ static void cpu0_think_led_write(bool blue_on, bool green_on) {
  * @return 1～6の異常番号
  * ================================================================= */
 static uint32_t cpu0_think_fault_code(uint32_t fault_flags) {
-    if (0U != (fault_flags &
-        (CPU0_FAULT_TASK_CREATE | CPU0_FAULT_TASK_START))) {
+    if (0U != (fault_flags & (CPU0_FAULT_TASK_CREATE | CPU0_FAULT_TASK_START))) {
         return 1U;
     }
     if (0U != (fault_flags & CPU0_FAULT_IPC_INIT)) {
@@ -228,59 +221,46 @@ static uint32_t cpu0_think_fault_code(uint32_t fault_flags) {
  * @param[in] heartbeat_elapsed_ms heartbeat周期内の時刻
  * @param[in] fault_elapsed_ms fault点滅周期内の時刻
  * ================================================================= */
-static void cpu0_think_led_update(uint32_t state_elapsed_ms,
-                                  uint32_t heartbeat_elapsed_ms,
-                                  uint32_t fault_elapsed_ms) {
+static void cpu0_think_led_update(uint32_t state_elapsed_ms, uint32_t heartbeat_elapsed_ms, uint32_t fault_elapsed_ms) {
     bool blue_on = false;
     bool green_on = false;
 
     if (CPU0_FAULT_NONE != g_cpu0_fault_flags) {
-        uint32_t const code = cpu0_think_fault_code(
-            g_cpu0_fault_flags);
-        uint32_t const pulse_window_ms =
-            code * CPU0_LED_FAULT_PULSE_MS * 2U;
-        uint32_t const pattern_ms = pulse_window_ms +
-                                    CPU0_LED_FAULT_GAP_MS;
+        uint32_t const code = cpu0_think_fault_code(g_cpu0_fault_flags);
+        uint32_t const pulse_window_ms = code * CPU0_LED_FAULT_PULSE_MS * 2U;
+        uint32_t const pattern_ms = pulse_window_ms + CPU0_LED_FAULT_GAP_MS;
         uint32_t const position_ms = fault_elapsed_ms % pattern_ms;
 
         green_on = true;
-        blue_on = (position_ms < pulse_window_ms) &&
-                  (0U == ((position_ms /
-                           CPU0_LED_FAULT_PULSE_MS) & 1U));
+        blue_on = (position_ms < pulse_window_ms) && (0U == ((position_ms / CPU0_LED_FAULT_PULSE_MS) & 1U));
     } else {
-        green_on = heartbeat_elapsed_ms <
-                   CPU0_LED_HEARTBEAT_PULSE_MS;
+        green_on = heartbeat_elapsed_ms < CPU0_LED_HEARTBEAT_PULSE_MS;
 
         switch (g_cpu0_think_state) {
-            case CPU0_THINK_STATE_WAIT_LINK:
-                green_on = false;
-                blue_on = 0U == ((state_elapsed_ms /
-                                  CPU0_LED_WAIT_LINK_BLINK_MS) & 1U);
-                break;
+        case CPU0_THINK_STATE_WAIT_LINK:
+            green_on = false;
+            blue_on = 0U == ((state_elapsed_ms / CPU0_LED_WAIT_LINK_BLINK_MS) & 1U);
+            break;
 
-            case CPU0_THINK_STATE_LISTEN:
-                blue_on = state_elapsed_ms %
-                          CPU0_LED_LISTEN_BLINK_MS <
-                          CPU0_LED_HEARTBEAT_PULSE_MS;
-                break;
+        case CPU0_THINK_STATE_LISTEN:
+            blue_on = state_elapsed_ms % CPU0_LED_LISTEN_BLINK_MS < CPU0_LED_HEARTBEAT_PULSE_MS;
+            break;
 
-            case CPU0_THINK_STATE_STEER_PREP:
-                blue_on = 0U == ((state_elapsed_ms /
-                                  CPU0_LED_STEER_BLINK_MS) & 1U);
-                break;
+        case CPU0_THINK_STATE_STEER_PREP:
+            blue_on = 0U == ((state_elapsed_ms / CPU0_LED_STEER_BLINK_MS) & 1U);
+            break;
 
-            case CPU0_THINK_STATE_MOVE_STEP:
-                blue_on = true;
-                break;
+        case CPU0_THINK_STATE_MOVE_STEP:
+            blue_on = true;
+            break;
 
-            case CPU0_THINK_STATE_SETTLE:
-            case CPU0_THINK_STATE_COOLDOWN:
-                blue_on = 0U == ((state_elapsed_ms /
-                                  CPU0_LED_SETTLE_BLINK_MS) & 1U);
-                break;
+        case CPU0_THINK_STATE_SETTLE:
+        case CPU0_THINK_STATE_COOLDOWN:
+            blue_on = 0U == ((state_elapsed_ms / CPU0_LED_SETTLE_BLINK_MS) & 1U);
+            break;
 
-            default:
-                break;
+        default:
+            break;
         }
     }
 
@@ -302,49 +282,35 @@ static void cpu0_think_task(INT stacd, void * exinf) {
 
     while (1) {
         UINT fault_pattern = 0U;
-        ER const flag_err = tk_wai_flg(think_fault_flag_id,
-                                       CPU0_FAULT_ALL_MASK,
-                                       TWF_ORW | TWF_BITCLR,
-                                       &fault_pattern,
-                                       TMO_POL);
+        ER const flag_err =
+            tk_wai_flg(think_fault_flag_id, CPU0_FAULT_ALL_MASK, TWF_ORW | TWF_BITCLR, &fault_pattern, TMO_POL);
         if (E_OK == flag_err) {
             g_cpu0_fault_flags |= fault_pattern;
         }
 
         cpu0_audio_snapshot_t snapshot = {0};
         ER const snapshot_err = cpu0_audio_snapshot_get(&snapshot);
-        bool const observation_usable = (E_OK == snapshot_err) &&
-            snapshot.usb_configured &&
-            snapshot.hello_received &&
-            snapshot.observation_received &&
-            (ACOUSTIC_XVF_STATUS_READY ==
-             snapshot.observation.xvf_status) &&
+        bool const observation_usable =
+            (E_OK == snapshot_err) && snapshot.usb_configured && snapshot.hello_received &&
+            snapshot.observation_received && (ACOUSTIC_XVF_STATUS_READY == snapshot.observation.xvf_status) &&
             (0U == (snapshot.observation.audio_flags &
-                     (ACOUSTIC_AUDIO_FLAG_I2C_ERROR |
-                      ACOUSTIC_AUDIO_FLAG_MUTED |
-                      ACOUSTIC_AUDIO_FLAG_I2S_STALE)));
-        bool const sequence_changed = observation_usable &&
-            (!observation_sequence_valid ||
-             (snapshot.observation_sequence !=
-              last_observation_sequence));
+                    (ACOUSTIC_AUDIO_FLAG_I2C_ERROR | ACOUSTIC_AUDIO_FLAG_MUTED | ACOUSTIC_AUDIO_FLAG_I2S_STALE)));
+        bool const sequence_changed =
+            observation_usable &&
+            (!observation_sequence_valid || (snapshot.observation_sequence != last_observation_sequence));
         if (sequence_changed) {
             last_observation_sequence = snapshot.observation_sequence;
-            g_cpu0_think_observation_sequence =
-                snapshot.observation_sequence;
+            g_cpu0_think_observation_sequence = snapshot.observation_sequence;
             g_cpu0_think_observation_watchdog_ms = 0U;
             observation_sequence_valid = true;
         } else if (observation_sequence_valid &&
-                   (g_cpu0_think_observation_watchdog_ms <=
-                    UINT32_MAX - CPU0_THINK_PERIOD_MS)) {
-            g_cpu0_think_observation_watchdog_ms +=
-                CPU0_THINK_PERIOD_MS;
+                   (g_cpu0_think_observation_watchdog_ms <= UINT32_MAX - CPU0_THINK_PERIOD_MS)) {
+            g_cpu0_think_observation_watchdog_ms += CPU0_THINK_PERIOD_MS;
         }
 
         bool const link_ready = observation_usable &&
-            (snapshot.observation_age_ms <=
-             CPU0_SOUND_OBSERVATION_TIMEOUT_MS) &&
-            (g_cpu0_think_observation_watchdog_ms <
-             CPU0_SOUND_OBSERVATION_TIMEOUT_MS);
+                                (snapshot.observation_age_ms <= CPU0_SOUND_OBSERVATION_TIMEOUT_MS) &&
+                                (g_cpu0_think_observation_watchdog_ms < CPU0_SOUND_OBSERVATION_TIMEOUT_MS);
         bool const new_observation = link_ready && sequence_changed;
         if (!observation_usable) {
             observation_sequence_valid = false;
@@ -358,11 +324,8 @@ static void cpu0_think_task(INT stacd, void * exinf) {
             .observation = snapshot.observation,
         };
         sound_follow_output_t output;
-        cpu0_think_state_t const previous_state =
-            g_cpu0_think_state;
-        sound_follow_controller_step(&input,
-                                     CPU0_THINK_PERIOD_MS,
-                                     &output);
+        cpu0_think_state_t const previous_state = g_cpu0_think_state;
+        sound_follow_controller_step(&input, CPU0_THINK_PERIOD_MS, &output);
         g_cpu0_think_state = output.state;
         if (previous_state != g_cpu0_think_state) {
             state_elapsed_ms = 0U;
@@ -384,16 +347,13 @@ static void cpu0_think_task(INT stacd, void * exinf) {
         g_cpu0_think_actuator_enable = output.actuator_enable;
         g_cpu0_think_emergency_stop = output.emergency_stop;
 
-        cpu0_think_led_update(state_elapsed_ms,
-                              heartbeat_elapsed_ms,
-                              fault_elapsed_ms);
+        cpu0_think_led_update(state_elapsed_ms, heartbeat_elapsed_ms, fault_elapsed_ms);
         g_cpu0_think_cycle_count++;
         state_elapsed_ms += CPU0_THINK_PERIOD_MS;
 
         if (CPU0_FAULT_NONE == g_cpu0_fault_flags) {
             heartbeat_elapsed_ms += CPU0_THINK_PERIOD_MS;
-            if (heartbeat_elapsed_ms >=
-                CPU0_LED_HEARTBEAT_PERIOD_MS) {
+            if (heartbeat_elapsed_ms >= CPU0_LED_HEARTBEAT_PERIOD_MS) {
                 heartbeat_elapsed_ms = 0U;
             }
         } else {

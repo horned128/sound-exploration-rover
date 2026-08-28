@@ -48,7 +48,7 @@
 #define CPU0_SOUND_TURN_INNER_RPM          (90)
 
 /* 正の車体操舵値を実機の右旋回へ変換するサーボ出力の符号。 */
-#define CPU0_STEERING_SERVO_OUTPUT_SIGN    (-1)
+#define CPU0_STEERING_SERVO_OUTPUT_SIGN (-1)
 
 /* 青LED: 思考状態、緑LED: heartbeatまたはfault。赤LEDはCPU1専用。 */
 #define CPU0_THINK_BLUE_LED_INDEX          (0U)

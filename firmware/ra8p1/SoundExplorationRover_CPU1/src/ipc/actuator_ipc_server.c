@@ -80,51 +80,49 @@ void actuator_ipc_callback(ipc_callback_args_t * p_args) {
     uint32_t const payload = actuator_ipc_get_payload(p_args->message);
 
     switch (actuator_ipc_get_message_id(p_args->message)) {
-        case ACTUATOR_IPC_COMMAND_CONTROL:
-            g_staging_command.actuator_enable =
-                (0U != (payload & ACTUATOR_CONTROL_ENABLE_MASK)) ? 1U : 0U;
-            g_staging_command.emergency_stop =
-                (0U != (payload & ACTUATOR_CONTROL_EMERGENCY_STOP_MASK)) ? 1U : 0U;
+    case ACTUATOR_IPC_COMMAND_CONTROL:
+        g_staging_command.actuator_enable = (0U != (payload & ACTUATOR_CONTROL_ENABLE_MASK)) ? 1U : 0U;
+        g_staging_command.emergency_stop = (0U != (payload & ACTUATOR_CONTROL_EMERGENCY_STOP_MASK)) ? 1U : 0U;
 
-            /* 緊急停止はシーケンス番号を待たずに即時コミットする。 */
-            if (0U != g_staging_command.emergency_stop) {
-                g_committed_command = g_staging_command;
-                g_command_pending = true;
-            }
-            break;
-
-        case ACTUATOR_IPC_COMMAND_LEFT_TARGET_RPM:
-            g_staging_command.left_target_rpm = actuator_ipc_get_i16_payload(p_args->message);
-            break;
-
-        case ACTUATOR_IPC_COMMAND_RIGHT_TARGET_RPM:
-            g_staging_command.right_target_rpm = actuator_ipc_get_i16_payload(p_args->message);
-            break;
-
-        case ACTUATOR_IPC_COMMAND_FR_TARGET_DEG:
-            g_staging_command.servo_target_deg[0] = actuator_ipc_get_i16_payload(p_args->message);
-            break;
-
-        case ACTUATOR_IPC_COMMAND_FL_TARGET_DEG:
-            g_staging_command.servo_target_deg[1] = actuator_ipc_get_i16_payload(p_args->message);
-            break;
-
-        case ACTUATOR_IPC_COMMAND_RR_TARGET_DEG:
-            g_staging_command.servo_target_deg[2] = actuator_ipc_get_i16_payload(p_args->message);
-            break;
-
-        case ACTUATOR_IPC_COMMAND_RL_TARGET_DEG:
-            g_staging_command.servo_target_deg[3] = actuator_ipc_get_i16_payload(p_args->message);
-            break;
-
-        case ACTUATOR_IPC_COMMAND_SEQUENCE:
-            g_staging_command.sequence_number = payload & ACTUATOR_IPC_SEQUENCE_MASK;
+        /* 緊急停止はシーケンス番号を待たずに即時コミットする。 */
+        if (0U != g_staging_command.emergency_stop) {
             g_committed_command = g_staging_command;
             g_command_pending = true;
-            break;
+        }
+        break;
 
-        default:
-            g_rx_fault_pending = true;
-            break;
+    case ACTUATOR_IPC_COMMAND_LEFT_TARGET_RPM:
+        g_staging_command.left_target_rpm = actuator_ipc_get_i16_payload(p_args->message);
+        break;
+
+    case ACTUATOR_IPC_COMMAND_RIGHT_TARGET_RPM:
+        g_staging_command.right_target_rpm = actuator_ipc_get_i16_payload(p_args->message);
+        break;
+
+    case ACTUATOR_IPC_COMMAND_FR_TARGET_DEG:
+        g_staging_command.servo_target_deg[0] = actuator_ipc_get_i16_payload(p_args->message);
+        break;
+
+    case ACTUATOR_IPC_COMMAND_FL_TARGET_DEG:
+        g_staging_command.servo_target_deg[1] = actuator_ipc_get_i16_payload(p_args->message);
+        break;
+
+    case ACTUATOR_IPC_COMMAND_RR_TARGET_DEG:
+        g_staging_command.servo_target_deg[2] = actuator_ipc_get_i16_payload(p_args->message);
+        break;
+
+    case ACTUATOR_IPC_COMMAND_RL_TARGET_DEG:
+        g_staging_command.servo_target_deg[3] = actuator_ipc_get_i16_payload(p_args->message);
+        break;
+
+    case ACTUATOR_IPC_COMMAND_SEQUENCE:
+        g_staging_command.sequence_number = payload & ACTUATOR_IPC_SEQUENCE_MASK;
+        g_committed_command = g_staging_command;
+        g_command_pending = true;
+        break;
+
+    default:
+        g_rx_fault_pending = true;
+        break;
     }
 }

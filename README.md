@@ -37,7 +37,7 @@ sound-exploration-rover/
 ├── firmware/
 │   ├── common/                 MCU間で共有する通信protocol
 │   ├── ra8p1/                  EK-RA8P1用e² studioワークスペース
-│   └── esp32s3/ XIAO ESP32S3用ESP-IDF project
+│   └── esp32s3/                XIAO ESP32S3用ESP-IDF project
 └── hardware/
     ├── actuator/               使用アクチュエータの仕様
     ├── papaya-addon/

@@ -44,7 +44,7 @@ volatile uint16_t g_servo_pulse_us[SERVO_COUNT] = {
     SERVO_PULSE_CENTER_US,
 };
 
-static bool servo_running[SERVO_COUNT];                      /**< サーボPWM出力状態 */
+static bool servo_running[SERVO_COUNT];                     /**< サーボPWM出力状態 */
 /**< 各サーボ目標角度 */
 static int16_t servo_target_deg[SERVO_COUNT] = {
     STEERING_CENTER_DEG,
@@ -61,8 +61,7 @@ fsp_err_t servo_init(void) {
     for (uint32_t i = 0U; i < SERVO_COUNT; i++) {
         servo_running[i] = false;
         servo_target_deg[i] = STEERING_CENTER_DEG;
-        int32_t center_us = (int32_t) SERVO_PULSE_CENTER_US +
-                            (int32_t) g_servo_center_trim_us[i];
+        int32_t center_us = (int32_t) SERVO_PULSE_CENTER_US + (int32_t) g_servo_center_trim_us[i];
         if (center_us < (int32_t) SERVO_PULSE_MIN_SAFE_US) {
             center_us = (int32_t) SERVO_PULSE_MIN_SAFE_US;
         } else if (center_us > (int32_t) SERVO_PULSE_MAX_SAFE_US) {
@@ -71,8 +70,7 @@ fsp_err_t servo_init(void) {
         g_servo_pulse_us[i] = (uint16_t) center_us;
 
         if (NULL != servo_timers[i]) {
-            fsp_err_t const err = servo_timers[i]->p_api->open(servo_timers[i]->p_ctrl,
-                                                               servo_timers[i]->p_cfg);
+            fsp_err_t const err = servo_timers[i]->p_api->open(servo_timers[i]->p_ctrl, servo_timers[i]->p_cfg);
             if (FSP_SUCCESS != err) {
                 return err;
             }
@@ -99,8 +97,7 @@ fsp_err_t servo_set_target_deg(uint32_t servo_index, int16_t target_deg) {
     int32_t const angle_span = STEERING_MAX_DEG - STEERING_MIN_DEG;
     int32_t const pulse_span = STEERING_MAX_PULSE_US - STEERING_MIN_PULSE_US;
     int32_t const angle_delta_us = ((int32_t) target_deg * pulse_span) / angle_span;
-    int32_t pulse_value_us = (int32_t) SERVO_PULSE_CENTER_US +
-                             (int32_t) g_servo_center_trim_us[servo_index] +
+    int32_t pulse_value_us = (int32_t) SERVO_PULSE_CENTER_US + (int32_t) g_servo_center_trim_us[servo_index] +
                              ((int32_t) servo_directions[servo_index] * angle_delta_us);
     if (pulse_value_us < (int32_t) SERVO_PULSE_MIN_SAFE_US) {
         pulse_value_us = (int32_t) SERVO_PULSE_MIN_SAFE_US;
@@ -115,11 +112,9 @@ fsp_err_t servo_set_target_deg(uint32_t servo_index, int16_t target_deg) {
         fsp_err_t err = p_timer->p_api->infoGet(p_timer->p_ctrl, &info);
         if (FSP_SUCCESS == err) {
             uint32_t const duty_counts =
-                (uint32_t) ((((uint64_t) info.period_counts * pulse_us) +
-                             (SERVO_PWM_PERIOD_US / 2U)) / SERVO_PWM_PERIOD_US);
-            err = p_timer->p_api->dutyCycleSet(p_timer->p_ctrl,
-                                               duty_counts,
-                                               servo_outputs[servo_index]);
+                (uint32_t) ((((uint64_t) info.period_counts * pulse_us) + (SERVO_PWM_PERIOD_US / 2U)) /
+                            SERVO_PWM_PERIOD_US);
+            err = p_timer->p_api->dutyCycleSet(p_timer->p_ctrl, duty_counts, servo_outputs[servo_index]);
         }
         if ((FSP_SUCCESS == err) && !servo_running[servo_index]) {
             err = p_timer->p_api->start(p_timer->p_ctrl);

@@ -2,19 +2,21 @@
  * @file   tk_command.c
  * @brief  CPU0指令タスク実装
  * ================================================================= */
-#include "tk_command.h"                                   /* CPU0指令タスクAPI */
-#include "tk_think.h"                                     /* 思考タスクへの異常通知 */
-#include "../../cpu0_config.h"                            /* 指令周期、優先度、タイムアウト */
-#include "../../ipc/actuator_ipc_client.h"                /* CPU1へのIPC送信API */
+#include "tk_command.h"                                     /* CPU0指令タスクAPI */
+#include "../../cpu0_config.h"                              /* 指令周期、優先度、タイムアウト */
+#include "../../ipc/actuator_ipc_client.h"                  /* CPU1へのIPC送信API */
+#include "tk_think.h"                                       /* 思考タスクへの異常通知 */
 
+/**< 最新アクチュエータ目標を保護するμT-Kernel mutex設定 */
 static T_CMTX const command_mutex_config = {
     .mtxatr = TA_INHERIT,
     .ceilpri = 0,
 };
 
-static void cpu0_command_task(INT stacd, void * exinf);    /* 指令タスク本体 */
-static void cpu0_command_send_latest(void);                /* 最新指令スナップショット送信 */
+static void cpu0_command_task(INT stacd, void * exinf);     /* 指令タスク本体 */
+static void cpu0_command_send_latest(void);                 /* 最新指令スナップショット送信 */
 
+/**< CPU1へIPC指令を送信するタスク設定 */
 static T_CTSK const command_task_config = {
     .exinf = NULL,
     .tskatr = TA_HLNG | TA_RNG3,
@@ -24,20 +26,22 @@ static T_CTSK const command_task_config = {
     .bufptr = NULL,
 };
 
-static ID command_task_id;                                 /**< 指令タスクID */
-static ID command_mutex_id;                                /**< 最新目標保護mutex ID */
-static bool command_task_started;                          /**< 指令タスク開始状態 */
-static bool command_ipc_open;                              /**< IPC open状態 */
-static bool command_emergency_reset_pending;               /**< CPU1 estopラッチ解除待ち */
-static bool command_timeout_reported;                      /**< 目標期限切れ通知済み状態 */
-static uint32_t command_target_age_ms;                     /**< 最新目標の経過時間 */
+static ID command_task_id;                                  /**< 指令タスクID */
+static ID command_mutex_id;                                 /**< 最新目標保護mutex ID */
+static bool command_task_started;                           /**< 指令タスク開始状態 */
+static bool command_ipc_open;                               /**< IPC open状態 */
+static bool command_emergency_reset_pending;                /**< CPU1 estopラッチ解除待ち */
+static bool command_timeout_reported;                       /**< 目標期限切れ通知済み状態 */
+static uint32_t command_target_age_ms;                      /**< 最新目標の経過時間 */
 
+/**< 思考タスクが更新する最新アクチュエータ目標 */
 static rover_motion_target_t command_target = {
     .left_target_rpm = 0,
     .right_target_rpm = 0,
     .actuator_enable = false,
     .emergency_stop = true,
 };
+/**< IPCでCPU1へ最後に送信したアクチュエータ目標 */
 static rover_motion_target_t command_last_sent_target = {
     .left_target_rpm = 0,
     .right_target_rpm = 0,
@@ -45,9 +49,9 @@ static rover_motion_target_t command_last_sent_target = {
     .emergency_stop = true,
 };
 
-volatile uint32_t g_cpu0_command_sequence;                 /**< 最終送信シーケンス */
-volatile uint32_t g_cpu0_command_send_count;               /**< 正常送信回数 */
-volatile fsp_err_t g_cpu0_command_last_error;              /**< 最終IPCエラー */
+volatile uint32_t g_cpu0_command_sequence;                  /**< 最終送信シーケンス */
+volatile uint32_t g_cpu0_command_send_count;                /**< 正常送信回数 */
+volatile fsp_err_t g_cpu0_command_last_error;               /**< 最終IPCエラー */
 
 /** =================================================================*
  * @brief  指令タスクと共有資源生成
@@ -61,7 +65,7 @@ cpu0_fault_t cpu0_command_task_create(void) {
     command_emergency_reset_pending = true;
     command_timeout_reported = false;
     command_target_age_ms = CPU0_COMMAND_TARGET_TIMEOUT_MS;
-    command_target = (rover_motion_target_t) {
+    command_target = (rover_motion_target_t){
         .left_target_rpm = 0,
         .right_target_rpm = 0,
         .actuator_enable = false,
@@ -137,7 +141,7 @@ void cpu0_command_task_delete(void) {
 }
 
 /** =================================================================*
- * @brief  思考タスクが生成した最新目標を更新
+ * @brief  思考タスク目標更新
  * @param[in] p_target FR/FL/RR/RLと左右モーターを含む目標
  * @return μT-Kernelエラーコード
  * ================================================================= */
@@ -181,8 +185,7 @@ ER cpu0_command_snapshot_get(cpu0_command_snapshot_t * p_snapshot) {
     p_snapshot->target = command_target;
     p_snapshot->last_sent_target = command_last_sent_target;
     p_snapshot->target_age_ms = command_target_age_ms;
-    p_snapshot->target_stale =
-        command_target_age_ms >= CPU0_COMMAND_TARGET_TIMEOUT_MS;
+    p_snapshot->target_stale = command_target_age_ms >= CPU0_COMMAND_TARGET_TIMEOUT_MS;
     err = tk_unl_mtx(command_mutex_id);
     return err;
 }
@@ -226,9 +229,7 @@ static void cpu0_command_send_latest(void) {
         target.emergency_stop = true;
     }
 
-    bool const clear_emergency_latch = command_emergency_reset_pending &&
-                                       !target_stale &&
-                                       !target.emergency_stop;
+    bool const clear_emergency_latch = command_emergency_reset_pending && !target_stale && !target.emergency_stop;
 
     actuator_command_t command = actuator_command_make_safe();
     command.left_target_rpm = target.left_target_rpm;
@@ -246,20 +247,14 @@ static void cpu0_command_send_latest(void) {
         (void) cpu0_think_report_fault(CPU0_FAULT_IPC_SEND);
     } else {
         g_cpu0_command_send_count++;
-        ER const sent_lock_err = tk_loc_mtx(command_mutex_id,
-                                             TMO_FEVR);
+        ER const sent_lock_err = tk_loc_mtx(command_mutex_id, TMO_FEVR);
         if (E_OK == sent_lock_err) {
-            command_last_sent_target.left_target_rpm =
-                command.left_target_rpm;
-            command_last_sent_target.right_target_rpm =
-                command.right_target_rpm;
-            command_last_sent_target.actuator_enable =
-                0U != command.actuator_enable;
-            command_last_sent_target.emergency_stop =
-                0U != command.emergency_stop;
+            command_last_sent_target.left_target_rpm = command.left_target_rpm;
+            command_last_sent_target.right_target_rpm = command.right_target_rpm;
+            command_last_sent_target.actuator_enable = 0U != command.actuator_enable;
+            command_last_sent_target.emergency_stop = 0U != command.emergency_stop;
             for (uint32_t i = 0U; i < ACTUATOR_SERVO_COUNT; i++) {
-                command_last_sent_target.servo_target_deg[i] =
-                    command.servo_target_deg[i];
+                command_last_sent_target.servo_target_deg[i] = command.servo_target_deg[i];
             }
             (void) tk_unl_mtx(command_mutex_id);
         }

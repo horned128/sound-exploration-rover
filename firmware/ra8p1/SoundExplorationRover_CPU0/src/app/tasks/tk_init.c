@@ -2,14 +2,15 @@
  * @file   tk_init.c
  * @brief  CPU0独立タスクの初期化
  * ================================================================= */
-#include "tk_init.h"                                      /* CPU0タスク初期化API */
-#include "tk_audio.h"                                     /* 音響タスク生成・開始API */
-#include "tk_command.h"                                   /* 指令タスク生成・開始API */
-#include "tk_think.h"                                     /* 思考タスク生成・開始API */
-#include "../../cpu0_config.h"                            /* 初期化タスク優先度、スタック */
+#include "tk_init.h"                                        /* CPU0タスク初期化API */
+#include "../../cpu0_config.h"                              /* 初期化タスク優先度、スタック */
+#include "tk_audio.h"                                       /* 音響タスク生成・開始API */
+#include "tk_command.h"                                     /* 指令タスク生成・開始API */
+#include "tk_think.h"                                       /* 思考タスク生成・開始API */
 
-static void cpu0_init_task(INT stacd, void * exinf);       /* 初期化タスク本体 */
+static void cpu0_init_task(INT stacd, void * exinf);        /* 初期化タスク本体 */
 
+/**< CPU0起動時に一度だけ動作する初期化タスク設定 */
 static T_CTSK const init_task_config = {
     .exinf = NULL,
     .tskatr = TA_HLNG | TA_RNG3,
@@ -19,7 +20,7 @@ static T_CTSK const init_task_config = {
     .bufptr = NULL,
 };
 
-static ID init_task_id;                                    /**< 初期化タスクID */
+static ID init_task_id;                                     /**< 初期化タスクID */
 
 /** =================================================================*
  * @brief  CPU0初期化タスク生成・開始

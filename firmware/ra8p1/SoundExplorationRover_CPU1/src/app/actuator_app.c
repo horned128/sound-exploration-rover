@@ -65,22 +65,14 @@ static void actuator_apply_command(const actuator_command_t * p_received) {
     actuator_command_t command = *p_received;
     bool limited = false;
 
-    command.left_target_rpm = clamp_i16(command.left_target_rpm,
-                                        -JGA25_TARGET_RPM_MAX,
-                                        JGA25_TARGET_RPM_MAX,
-                                        &limited);
-    command.right_target_rpm = clamp_i16(command.right_target_rpm,
-                                         -JGA25_TARGET_RPM_MAX,
-                                         JGA25_TARGET_RPM_MAX,
-                                         &limited);
+    command.left_target_rpm = clamp_i16(command.left_target_rpm, -JGA25_TARGET_RPM_MAX, JGA25_TARGET_RPM_MAX, &limited);
+    command.right_target_rpm =
+        clamp_i16(command.right_target_rpm, -JGA25_TARGET_RPM_MAX, JGA25_TARGET_RPM_MAX, &limited);
     for (uint32_t i = 0U; i < SERVO_COUNT; i++) {
-        command.servo_target_deg[i] = clamp_i16(command.servo_target_deg[i],
-                                                STEERING_MIN_DEG,
-                                                STEERING_MAX_DEG,
-                                                &limited);
+        command.servo_target_deg[i] =
+            clamp_i16(command.servo_target_deg[i], STEERING_MIN_DEG, STEERING_MAX_DEG, &limited);
     }
-    g_actuator_fault_flags &= (uint16_t) ~(ACTUATOR_FAULT_COMMAND_TIMEOUT |
-                                            ACTUATOR_FAULT_COMMAND_LIMITED);
+    g_actuator_fault_flags &= (uint16_t) ~(ACTUATOR_FAULT_COMMAND_TIMEOUT | ACTUATOR_FAULT_COMMAND_LIMITED);
     if (limited) {
         g_actuator_fault_flags |= ACTUATOR_FAULT_COMMAND_LIMITED;
     }
@@ -119,14 +111,12 @@ static void actuator_apply_command(const actuator_command_t * p_received) {
         }
     }
 
-    fsp_err_t err = dc_motor_request_rpm(command.left_target_rpm,
-                                         command.right_target_rpm);
+    fsp_err_t err = dc_motor_request_rpm(command.left_target_rpm, command.right_target_rpm);
     if (FSP_SUCCESS != err) {
         g_actuator_last_error = err;
         g_actuator_fault_flags |= ACTUATOR_FAULT_DRIVER;
         actuator_safe_stop();
     }
-
 }
 
 /** =================================================================*
@@ -199,5 +189,4 @@ void actuator_app_run_1ms(void) {
         g_actuator_fault_flags |= ACTUATOR_FAULT_COMMAND_TIMEOUT;
         actuator_safe_stop();
     }
-
 }

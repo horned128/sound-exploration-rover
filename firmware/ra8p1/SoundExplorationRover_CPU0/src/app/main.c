@@ -5,9 +5,9 @@
  * @date   2026-08
  * ================================================================= */
 #include "hal_data.h"                                       /* FSP生成のHAL/BSPインスタンス、周辺機器設定、型定義 */
-#include <tk/tkernel.h>                                     /* μT-Kernelのタスク休止API、型定義、共通定義 */
 #include "tasks/tk_init.h"                                  /* CPU0独立タスクの初期化API */
 #include "tasks/tk_think.h"                                 /* CPU0起動異常のLED表示API */
+#include <tk/tkernel.h>                                     /* μT-Kernelのタスク休止API、型定義、共通定義 */
 
 EXPORT INT usermain(void);                                  /* CPU0アプリケーション起動 */
 
@@ -22,7 +22,8 @@ EXPORT INT usermain(void) {
     R_BSP_SecondaryCoreStart();
 #endif
 
-    cpu0_fault_t const fault = cpu0_tasks_init();           /* CPU0独立タスクの起動結果 */
+    /* CPU0独立タスクの起動結果 */
+    cpu0_fault_t const fault = cpu0_tasks_init();
     if (CPU0_FAULT_NONE != fault) {
         cpu0_think_halt(fault);
     }

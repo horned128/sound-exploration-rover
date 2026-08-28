@@ -90,7 +90,7 @@ firmware/
 │  ├─ acoustic_protocol.h/.c          ESP32S3/CPU0共通USB protocol
 ├─ esp32s3/
 │  ├─ CMakeLists.txt                  ESP-IDF project
-│  └─ main/
+│  └─ src/
 │     ├─ app_main.c                   frontend初期化入口
 │     ├─ xvf3800_control.c/.h         I2C DoA/VAD取得
 │     ├─ audio_capture.c/.h           I2S取込・dBFS算出
@@ -134,7 +134,7 @@ firmware/
 主要ファイル:
 
 - 共通契約: [`acoustic_protocol.h`](../../firmware/common/acoustic_protocol.h)、[`ipc_message.h`](../../firmware/ra8p1/common/ipc_message.h)
-- 音響frontend: [`acoustic_frontend.c`](../../firmware/esp32s3/main/acoustic_frontend.c)、[`xvf3800_control.c`](../../firmware/esp32s3/main/xvf3800_control.c)、[`audio_capture.c`](../../firmware/esp32s3/main/audio_capture.c)、[`usb_link.c`](../../firmware/esp32s3/main/usb_link.c)
+- 音響frontend: [`acoustic_frontend.c`](../../firmware/esp32s3/src/acoustic_frontend.c)、[`xvf3800_control.c`](../../firmware/esp32s3/src/xvf3800_control.c)、[`audio_capture.c`](../../firmware/esp32s3/src/audio_capture.c)、[`usb_link.c`](../../firmware/esp32s3/src/usb_link.c)
 - CPU0: [`main.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/main.c)、[`tk_init.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_init.c)、[`tk_audio.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_audio.c)、[`tk_think.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_think.c)、[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/control/sound_follow_controller.c)、[`tk_command.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_command.c)
 - CPU1: [`actuator_app.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/actuator_app.c)、[`actuator_ipc_server.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/ipc/actuator_ipc_server.c)、[`servo.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/servo.c)、[`dc_motor.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/dc_motor.c)
 

@@ -3,8 +3,8 @@
  * @brief  CPU0-CPU1間IPCクライアント実装
  * ================================================================= */
 #include "actuator_ipc_client.h"                            /* CPU0側IPCクライアントAPIとメッセージ型 */
-#include <tk/tkernel.h>                                     /* μT-Kernelのタスク遅延API */
 #include "../cpu0_config.h"                                 /* CPU0のIPC再送待ち時間 */
+#include <tk/tkernel.h>                                     /* μT-Kernelのタスク遅延API */
 
 /**< CPU1へ送るサーボ目標角メッセージID */
 static actuator_ipc_message_id_t const servo_target_message_ids[ACTUATOR_SERVO_COUNT] = {
@@ -60,23 +60,19 @@ fsp_err_t actuator_ipc_client_send(const actuator_command_t * p_command) {
 
     /* 緊急停止を先に送り、スナップショット確定前にCPU1が停止できるようにする。 */
     fsp_err_t err = actuator_ipc_send_word(
-        actuator_ipc_make_control_word(0U != p_command->actuator_enable,
-                                       0U != p_command->emergency_stop));
+        actuator_ipc_make_control_word(0U != p_command->actuator_enable, 0U != p_command->emergency_stop));
 
     if (FSP_SUCCESS == err) {
         err = actuator_ipc_send_word(
-            actuator_ipc_make_i16_word(ACTUATOR_IPC_COMMAND_LEFT_TARGET_RPM,
-                                       p_command->left_target_rpm));
+            actuator_ipc_make_i16_word(ACTUATOR_IPC_COMMAND_LEFT_TARGET_RPM, p_command->left_target_rpm));
     }
     if (FSP_SUCCESS == err) {
         err = actuator_ipc_send_word(
-            actuator_ipc_make_i16_word(ACTUATOR_IPC_COMMAND_RIGHT_TARGET_RPM,
-                                       p_command->right_target_rpm));
+            actuator_ipc_make_i16_word(ACTUATOR_IPC_COMMAND_RIGHT_TARGET_RPM, p_command->right_target_rpm));
     }
     for (uint32_t i = 0U; (FSP_SUCCESS == err) && (i < ACTUATOR_SERVO_COUNT); i++) {
         err = actuator_ipc_send_word(
-            actuator_ipc_make_i16_word(servo_target_message_ids[i],
-                                       p_command->servo_target_deg[i]));
+            actuator_ipc_make_i16_word(servo_target_message_ids[i], p_command->servo_target_deg[i]));
     }
     if (FSP_SUCCESS == err) {
         /* シーケンス番号を完全な指令スナップショットのコミットマーカーとする。 */
