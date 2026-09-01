@@ -55,3 +55,6 @@ skills-lock.json
 # Dust which software made by Pyhton emit
 *.log
 *.pyc
+
+# Tmp Folder
+**/tmp

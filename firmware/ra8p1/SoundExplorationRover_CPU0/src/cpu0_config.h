@@ -15,11 +15,9 @@
 #define CPU0_IPC_RETRY_DELAY_MS            (1U)
 
 /* 数値が小さいほど高優先度。IPC keep-aliveを思考処理より優先する。 */
-#define CPU0_INIT_TASK_PRIORITY            (5)
 #define CPU0_COMMAND_TASK_PRIORITY         (6)
 #define CPU0_AUDIO_TASK_PRIORITY           (8)
 #define CPU0_THINK_TASK_PRIORITY           (10)
-#define CPU0_INIT_TASK_STACK_SIZE          (1024U)
 #define CPU0_COMMAND_TASK_STACK_SIZE       (1024U)
 #define CPU0_AUDIO_TASK_STACK_SIZE         (2048U)
 #define CPU0_THINK_TASK_STACK_SIZE         (1024U)
@@ -48,7 +46,7 @@
 #define CPU0_SOUND_TURN_INNER_RPM          (90)
 
 /* 正の車体操舵値を実機の右旋回へ変換するサーボ出力の符号。 */
-#define CPU0_STEERING_SERVO_OUTPUT_SIGN (-1)
+#define CPU0_STEERING_SERVO_OUTPUT_SIGN    (-1)
 
 /* 青LED: 思考状態、緑LED: heartbeatまたはfault。赤LEDはCPU1専用。 */
 #define CPU0_THINK_BLUE_LED_INDEX          (0U)

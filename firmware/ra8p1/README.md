@@ -4,14 +4,14 @@ CPU0がReSpeaker/XIAOからUSBで音響観測を受けて短距離の音源追�
 
 ```text
 CPU0 / Cortex-M85 / μT-Kernel
-  usermain() ──> tk_init
-                  ├─ tk_command (priority 6 / 50 ms)
-                  │    └─ 4サーボ＋左右モーターを1フレームでIPC送信
-                  ├─ tk_audio   (priority 8 / 1 ms poll)
-                  │    └─ USB HCDC受信・音響snapshot
-                  └─ tk_think   (priority 10 / 100 ms)
-                       ├─ 停止聴取型の音源追従目標
-                       └─ 青・緑LEDによる状態／fault表示
+  usermain() ──> CPU0 task registry
+                   ├─ tk_command (priority 6 / 50 ms)
+                   │    └─ 4サーボ＋左右モーターを1フレームでIPC送信
+                   ├─ tk_audio   (priority 8 / 1 ms poll)
+                   │    └─ USB HCDC受信・音響snapshot
+                   └─ tk_think   (priority 10 / 100 ms)
+                        ├─ 停止聴取型の音源追従目標
+                        └─ 青・緑LEDによる状態／fault表示
                                       │
                                       v 意味ベースの32 bitメッセージ列
                                  IPC message FIFO channel 0
@@ -36,7 +36,7 @@ CPU1は4輪操舵サーボ、左右BTS7960、左右代表エンコーダを起�
 
 購入時の仕様表記は100 rpmですが、今回の実機確認では約300 rpmを測定したため、開ループ換算上限を300 rpmへ変更しています。この値が無負荷測定である場合、車体搭載時の速度・トルクは別途確認してください。
 
-CPU0はCPU1を起動し、ワンショットの`tk_init`を`tk_cre_tsk()`で生成します。`tk_init`は独立した`tk_command`、`tk_audio`、`tk_think`をそれぞれ`tk_cre_tsk()`で生成し、この順で開始してから自己削除します。`tk_think`は停止中の音響観測が閾値と方向安定条件を満たした場合だけ、短時間の操舵・前進目標を生成します。CPU1は左右代表エンコーダの実測RPMを使い、左右別にPWMを比例補正します。
+CPU0はCPU1を起動した後、μT-Kernel初期タスクから呼ばれる`usermain()`で`cpu0_tasks_init()`を実行します。`tk_init.c`の登録配列を基に`tk_think`、`tk_command`、`tk_audio`の全リソースを生成してから全タスクを開始し、`usermain()`は永久休止します。`tk_think`は停止中の音響観測が閾値と方向安定条件を満たした場合だけ、短時間の操舵・前進目標を生成します。CPU1は左右代表エンコーダの実測RPMを使い、左右別にPWMを比例補正します。
 
 `tk_command`は高優先度の50 ms周期で最新目標を読み、FR、FL、RR、RLと左右モーターの6指示値を1つのIPCスナップショットとして送信します。思考目標が500 ms途絶した場合は緊急停止へ切り替えます。
 
@@ -210,7 +210,7 @@ CPU0では次の変数をLive Watchへ追加します。
 | `../common/acoustic_protocol.h/.c` | XIAO ESP32S3とCPU0で共有するUSB音響protocol |
 | `common/ipc_message.h` | 両CPU共通のコマンド型と32 bit通信形式 |
 | `SoundExplorationRover_CPU0/src/app/main.c` | CPU1起動とCPU0タスク群の起動 |
-| `SoundExplorationRover_CPU0/src/app/tasks/tk_init.c` | 独立タスクの資源生成、`tk_cre_tsk()`、開始、失敗時の後処理 |
+| `SoundExplorationRover_CPU0/src/app/tasks/tk_init.c` | CPU0タスク登録配列、全タスクの生成・開始、失敗時の逆順解放 |
 | `SoundExplorationRover_CPU0/src/app/tasks/tk_audio.c` | HCDC event、frame検証、最新音響snapshot |
 | `SoundExplorationRover_CPU0/src/app/tasks/tk_think.c` | 音響snapshot取得、目標展開、青・緑LED、CPU0 faultラッチ |
 | `SoundExplorationRover_CPU0/src/app/control/sound_follow_controller.c` | 停止聴取型の音源追従状態機械 |
@@ -225,11 +225,10 @@ CPU0では次の変数をLive Watchへ追加します。
 
 ### CPU0タスク一覧
 
-`tk_init`は起動時だけ動く独立カーネルタスクです。共有資源を作成し、`tk_command`、`tk_audio`、`tk_think`を個別に生成し、この順で開始した後、`tk_exd_tsk()`で自己削除します。4タスクはそれぞれ`tk_cre_tsk()`で生成され、別々のスタックと優先度を持ちます。
+`tk_init.c`は独立カーネルタスクではなく、`usermain()`から呼ばれるタスク登録・初期化モジュールです。登録配列に生成・開始・解放APIを追加するだけでCPU0タスクを増減できます。全リソースの生成に成功してから各タスクを開始し、失敗時は生成済みリソースを登録の逆順で解放します。`usermain()`はμT-Kernel初期タスクの実行コンテキストを永久休止させ、登録された3タスクを別々のスタックと優先度で実行します。
 
 | ファイル | カーネルタスク | 優先度 | 周期・待ち | 役割 |
 |---|---|---:|---|---|
-| `tk_init.c` | `cpu0_init_task` | 5 | 起動時に1回 | 共有資源と子タスクを生成・開始後に自己削除 |
 | `tk_command.c` | `cpu0_command_task` | 6 | 50 ms | CPU1へ6出力分の最新目標を送信 |
 | `tk_audio.c` | `cpu0_audio_task` | 8 | 1 ms poll | USB HCDC受信、frame parser、音響snapshot |
 | `tk_think.c` | `cpu0_think_task` | 10 | 100 ms | 音源追従目標、LED、faultラッチ |

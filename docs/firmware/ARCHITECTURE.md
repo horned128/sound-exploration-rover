@@ -12,7 +12,7 @@
 
 1. XVF3800はDoA/VADと処理済み音声を生成し、XIAO ESP32S3は音響・無線フロントエンドとして観測値を整形する。
 2. CPU0（Cortex-M85）はUSB hostとして音響観測を検証し、μT-Kernel上で音源追従判断と指令送信を行う。
-3. CPU0の`tk_init`、`tk_audio`、`tk_think`、`tk_command`は、それぞれ`tk_cre_tsk()`で生成する独立カーネルタスクである。
+3. CPU0の`tk_audio`、`tk_think`、`tk_command`は、それぞれ`tk_cre_tsk()`で生成する独立カーネルタスクである。`tk_init.c`は`usermain()`から呼ばれるタスク登録・初期化モジュールである。
 4. CPU1（Cortex-M33）はベアメタルの約1 msループで指令を検証し、4サーボと論理左右DCモーターを駆動する。
 5. 6個のアクチュエータ指示値は、IPCの`SEQUENCE`をcommit markerとして1つのスナップショットで確定する。
 6. USBや音響データが異常・timeoutになってもCPU1の実時間制御を巻き込まず、CPU0停止目標とCPU1ローカルtimeoutを重ねる。
@@ -39,7 +39,7 @@ flowchart LR
 
     subgraph MCU["RA8P1 MCU"]
         subgraph CPU0["CPU0 / Cortex-M85 / μT-Kernel"]
-            INIT["tk_init<br/>子タスク生成後に自己削除"]
+            INIT["usermain / task registry<br/>全タスク生成・開始"]
             AUDIO["tk_audio<br/>USB HCDC・frame検証"]
             OBS["最新音響snapshot<br/>mutex保護"]
             THINK["tk_think / 100 ms<br/>音源追従状態機械・青/緑LED"]
@@ -110,9 +110,9 @@ firmware/
    │  ├─ ra/、ra_cfg/、ra_gen/        FSPコード・設定・生成物
    │  └─ src/
    │     ├─ hal_entry.c               μT-Kernel起動入口
-   │     ├─ app/main.c                CPU1とtk_initの起動
+   │     ├─ app/main.c                CPU1起動とCPU0タスク群初期化
    │     ├─ app/tasks/task_common.h   CPU0共通fault定義
-   │     ├─ app/tasks/tk_init.c       独立タスク生成・開始
+   │     ├─ app/tasks/tk_init.c       タスク登録配列、生成・開始・失敗時解放
    │     ├─ app/tasks/tk_audio.c      USB event、frame parser、音響snapshot
    │     ├─ app/tasks/tk_think.c      音源追従、青/緑LED、faultラッチ
    │     ├─ app/tasks/tk_command.c    目標共有、期限監視、IPC送信
@@ -148,8 +148,7 @@ firmware/
 sequenceDiagram
     participant ESP as XIAO ESP32S3
     participant RESET as Reset / BSP
-    participant MAIN as CPU0 usermain
-    participant INIT as CPU0 tk_init
+    participant MAIN as CPU0 usermain / 初期タスク
     participant AUDIO as CPU0 tk_audio
     participant CMD as CPU0 tk_command
     participant THINK as CPU0 tk_think
@@ -157,15 +156,14 @@ sequenceDiagram
 
     RESET->>MAIN: μT-Kernel起動後にusermain()
     MAIN->>C1: R_BSP_SecondaryCoreStart()
-    MAIN->>INIT: tk_cre_tsk() / tk_sta_tsk()
     par CPU0
-        INIT->>THINK: event flagとtaskを生成
-        INIT->>CMD: mutex、IPC client、taskを生成
-        INIT->>AUDIO: mutex、USB受信taskを生成
-        INIT->>CMD: task開始
-        INIT->>AUDIO: task開始
-        INIT->>THINK: task開始
-        INIT->>INIT: tk_exd_tsk()で自己削除
+        MAIN->>THINK: event flagとtaskを生成
+        MAIN->>CMD: mutex、IPC client、taskを生成
+        MAIN->>AUDIO: mutex、USB受信taskを生成
+        MAIN->>THINK: task開始
+        MAIN->>CMD: task開始
+        MAIN->>AUDIO: task開始
+        MAIN->>MAIN: tk_slp_tsk(TMO_FEVR)で永久休止
         loop nominal 1 ms
             AUDIO->>AUDIO: USB event poll・frame検証
             ESP-->>AUDIO: HELLO / OBSERVATION / HEALTH
@@ -186,7 +184,7 @@ sequenceDiagram
     end
 ```
 
-`usermain()`はCPU1と`tk_init`を起動して永久休止する。`tk_init`は子タスクの資源をすべて生成してから`tk_command`、`tk_audio`、`tk_think`の順で開始し、正常時は自己削除する。初期化に失敗した場合は生成済みの子資源を解放し、青・緑LEDによるfault表示を続ける。
+`usermain()`はμT-Kernelが生成した高優先度の初期タスクから呼ばれる。CPU1起動後、`tk_init.c`の登録配列を介して全タスクの資源を生成し、すべて成功してから各タスクを開始して永久休止する。登録処理に失敗した場合は、失敗した要素を含む生成済みリソースを登録の逆順で解放し、青・緑LEDによるfault表示を続ける。開始APIの呼び出し中は初期タスクが実行中であり、休止後はタスク優先度に従って`tk_command`、`tk_audio`、`tk_think`がスケジュールされる。
 
 `tk_dly_tsk()`およびCPU1の`R_BSP_SoftwareDelay()`を使うため、記載周期は処理時間を含まないnominal値であり、ハードウェアタイマー基準の厳密な周期ではない。
 
@@ -194,7 +192,6 @@ sequenceDiagram
 
 | タスク | 優先度 | スタック | 実行 | 責務 |
 |---|---:|---:|---|---|
-| `cpu0_init_task` | 5 | 1024 B | 起動時1回 | 資源と子タスクの生成・開始後に自己削除 |
 | `cpu0_command_task` | 6 | 1024 B | 50 ms | 最新目標、500 ms期限監視、6出力のIPC一括送信 |
 | `cpu0_audio_task` | 8 | 2048 B | nominal 1 ms poll | HCDC event、stream parser、最新音響snapshot |
 | `cpu0_think_task` | 10 | 1024 B | 100 ms | 音源追従、状態遷移、青/緑LED、faultラッチ |
