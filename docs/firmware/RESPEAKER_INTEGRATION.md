@@ -53,7 +53,7 @@ flowchart LR
 現行実装の制御経路は`XVF3800 → ESP32S3 → USB CDC → CPU0 → IPC → CPU1`である。診断経路はCPU0が同じCDCのBulk OUTで診断snapshotをESP32S3へ返し、ESP32S3がWi-Fi UDP JSON LinesとしてPCへ送信する。Wi-Fiの再接続やUDP送信は低優先度の独立taskで行い、音響観測とCPU1の実時間制御へ直接入れない。主な実装位置は次のとおりである。
 
 - 共有protocol: [`acoustic_protocol.h`](../../firmware/common/acoustic_protocol.h)、[`acoustic_protocol.c`](../../firmware/common/acoustic_protocol.c)
-- ESP32S3 frontend: [`acoustic_frontend.c`](../../firmware/esp32s3/main/acoustic_frontend.c)、[`xvf3800_control.c`](../../firmware/esp32s3/main/xvf3800_control.c)、[`audio_capture.c`](../../firmware/esp32s3/main/audio_capture.c)、[`usb_link.c`](../../firmware/esp32s3/main/usb_link.c)、[`wifi_telemetry.c`](../../firmware/esp32s3/main/wifi_telemetry.c)
+- ESP32S3 frontend: [`acoustic_frontend.c`](../../firmware/esp32s3/src/acoustic_frontend.c)、[`xvf3800_control.c`](../../firmware/esp32s3/src/xvf3800_control.c)、[`audio_capture.c`](../../firmware/esp32s3/src/audio_capture.c)、[`usb_link.c`](../../firmware/esp32s3/src/usb_link.c)、[`wifi_telemetry.c`](../../firmware/esp32s3/src/wifi_telemetry.c)
 - CPU0 USB受信: [`tk_audio.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_audio.c)
 - CPU0判断: [`tk_think.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_think.c)
 - CPU0→CPU1指令: [`tk_command.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_command.c)
@@ -203,7 +203,7 @@ CPU0 parserは次を満たさないframeを走行判断へ渡さない。
 
 ### 5.3 Wi-Fi UDP診断
 
-接続情報は[`app_config.h`](../../firmware/esp32s3/main/app_config.h)の次のmacroへ設定する。`APP_UDP_DESTINATION_IPV4`はXIAOのIPではなく、UDPを待ち受けるPCの無線LAN側IPv4アドレスである。実際のSSID/passwordをGitへcommitしないこと。
+接続情報は[`app_config.h`](../../firmware/esp32s3/src/app_config.h)の次のmacroへ設定する。`APP_UDP_DESTINATION_IPV4`はXIAOのIPではなく、UDPを待ち受けるPCの無線LAN側IPv4アドレスである。実際のSSID/passwordをGitへcommitしないこと。
 
 ```c
 #define APP_WIFI_SSID                        "your-ssid"

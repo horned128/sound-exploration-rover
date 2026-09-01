@@ -1,0 +1,270 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Sound Exploration ROVer 現行コード構造",
+    "output": "SEROV_ARCHITECTURE.html",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "xvf3800",
+      "type": "external",
+      "label": "XVF3800",
+      "sublabel": "4-mic DSP · DoA / VAD / PCM",
+      "tag": "audio firmware",
+      "pos": [40, 200],
+      "size": [160, 78]
+    },
+    {
+      "id": "esp_audio",
+      "type": "backend",
+      "label": "XIAO audio frontend",
+      "sublabel": "FreeRTOS · I2S level · observation",
+      "tag": "ESP32S3",
+      "pos": [250, 200],
+      "size": [180, 78]
+    },
+    {
+      "id": "esp_gateway",
+      "type": "messagebus",
+      "label": "USB / Wi-Fi gateway",
+      "sublabel": "TinyUSB CDC · UDP telemetry",
+      "tag": "ESP32S3",
+      "pos": [250, 390],
+      "size": [180, 78]
+    },
+    {
+      "id": "cpu0_startup",
+      "type": "backend",
+      "label": "usermain / tk_init",
+      "sublabel": "CPU1 start · task lifecycle",
+      "tag": "Cortex-M85 · μT-Kernel",
+      "pos": [700, 40],
+      "size": [190, 78]
+    },
+    {
+      "id": "cpu0_audio",
+      "type": "backend",
+      "label": "tk_audio",
+      "sublabel": "HCDC host · frame validation",
+      "tag": "audio snapshot",
+      "pos": [480, 200],
+      "size": [170, 78]
+    },
+    {
+      "id": "cpu0_think",
+      "type": "backend",
+      "label": "tk_think",
+      "sublabel": "sound_follow_controller · LEDs",
+      "tag": "behavior decision",
+      "pos": [710, 200],
+      "size": [170, 78]
+    },
+    {
+      "id": "cpu0_command",
+      "type": "backend",
+      "label": "tk_command",
+      "sublabel": "deadline · 6-output snapshot",
+      "tag": "50 ms command",
+      "pos": [940, 200],
+      "size": [170, 78]
+    },
+    {
+      "id": "ipc_channel",
+      "type": "messagebus",
+      "label": "RA8P1 IPC channel 0",
+      "sublabel": "32-bit staged message FIFO",
+      "tag": "SEQUENCE = commit",
+      "pos": [940, 390],
+      "size": [170, 78]
+    },
+    {
+      "id": "cpu1_control",
+      "type": "backend",
+      "label": "actuator_app",
+      "sublabel": "1 ms loop · limits · safe stop",
+      "tag": "Cortex-M33 · bare metal",
+      "pos": [710, 390],
+      "size": [180, 78]
+    },
+    {
+      "id": "cpu1_drivers",
+      "type": "backend",
+      "label": "CPU1 drivers",
+      "sublabel": "servo · DC motor · encoder",
+      "tag": "FSP / BSP",
+      "pos": [710, 570],
+      "size": [180, 78]
+    },
+    {
+      "id": "rover_hardware",
+      "type": "external",
+      "label": "Rover actuators",
+      "sublabel": "4 servos · 2 BTS7960 · 6 motors",
+      "tag": "2 representative encoders",
+      "pos": [940, 570],
+      "size": [190, 78]
+    },
+    {
+      "id": "rover_monitor",
+      "type": "frontend",
+      "label": "rover-monitor",
+      "sublabel": "FastAPI · WebSocket · browser UI",
+      "tag": "PC · UDP :5005",
+      "pos": [40, 570],
+      "size": [190, 78]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "ReSpeaker XVF3800 + XIAO ESP32S3",
+      "wraps": ["xvf3800", "esp_audio", "esp_gateway"],
+      "pad": 22
+    },
+    {
+      "kind": "region",
+      "label": "RA8P1 CPU0 · Cortex-M85 · μT-Kernel",
+      "wraps": ["cpu0_startup", "cpu0_audio", "cpu0_think", "cpu0_command"],
+      "pad": 22
+    },
+    {
+      "kind": "region",
+      "label": "RA8P1 CPU1 · Cortex-M33",
+      "wraps": ["cpu1_control", "cpu1_drivers"],
+      "pad": 22
+    }
+  ],
+  "connections": [
+    {
+      "id": "xvf-to-frontend",
+      "from": "xvf3800",
+      "to": "esp_audio",
+      "label": "I²C DoA/VAD · I²S PCM",
+      "labelAt": [225, 310],
+      "variant": "emphasis"
+    },
+    {
+      "id": "frontend-to-audio",
+      "from": "esp_audio",
+      "to": "cpu0_audio",
+      "label": "USB CDC · audio frames",
+      "labelAt": [455, 160],
+      "variant": "emphasis"
+    },
+    {
+      "id": "audio-to-think",
+      "from": "cpu0_audio",
+      "to": "cpu0_think",
+      "label": "mutex snapshot",
+      "labelAt": [680, 310],
+      "variant": "emphasis"
+    },
+    {
+      "id": "think-to-command",
+      "from": "cpu0_think",
+      "to": "cpu0_command",
+      "label": "rover_motion_target_t",
+      "labelAt": [910, 310],
+      "variant": "emphasis"
+    },
+    {
+      "id": "command-to-ipc",
+      "from": "cpu0_command",
+      "to": "ipc_channel",
+      "label": "32-bit words · SEQUENCE commit",
+      "labelAt": [1090, 335],
+      "variant": "emphasis"
+    },
+    {
+      "id": "ipc-to-control",
+      "from": "ipc_channel",
+      "to": "cpu1_control",
+      "label": "IRQ · committed snapshot",
+      "labelAt": [915, 490],
+      "variant": "emphasis"
+    },
+    {
+      "id": "control-to-drivers",
+      "from": "cpu1_control",
+      "to": "cpu1_drivers",
+      "label": "bounded targets · 1 ms",
+      "labelAt": [860, 520]
+    },
+    {
+      "id": "drivers-to-hardware",
+      "from": "cpu1_drivers",
+      "to": "rover_hardware",
+      "label": "PWM / GPIO",
+      "labelAt": [915, 550]
+    },
+    {
+      "id": "hardware-to-drivers",
+      "from": "rover_hardware",
+      "to": "cpu1_drivers",
+      "label": "encoder A/B",
+      "labelAt": [915, 670],
+      "variant": "dashed"
+    },
+    {
+      "id": "audio-to-gateway",
+      "from": "cpu0_audio",
+      "to": "esp_gateway",
+      "label": "USB CDC · rover telemetry",
+      "variant": "dashed"
+    },
+    {
+      "id": "gateway-to-monitor",
+      "from": "esp_gateway",
+      "to": "rover_monitor",
+      "label": "Wi-Fi UDP JSON · :5005",
+      "labelAt": [145, 550],
+      "variant": "dashed"
+    },
+    {
+      "id": "startup-to-audio",
+      "from": "cpu0_startup",
+      "to": "cpu0_audio",
+      "variant": "dashed"
+    },
+    {
+      "id": "startup-to-think",
+      "from": "cpu0_startup",
+      "to": "cpu0_think",
+      "variant": "dashed"
+    },
+    {
+      "id": "startup-to-command",
+      "from": "cpu0_startup",
+      "to": "cpu0_command",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "音響から判断",
+      "items": [
+        "XVF3800がDoA/VAD/PCMを生成し、ESP32S3がCRC付き観測へ整形",
+        "CPU0はtk_audio、tk_think、tk_commandをmutex snapshotで分離"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "実時間アクチュエータ",
+      "items": [
+        "SEQUENCEをcommit markerとして6出力をCPU1へ一括確定",
+        "CPU1は1 ms周期で制限・timeout・safe stop・PWM・encoderを担当"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "診断と現在の境界",
+      "items": [
+        "CPU0 telemetryはUSBでESP32S3へ戻り、UDP JSONでPCへ送信",
+        "CPU1実RPMの逆方向IPCと購入センサー群は現行コードでは未実装"
+      ]
+    }
+  ]
+}

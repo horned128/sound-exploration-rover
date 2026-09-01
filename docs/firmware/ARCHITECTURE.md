@@ -2,6 +2,8 @@
 
 最終更新: 2026-08-24 / 対象: RA8P1 CPU0/CPU1、ReSpeaker/XIAO統合の現行ファームウェア実装
 
+現行ソースに対応するインタラクティブな全体図は、[現行コード構造図](archify/SEROV_ARCHITECTURE.html)を参照する。
+
 ## 1. 目的と設計方針
 
 この文書は、Sound Exploration Roverについて、XVF3800、XIAO ESP32S3、RA8P1 CPU0/CPU1の責務、μT-Kernelタスク、USB音響入力、CPU間通信、アクチュエータ制御、安全動作、FSP生成コードとの境界を現行ソースに対応させて説明する。ReSpeakerの配線、USB protocol、DoA校正、段階試験の詳細は[ReSpeaker統合設計](RESPEAKER_INTEGRATION.md)に分離する。
