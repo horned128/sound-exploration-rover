@@ -82,9 +82,9 @@
     {
       "id": "cpu1_control",
       "type": "backend",
-      "label": "actuator_app",
-      "sublabel": "1 ms loop · limits · safe stop",
-      "tag": "Cortex-M33 · bare metal",
+      "label": "tk_actuator",
+      "sublabel": "1 ms task · limits · safe stop",
+      "tag": "Cortex-M33 · μT-Kernel",
       "pos": [710, 390],
       "size": [180, 78]
     },

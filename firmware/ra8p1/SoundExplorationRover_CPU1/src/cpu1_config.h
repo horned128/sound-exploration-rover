@@ -5,12 +5,22 @@
 #ifndef SEROV_CPU1_CONFIG_H
 #define SEROV_CPU1_CONFIG_H
 
-#include "../../../common/ipc_message.h"                    /* CPU間通信で共有するサーボ数 */
+#include "../../common/ipc_message.h"                       /* CPU間通信で共有するサーボ数 */
 #include "hal_data.h"                                       /* FSP生成のHAL/BSPインスタンス、ピン定義、周辺機器設定 */
 
 /* 安全設定と周期設定。CPU0指令タスクは現在50 ms周期で指令を送信する。 */
 #define ACTUATOR_COMMAND_TIMEOUT_MS        (1500U)
 #define ACTUATOR_LOOP_PERIOD_MS            (1U)
+
+/* 数値が小さいほど高優先度。1 msアクチュエータ処理を状態表示より優先する。 */
+#define CPU1_ACTUATOR_TASK_PRIORITY        (4)
+#define CPU1_STATUS_TASK_PRIORITY          (12)
+#define CPU1_ACTUATOR_TASK_STACK_SIZE      (2048U)
+#define CPU1_STATUS_TASK_STACK_SIZE        (512U)
+#define CPU1_STATUS_TASK_PERIOD_MS         (10U)
+#define CPU1_STATUS_LED_INDEX              (2U)
+#define CPU1_STATUS_HEARTBEAT_PERIOD_MS    (500U)
+#define CPU1_STATUS_FAULT_BLINK_PERIOD_MS  (50U)
 
 /* 操舵サーボ設定。DS3225MGの180度範囲から安全側の範囲を使用する。 */
 #define SERVO_PWM_PERIOD_US                (20000U)

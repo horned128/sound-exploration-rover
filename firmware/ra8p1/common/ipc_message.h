@@ -5,8 +5,7 @@
 #ifndef SEROV_IPC_MESSAGE_H
 #define SEROV_IPC_MESSAGE_H
 
-#include <stdbool.h>                                        /* bool型 */
-#include <stdint.h>                                         /* 固定幅整数型 */
+#include <tk/tkernel.h>                                     /* μT-Kernelの基本型、インライン定義 */
 
 #define ACTUATOR_SERVO_COUNT                  (4U)
 
@@ -14,12 +13,12 @@
 
 /* CPU0からCPU1へ送る意味ベースのアクチュエータ指令。 */
 typedef struct st_actuator_command {
-    int16_t  left_target_rpm;
-    int16_t  right_target_rpm;
-    int16_t  servo_target_deg[ACTUATOR_SERVO_COUNT];
-    uint8_t  actuator_enable;
-    uint8_t  emergency_stop;
-    uint32_t sequence_number;
+    H  left_target_rpm;
+    H  right_target_rpm;
+    H  servo_target_deg[ACTUATOR_SERVO_COUNT];
+    UB actuator_enable;
+    UB emergency_stop;
+    UW sequence_number;
 } actuator_command_t;
 
 typedef enum e_actuator_fault {
@@ -56,7 +55,7 @@ typedef enum e_actuator_ipc_message_id {
  * @brief  安全アクチュエータ指令生成
  * @return 緊急停止状態の指令
  * ================================================================= */
-static inline actuator_command_t actuator_command_make_safe(void) {
+Inline actuator_command_t actuator_command_make_safe(void) {
     actuator_command_t command = {0};
     command.emergency_stop = 1U;
     return command;
@@ -68,8 +67,8 @@ static inline actuator_command_t actuator_command_make_safe(void) {
  * @param[in] payload 24 bitペイロード
  * @return エンコード済みIPC通信語
  * ================================================================= */
-static inline uint32_t actuator_ipc_make_word(actuator_ipc_message_id_t id, uint32_t payload) {
-    return ((uint32_t) id << ACTUATOR_IPC_MESSAGE_ID_SHIFT) |
+Inline UW actuator_ipc_make_word(actuator_ipc_message_id_t id, UW payload) {
+    return ((UW) id << ACTUATOR_IPC_MESSAGE_ID_SHIFT) |
            (payload & ACTUATOR_IPC_PAYLOAD_MASK);
 }
 
@@ -79,8 +78,8 @@ static inline uint32_t actuator_ipc_make_word(actuator_ipc_message_id_t id, uint
  * @param[in] emergency_stop 緊急停止状態
  * @return 制御指令のIPC通信語
  * ================================================================= */
-static inline uint32_t actuator_ipc_make_control_word(bool enable, bool emergency_stop) {
-    uint32_t payload = enable ? ACTUATOR_CONTROL_ENABLE_MASK : 0U;
+Inline UW actuator_ipc_make_control_word(BOOL enable, BOOL emergency_stop) {
+    UW payload = enable ? ACTUATOR_CONTROL_ENABLE_MASK : 0U;
     payload |= emergency_stop ? ACTUATOR_CONTROL_EMERGENCY_STOP_MASK : 0U;
     return actuator_ipc_make_word(ACTUATOR_IPC_COMMAND_CONTROL, payload);
 }
@@ -91,8 +90,8 @@ static inline uint32_t actuator_ipc_make_control_word(bool enable, bool emergenc
  * @param[in] value 符号付き16 bit値
  * @return 16 bit値を含むIPC通信語
  * ================================================================= */
-static inline uint32_t actuator_ipc_make_i16_word(actuator_ipc_message_id_t id, int16_t value) {
-    return actuator_ipc_make_word(id, (uint32_t) (uint16_t) value);
+Inline UW actuator_ipc_make_i16_word(actuator_ipc_message_id_t id, H value) {
+    return actuator_ipc_make_word(id, (UW) (UH) value);
 }
 
 /** =================================================================*
@@ -100,7 +99,7 @@ static inline uint32_t actuator_ipc_make_i16_word(actuator_ipc_message_id_t id, 
  * @param[in] sequence_number シーケンス番号
  * @return シーケンス番号を含むIPC通信語
  * ================================================================= */
-static inline uint32_t actuator_ipc_make_sequence_word(uint32_t sequence_number) {
+Inline UW actuator_ipc_make_sequence_word(UW sequence_number) {
     return actuator_ipc_make_word(ACTUATOR_IPC_COMMAND_SEQUENCE,
                                   sequence_number & ACTUATOR_IPC_SEQUENCE_MASK);
 }
@@ -110,7 +109,7 @@ static inline uint32_t actuator_ipc_make_sequence_word(uint32_t sequence_number)
  * @param[in] word IPC通信語
  * @return メッセージID
  * ================================================================= */
-static inline actuator_ipc_message_id_t actuator_ipc_get_message_id(uint32_t word) {
+Inline actuator_ipc_message_id_t actuator_ipc_get_message_id(UW word) {
     return (actuator_ipc_message_id_t) ((word & ACTUATOR_IPC_MESSAGE_ID_MASK) >>
                                         ACTUATOR_IPC_MESSAGE_ID_SHIFT);
 }
@@ -120,7 +119,7 @@ static inline actuator_ipc_message_id_t actuator_ipc_get_message_id(uint32_t wor
  * @param[in] word IPC通信語
  * @return 24 bitペイロード
  * ================================================================= */
-static inline uint32_t actuator_ipc_get_payload(uint32_t word) {
+Inline UW actuator_ipc_get_payload(UW word) {
     return word & ACTUATOR_IPC_PAYLOAD_MASK;
 }
 
@@ -129,8 +128,8 @@ static inline uint32_t actuator_ipc_get_payload(uint32_t word) {
  * @param[in] word IPC通信語
  * @return 符号付き16 bit値
  * ================================================================= */
-static inline int16_t actuator_ipc_get_i16_payload(uint32_t word) {
-    return (int16_t) (uint16_t) actuator_ipc_get_payload(word);
+Inline H actuator_ipc_get_i16_payload(UW word) {
+    return (H) (UH) actuator_ipc_get_payload(word);
 }
 
 #endif /* SEROV_IPC_MESSAGE_H */

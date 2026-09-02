@@ -1,6 +1,6 @@
 [submodule "hardware/papaya-pathfinder"]
 	path = hardware/papaya-pathfinder
 	url = https://github.com/tronxi/papaya-pathfinder.git
-[submodule "firmware/ra8p1/SoundExplorationRover_CPU0/mtk3_bsp2"]
-	path = firmware/ra8p1/SoundExplorationRover_CPU0/mtk3_bsp2
+[submodule "firmware/ra8p1/common/mtk3_bsp2"]
+	path = firmware/ra8p1/common/mtk3_bsp2
 	url = https://github.com/tron-forum/mtk3_bsp2.git

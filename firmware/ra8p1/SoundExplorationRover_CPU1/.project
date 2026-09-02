@@ -42,4 +42,21 @@
 		<nature>com.renesas.cdt.managedbuild.jsoncdb.compilationdatabase.CompileCommandsNature</nature>
 		<nature>com.renesas.cdt.ra.contentgen.raNature</nature>
 	</natures>
+	<linkedResources>
+		<link>
+			<name>mtk3_bsp2</name>
+			<type>2</type>
+			<locationURI>PARENT-1-PROJECT_LOC/common/mtk3_bsp2</locationURI>
+		</link>
+		<link>
+			<name>shared</name>
+			<type>2</type>
+			<locationURI>PARENT-2-PROJECT_LOC/common</locationURI>
+		</link>
+		<link>
+			<name>mtkernel_config</name>
+			<type>2</type>
+			<locationURI>PARENT-1-PROJECT_LOC/common/mtkernel</locationURI>
+		</link>
+	</linkedResources>
 </projectDescription>

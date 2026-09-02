@@ -6,8 +6,7 @@
 #define SEROV_CPU0_SOUND_FOLLOW_CONTROLLER_H
 
 #include "../../../../../common/acoustic_protocol.h"        /* 音響観測型 */
-#include <stdbool.h>                                        /* 真偽値 */
-#include <stdint.h>                                         /* 固定幅整数型 */
+#include <tk/tkernel.h>                                     /* μT-Kernel基本型と公開範囲マクロ */
 
 typedef enum e_cpu0_think_state {
     CPU0_THINK_STATE_WAIT_LINK = 0,
@@ -20,25 +19,25 @@ typedef enum e_cpu0_think_state {
 } cpu0_think_state_t;
 
 typedef struct st_sound_follow_input {
-    bool link_ready;
-    bool new_observation;
-    bool fault_active;
+    BOOL link_ready;
+    BOOL new_observation;
+    BOOL fault_active;
     acoustic_observation_t observation;
 } sound_follow_input_t;
 
 typedef struct st_sound_follow_output {
     cpu0_think_state_t state;
-    int16_t steering_deg;
-    int16_t left_rpm;
-    int16_t right_rpm;
-    bool actuator_enable;
-    bool emergency_stop;
+    H steering_deg;
+    H left_rpm;
+    H right_rpm;
+    BOOL actuator_enable;
+    BOOL emergency_stop;
 } sound_follow_output_t;
 
-void sound_follow_controller_init(void);                    /* 追従状態初期化 */
+EXPORT void sound_follow_controller_init(void);                    /* 追従状態初期化 */
 /* 追従状態更新 */
-void sound_follow_controller_step(const sound_follow_input_t * p_input,
-                                  uint32_t elapsed_ms,
+EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input,
+                                  UW elapsed_ms,
                                   sound_follow_output_t * p_output);
 
 #endif /* SEROV_CPU0_SOUND_FOLLOW_CONTROLLER_H */

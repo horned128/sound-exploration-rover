@@ -7,7 +7,7 @@
 #include <tk/tkernel.h>                                     /* μT-Kernelのタスク遅延API */
 
 /**< CPU1へ送るサーボ目標角メッセージID */
-static actuator_ipc_message_id_t const servo_target_message_ids[ACTUATOR_SERVO_COUNT] = {
+LOCAL actuator_ipc_message_id_t const servo_target_message_ids[ACTUATOR_SERVO_COUNT] = {
     ACTUATOR_IPC_COMMAND_FR_TARGET_DEG,
     ACTUATOR_IPC_COMMAND_FL_TARGET_DEG,
     ACTUATOR_IPC_COMMAND_RR_TARGET_DEG,
@@ -19,7 +19,7 @@ static actuator_ipc_message_id_t const servo_target_message_ids[ACTUATOR_SERVO_C
  * @param[in] word 送信する32 bitワード
  * @return FSPエラーコード
  * ================================================================= */
-static fsp_err_t actuator_ipc_send_word(uint32_t word) {
+LOCAL fsp_err_t actuator_ipc_send_word(UW word) {
     fsp_err_t err;
 
     do {
@@ -36,7 +36,7 @@ static fsp_err_t actuator_ipc_send_word(uint32_t word) {
  * @brief  IPCクライアント初期化
  * @return FSPエラーコード
  * ================================================================= */
-fsp_err_t actuator_ipc_client_init(void) {
+EXPORT fsp_err_t actuator_ipc_client_init(void) {
     return g_actuator_ipc.p_api->open(g_actuator_ipc.p_ctrl, g_actuator_ipc.p_cfg);
 }
 
@@ -44,7 +44,7 @@ fsp_err_t actuator_ipc_client_init(void) {
  * @brief  IPCクライアント終了
  * @return FSPエラーコード
  * ================================================================= */
-fsp_err_t actuator_ipc_client_deinit(void) {
+EXPORT fsp_err_t actuator_ipc_client_deinit(void) {
     return g_actuator_ipc.p_api->close(g_actuator_ipc.p_ctrl);
 }
 
@@ -53,7 +53,7 @@ fsp_err_t actuator_ipc_client_deinit(void) {
  * @param[in] p_command CPU1へ送信する指令
  * @return FSPエラーコード
  * ================================================================= */
-fsp_err_t actuator_ipc_client_send(const actuator_command_t * p_command) {
+EXPORT fsp_err_t actuator_ipc_client_send(const actuator_command_t * p_command) {
     if (NULL == p_command) {
         return FSP_ERR_INVALID_POINTER;
     }
@@ -70,7 +70,7 @@ fsp_err_t actuator_ipc_client_send(const actuator_command_t * p_command) {
         err = actuator_ipc_send_word(
             actuator_ipc_make_i16_word(ACTUATOR_IPC_COMMAND_RIGHT_TARGET_RPM, p_command->right_target_rpm));
     }
-    for (uint32_t i = 0U; (FSP_SUCCESS == err) && (i < ACTUATOR_SERVO_COUNT); i++) {
+    for (UW i = 0U; (FSP_SUCCESS == err) && (i < ACTUATOR_SERVO_COUNT); i++) {
         err = actuator_ipc_send_word(
             actuator_ipc_make_i16_word(servo_target_message_ids[i], p_command->servo_target_deg[i]));
     }
@@ -87,8 +87,8 @@ fsp_err_t actuator_ipc_client_send(const actuator_command_t * p_command) {
  * @param[in] sequence_number 緊急停止指令のシーケンス番号
  * @return FSPエラーコード
  * ================================================================= */
-fsp_err_t actuator_ipc_client_emergency_stop(uint32_t sequence_number) {
-    fsp_err_t err = actuator_ipc_send_word(actuator_ipc_make_control_word(false, true));
+EXPORT fsp_err_t actuator_ipc_client_emergency_stop(UW sequence_number) {
+    fsp_err_t err = actuator_ipc_send_word(actuator_ipc_make_control_word(FALSE, TRUE));
     if (FSP_SUCCESS == err) {
         err = actuator_ipc_send_word(actuator_ipc_make_sequence_word(sequence_number));
     }

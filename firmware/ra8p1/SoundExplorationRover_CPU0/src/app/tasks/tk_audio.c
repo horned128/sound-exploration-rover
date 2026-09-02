@@ -14,26 +14,26 @@
 #define CPU0_AUDIO_GET_LINE_CODING         (USB_CDC_GET_LINE_CODING | USB_DEV_TO_HOST | USB_CLASS | USB_INTERFACE)
 #define CPU0_AUDIO_LINE_CODING_LENGTH      (7U)
 
-static void cpu0_audio_task(INT stacd, void * exinf);       /* 音響タスク本体 */
-static uint32_t cpu0_audio_monotonic_ms(void);              /* カーネル単調時刻取得 */
-static void cpu0_audio_link_reset(void);                    /* 音響リンク状態初期化 */
-static void cpu0_audio_observation_reset(void);             /* 旧音響観測無効化 */
-static fsp_err_t cpu0_audio_control_start(void);            /* CDC class request開始 */
-static void cpu0_audio_control_complete(const usb_event_info_t * p_event_info); /* CDC class request完了 */
-static fsp_err_t cpu0_audio_read_start(void);               /* USB Bulk IN開始 */
-static fsp_err_t cpu0_audio_telemetry_start(void);          /* USB Bulk OUT開始 */
-static void cpu0_audio_receive(uint32_t length);            /* USB受信データ処理 */
-static void cpu0_audio_frame_handle(const acoustic_frame_t * p_frame); /* 正常フレーム反映 */
-static bool cpu0_audio_sequence_accept(uint32_t sequence);  /* sequence新旧判定 */
+LOCAL void cpu0_audio_task(INT stacd, void * exinf);       /* 音響タスク本体 */
+LOCAL UW cpu0_audio_monotonic_ms(void);              /* カーネル単調時刻取得 */
+LOCAL void cpu0_audio_link_reset(void);                    /* 音響リンク状態初期化 */
+LOCAL void cpu0_audio_observation_reset(void);             /* 旧音響観測無効化 */
+LOCAL fsp_err_t cpu0_audio_control_start(void);            /* CDC class request開始 */
+LOCAL void cpu0_audio_control_complete(const usb_event_info_t * p_event_info); /* CDC class request完了 */
+LOCAL fsp_err_t cpu0_audio_read_start(void);               /* USB Bulk IN開始 */
+LOCAL fsp_err_t cpu0_audio_telemetry_start(void);          /* USB Bulk OUT開始 */
+LOCAL void cpu0_audio_receive(UW length);            /* USB受信データ処理 */
+LOCAL void cpu0_audio_frame_handle(const acoustic_frame_t * p_frame); /* 正常フレーム反映 */
+LOCAL BOOL cpu0_audio_sequence_accept(UW sequence);  /* sequence新旧判定 */
 
 /**< 音響状態を保護するμT-Kernel mutex設定 */
-static T_CMTX const audio_mutex_config = {
+LOCAL T_CMTX const audio_mutex_config = {
     .mtxatr = TA_INHERIT,
     .ceilpri = 0,
 };
 
 /**< 音響受信タスク設定 */
-static T_CTSK const audio_task_config = {
+LOCAL T_CTSK const audio_task_config = {
     .exinf = NULL,
     .tskatr = TA_HLNG | TA_RNG3,
     .task = (FP) cpu0_audio_task,
@@ -42,63 +42,63 @@ static T_CTSK const audio_task_config = {
     .bufptr = NULL,
 };
 
-static ID audio_task_id;                                    /**< 音響タスクID */
-static ID audio_mutex_id;                                   /**< 音響状態保護mutex ID */
-static bool audio_task_started;                             /**< 音響タスク開始状態 */
-static bool audio_usb_open;                                 /**< USBドライバopen状態 */
-static bool audio_read_pending;                             /**< Bulk IN要求実行中 */
-static bool audio_write_pending;                            /**< Bulk OUT要求実行中 */
-static bool audio_control_pending;                          /**< CDC class request実行中 */
-static bool audio_sequence_valid;                           /**< sequence初回受信済み */
-static bool audio_boot_id_valid;                            /**< boot ID初回受信済み */
-static uint8_t audio_device_address;                        /**< CDCデバイスアドレス */
-static uint32_t audio_now_ms;                               /**< 音響タスク単調時刻 */
-static uint32_t audio_configured_at_ms;                     /**< USB列挙時刻 */
-static uint32_t audio_observation_at_ms;                    /**< 最終観測受信時刻 */
-static uint32_t audio_last_sequence;                        /**< 最終受信sequence */
-static uint32_t audio_observation_sequence;                 /**< 最終観測sequence */
-static uint32_t audio_telemetry_sequence;                   /**< 診断送信sequence */
-static uint32_t audio_last_telemetry_ms;                    /**< 最終診断送信要求時刻 */
-static uint32_t audio_boot_id;                              /**< ESP32 boot ID */
-static acoustic_protocol_parser_t audio_parser;             /**< CDCストリームパーサー */
-static acoustic_hello_t audio_hello;                        /**< 最新HELLO */
-static acoustic_health_t audio_health;                      /**< 最新HEALTH */
+LOCAL ID audio_task_id;                                    /**< 音響タスクID */
+LOCAL ID audio_mutex_id;                                   /**< 音響状態保護mutex ID */
+LOCAL BOOL audio_task_started;                             /**< 音響タスク開始状態 */
+LOCAL BOOL audio_usb_open;                                 /**< USBドライバopen状態 */
+LOCAL BOOL audio_read_pending;                             /**< Bulk IN要求実行中 */
+LOCAL BOOL audio_write_pending;                            /**< Bulk OUT要求実行中 */
+LOCAL BOOL audio_control_pending;                          /**< CDC class request実行中 */
+LOCAL BOOL audio_sequence_valid;                           /**< sequence初回受信済み */
+LOCAL BOOL audio_boot_id_valid;                            /**< boot ID初回受信済み */
+LOCAL UB audio_device_address;                        /**< CDCデバイスアドレス */
+LOCAL UW audio_now_ms;                               /**< 音響タスク単調時刻 */
+LOCAL UW audio_configured_at_ms;                     /**< USB列挙時刻 */
+LOCAL UW audio_observation_at_ms;                    /**< 最終観測受信時刻 */
+LOCAL UW audio_last_sequence;                        /**< 最終受信sequence */
+LOCAL UW audio_observation_sequence;                 /**< 最終観測sequence */
+LOCAL UW audio_telemetry_sequence;                   /**< 診断送信sequence */
+LOCAL UW audio_last_telemetry_ms;                    /**< 最終診断送信要求時刻 */
+LOCAL UW audio_boot_id;                              /**< ESP32 boot ID */
+LOCAL acoustic_protocol_parser_t audio_parser;             /**< CDCストリームパーサー */
+LOCAL acoustic_hello_t audio_hello;                        /**< 最新HELLO */
+LOCAL acoustic_health_t audio_health;                      /**< 最新HEALTH */
 /**< CDC仮想UART設定 */
-static usb_hcdc_linecoding_t audio_line_coding = {
+LOCAL usb_hcdc_linecoding_t audio_line_coding = {
     .dwdte_rate = USB_HCDC_SPEED_115200,
     .bchar_format = USB_HCDC_STOP_BIT_1,
     .bparity_type = USB_HCDC_PARITY_BIT_NONE,
     .bdata_bits = USB_HCDC_DATA_BIT_8,
     .rsv = 0U,
 };
-static uint8_t audio_control_dummy;                         /**< data無しcontrol転送用 */
-static uint8_t audio_rx_buffer[CPU0_AUDIO_USB_RX_SIZE];     /**< USB Bulk INバッファ */
+LOCAL UB audio_control_dummy;                         /**< data無しcontrol転送用 */
+LOCAL UB audio_rx_buffer[CPU0_AUDIO_USB_RX_SIZE];     /**< USB Bulk INバッファ */
 /**< USB Bulk OUTバッファ */
-static uint8_t audio_tx_buffer[ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE];
+LOCAL UB audio_tx_buffer[ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE];
 
-volatile bool g_cpu0_audio_usb_configured;                  /**< USB列挙状態 */
-volatile cpu0_audio_usb_state_t g_cpu0_audio_usb_state;     /**< CDC初期化段階 */
-volatile usb_status_t g_cpu0_audio_last_event;              /**< 最終USBイベント */
-volatile uint8_t g_cpu0_audio_device_address;               /**< CDCアドレス */
-volatile uint32_t g_cpu0_audio_event_count;                 /**< USBイベント数 */
-volatile uint32_t g_cpu0_audio_transfer_busy_count;         /**< USB転送BUSY回数 */
-volatile bool g_cpu0_audio_hello_received;                  /**< HELLO受信状態 */
-volatile uint32_t g_cpu0_audio_frame_count;                 /**< 正常フレーム数 */
-volatile uint32_t g_cpu0_audio_crc_error_count;             /**< CRC異常数 */
-volatile uint32_t g_cpu0_audio_format_error_count;          /**< 形式異常数 */
-volatile uint32_t g_cpu0_audio_sequence_drop_count;         /**< 逆行sequence数 */
-volatile uint32_t g_cpu0_audio_observation_age_ms;          /**< 観測経過時間 */
-volatile uint32_t g_cpu0_audio_telemetry_send_count;        /**< 診断送信完了数 */
-volatile uint32_t g_cpu0_audio_telemetry_busy_count;        /**< 診断送信BUSY数 */
-volatile acoustic_observation_t g_cpu0_audio_observation;   /**< 最新音響観測 */
-volatile fsp_err_t g_cpu0_audio_last_error;                 /**< 最終USBエラー */
+EXPORT volatile BOOL g_cpu0_audio_usb_configured;                  /**< USB列挙状態 */
+EXPORT volatile cpu0_audio_usb_state_t g_cpu0_audio_usb_state;     /**< CDC初期化段階 */
+EXPORT volatile usb_status_t g_cpu0_audio_last_event;              /**< 最終USBイベント */
+EXPORT volatile UB g_cpu0_audio_device_address;               /**< CDCアドレス */
+EXPORT volatile UW g_cpu0_audio_event_count;                 /**< USBイベント数 */
+EXPORT volatile UW g_cpu0_audio_transfer_busy_count;         /**< USB転送BUSY回数 */
+EXPORT volatile BOOL g_cpu0_audio_hello_received;                  /**< HELLO受信状態 */
+EXPORT volatile UW g_cpu0_audio_frame_count;                 /**< 正常フレーム数 */
+EXPORT volatile UW g_cpu0_audio_crc_error_count;             /**< CRC異常数 */
+EXPORT volatile UW g_cpu0_audio_format_error_count;          /**< 形式異常数 */
+EXPORT volatile UW g_cpu0_audio_sequence_drop_count;         /**< 逆行sequence数 */
+EXPORT volatile UW g_cpu0_audio_observation_age_ms;          /**< 観測経過時間 */
+EXPORT volatile UW g_cpu0_audio_telemetry_send_count;        /**< 診断送信完了数 */
+EXPORT volatile UW g_cpu0_audio_telemetry_busy_count;        /**< 診断送信BUSY数 */
+EXPORT volatile acoustic_observation_t g_cpu0_audio_observation;   /**< 最新音響観測 */
+EXPORT volatile fsp_err_t g_cpu0_audio_last_error;                 /**< 最終USBエラー */
 
 /** =================================================================*
  * @brief  カーネルの単調時刻を32bitミリ秒で取得
  * @details 32bit wrap後も符号なし差分で経過時間を計算できる。
  * @return システム起動後の単調時刻
  * ================================================================= */
-static uint32_t cpu0_audio_monotonic_ms(void) {
+LOCAL UW cpu0_audio_monotonic_ms(void) {
     SYSTIM system_time = {0};
     if (E_OK == tk_get_otm(&system_time)) {
         return system_time.lo;
@@ -111,14 +111,14 @@ static uint32_t cpu0_audio_monotonic_ms(void) {
  * @brief  音響タスクと共有資源生成
  * @return CPU0異常コード
  * ================================================================= */
-cpu0_fault_t cpu0_audio_task_create(void) {
+EXPORT cpu0_fault_t cpu0_audio_task_create(void) {
     audio_task_id = 0;
     audio_mutex_id = 0;
-    audio_task_started = false;
-    audio_usb_open = false;
-    audio_read_pending = false;
-    audio_write_pending = false;
-    audio_control_pending = false;
+    audio_task_started = FALSE;
+    audio_usb_open = FALSE;
+    audio_read_pending = FALSE;
+    audio_write_pending = FALSE;
+    audio_control_pending = FALSE;
     audio_now_ms = 0U;
     g_cpu0_audio_usb_state = CPU0_AUDIO_USB_STATE_CLOSED;
     g_cpu0_audio_last_event = (usb_status_t) 0U;
@@ -154,7 +154,7 @@ cpu0_fault_t cpu0_audio_task_create(void) {
  * @brief  音響タスク開始
  * @return CPU0異常コード
  * ================================================================= */
-cpu0_fault_t cpu0_audio_task_start(void) {
+EXPORT cpu0_fault_t cpu0_audio_task_start(void) {
     if (audio_task_id <= 0) {
         return CPU0_FAULT_TASK_CREATE;
     }
@@ -163,26 +163,26 @@ cpu0_fault_t cpu0_audio_task_start(void) {
     if (E_OK != err) {
         return CPU0_FAULT_TASK_START;
     }
-    audio_task_started = true;
+    audio_task_started = TRUE;
     return CPU0_FAULT_NONE;
 }
 
 /** =================================================================*
  * @brief  音響タスクと共有資源解放
  * ================================================================= */
-void cpu0_audio_task_delete(void) {
+EXPORT void cpu0_audio_task_delete(void) {
     if (audio_task_id > 0) {
         if (audio_task_started) {
             (void) tk_ter_tsk(audio_task_id);
         }
         (void) tk_del_tsk(audio_task_id);
         audio_task_id = 0;
-        audio_task_started = false;
+        audio_task_started = FALSE;
     }
 
     if (audio_usb_open) {
         (void) g_usb_on_usb.close(&g_basic0_ctrl);
-        audio_usb_open = false;
+        audio_usb_open = FALSE;
     }
 
     if (audio_mutex_id > 0) {
@@ -195,18 +195,18 @@ void cpu0_audio_task_delete(void) {
  * @brief  音響リンク状態初期化
  * @details USB切断後の古い観測が走行判断へ残らないよう無効化する。
  * ================================================================= */
-static void cpu0_audio_link_reset(void) {
-    g_cpu0_audio_usb_configured = false;
+LOCAL void cpu0_audio_link_reset(void) {
+    g_cpu0_audio_usb_configured = FALSE;
     g_cpu0_audio_usb_state = audio_usb_open ? CPU0_AUDIO_USB_STATE_WAIT_DEVICE : CPU0_AUDIO_USB_STATE_CLOSED;
     g_cpu0_audio_device_address = 0U;
-    g_cpu0_audio_hello_received = false;
+    g_cpu0_audio_hello_received = FALSE;
     cpu0_audio_observation_reset();
     memset(&audio_hello, 0, sizeof(audio_hello));
-    audio_sequence_valid = false;
-    audio_boot_id_valid = false;
-    audio_read_pending = false;
-    audio_write_pending = false;
-    audio_control_pending = false;
+    audio_sequence_valid = FALSE;
+    audio_boot_id_valid = FALSE;
+    audio_read_pending = FALSE;
+    audio_write_pending = FALSE;
+    audio_control_pending = FALSE;
     audio_device_address = 0U;
     audio_configured_at_ms = audio_now_ms;
     audio_last_sequence = 0U;
@@ -221,31 +221,31 @@ static void cpu0_audio_link_reset(void) {
  * @details FSP HCDCの推奨順序で仮想UARTを初期化する。
  * @return FSPエラーコード
  * ================================================================= */
-static fsp_err_t cpu0_audio_control_start(void) {
+LOCAL fsp_err_t cpu0_audio_control_start(void) {
     if (!g_cpu0_audio_usb_configured || (0U == audio_device_address) || audio_control_pending) {
         return FSP_SUCCESS;
     }
 
     usb_setup_t setup = {0};
-    uint8_t * p_data = &audio_control_dummy;
+    UB * p_data = &audio_control_dummy;
 
     if (CPU0_AUDIO_USB_STATE_SET_LINE_CODING == g_cpu0_audio_usb_state) {
         setup.request_type = CPU0_AUDIO_SET_LINE_CODING;
         setup.request_length = CPU0_AUDIO_LINE_CODING_LENGTH;
-        p_data = (uint8_t *) &audio_line_coding;
+        p_data = (UB *) &audio_line_coding;
     } else if (CPU0_AUDIO_USB_STATE_SET_CONTROL_LINE_STATE == g_cpu0_audio_usb_state) {
         setup.request_type = CPU0_AUDIO_SET_CONTROL_LINE_STATE;
     } else if (CPU0_AUDIO_USB_STATE_GET_LINE_CODING == g_cpu0_audio_usb_state) {
         setup.request_type = CPU0_AUDIO_GET_LINE_CODING;
         setup.request_length = CPU0_AUDIO_LINE_CODING_LENGTH;
-        p_data = (uint8_t *) &audio_line_coding;
+        p_data = (UB *) &audio_line_coding;
     } else {
         return FSP_SUCCESS;
     }
 
     fsp_err_t const err = g_usb_on_usb.hostControlTransfer(&g_basic0_ctrl, &setup, p_data, audio_device_address);
     if (FSP_SUCCESS == err) {
-        audio_control_pending = true;
+        audio_control_pending = TRUE;
     } else if (FSP_ERR_USB_BUSY == err) {
         g_cpu0_audio_transfer_busy_count++;
     }
@@ -256,13 +256,13 @@ static fsp_err_t cpu0_audio_control_start(void) {
  * @brief  CDC class request完了
  * @param[in] p_event_info USB request完了情報
  * ================================================================= */
-static void cpu0_audio_control_complete(const usb_event_info_t * p_event_info) {
+LOCAL void cpu0_audio_control_complete(const usb_event_info_t * p_event_info) {
     if ((NULL == p_event_info) || !audio_control_pending) {
         return;
     }
 
-    uint16_t const request = p_event_info->setup.request_type & USB_BREQUEST;
-    audio_control_pending = false;
+    UH const request = p_event_info->setup.request_type & USB_BREQUEST;
+    audio_control_pending = FALSE;
     if (USB_SETUP_STATUS_ACK != p_event_info->status) {
         g_cpu0_audio_last_error = FSP_ERR_USB_FAILED;
         return;
@@ -283,7 +283,7 @@ static void cpu0_audio_control_complete(const usb_event_info_t * p_event_info) {
  * @brief  旧音響観測無効化
  * @details frontend再起動後に再起動前のDoAを走行判断へ渡さない。
  * ================================================================= */
-static void cpu0_audio_observation_reset(void) {
+LOCAL void cpu0_audio_observation_reset(void) {
     g_cpu0_audio_observation_age_ms = UINT32_MAX;
     memset((void *) &g_cpu0_audio_observation, 0, sizeof(g_cpu0_audio_observation));
     g_cpu0_audio_observation.doa_deg = ACOUSTIC_PROTOCOL_DOA_INVALID;
@@ -297,7 +297,7 @@ static void cpu0_audio_observation_reset(void) {
  * @param[out] p_snapshot 音響状態スナップショット
  * @return μT-Kernelエラーコード
  * ================================================================= */
-ER cpu0_audio_snapshot_get(cpu0_audio_snapshot_t * p_snapshot) {
+EXPORT ER cpu0_audio_snapshot_get(cpu0_audio_snapshot_t * p_snapshot) {
     if (NULL == p_snapshot) {
         return E_PAR;
     }
@@ -330,7 +330,7 @@ ER cpu0_audio_snapshot_get(cpu0_audio_snapshot_t * p_snapshot) {
  * @brief  USB Bulk IN開始
  * @return FSPエラーコード
  * ================================================================= */
-static fsp_err_t cpu0_audio_read_start(void) {
+LOCAL fsp_err_t cpu0_audio_read_start(void) {
     if (!g_cpu0_audio_usb_configured || (CPU0_AUDIO_USB_STATE_READY != g_cpu0_audio_usb_state) ||
         (0U == audio_device_address)) {
         return FSP_ERR_NOT_OPEN;
@@ -343,7 +343,7 @@ static fsp_err_t cpu0_audio_read_start(void) {
     fsp_err_t const err =
         g_usb_on_usb.read(&g_basic0_ctrl, audio_rx_buffer, sizeof(audio_rx_buffer), audio_device_address);
     if (FSP_SUCCESS == err) {
-        audio_read_pending = true;
+        audio_read_pending = TRUE;
         return FSP_SUCCESS;
     }
     if (FSP_ERR_USB_BUSY == err) {
@@ -357,7 +357,7 @@ static fsp_err_t cpu0_audio_read_start(void) {
  * @details 音響受信を止めず、最新判断とIPC指令をESP32へ返送する。
  * @return FSPエラーコード
  * ================================================================= */
-static fsp_err_t cpu0_audio_telemetry_start(void) {
+LOCAL fsp_err_t cpu0_audio_telemetry_start(void) {
     if (!g_cpu0_audio_usb_configured || (CPU0_AUDIO_USB_STATE_READY != g_cpu0_audio_usb_state) ||
         (0U == audio_device_address)) {
         return FSP_ERR_NOT_OPEN;
@@ -373,7 +373,7 @@ static fsp_err_t cpu0_audio_telemetry_start(void) {
         return FSP_ERR_USB_BUSY;
     }
 
-    uint8_t flags = 0U;
+    UB flags = 0U;
     if (g_cpu0_audio_usb_configured) {
         flags |= ACOUSTIC_TELEMETRY_FLAG_USB_CONFIGURED;
     }
@@ -401,8 +401,8 @@ static fsp_err_t cpu0_audio_telemetry_start(void) {
 
     acoustic_rover_telemetry_t telemetry = {
         .schema_version = 1U,
-        .think_state = (uint8_t) g_cpu0_think_state,
-        .usb_state = (uint8_t) g_cpu0_audio_usb_state,
+        .think_state = (UB) g_cpu0_think_state,
+        .usb_state = (UB) g_cpu0_audio_usb_state,
         .flags = flags,
         .doa_deg = g_cpu0_audio_observation.doa_deg,
         .level_dbfs_x100 = g_cpu0_audio_observation.level_dbfs_x100,
@@ -422,11 +422,11 @@ static fsp_err_t cpu0_audio_telemetry_start(void) {
         .left_target_rpm = command_snapshot.last_sent_target.left_target_rpm,
         .right_target_rpm = command_snapshot.last_sent_target.right_target_rpm,
         .command_sequence = g_cpu0_command_sequence,
-        .command_last_error = (int32_t) g_cpu0_command_last_error,
+        .command_last_error = (W) g_cpu0_command_last_error,
         .command_target_age_ms = command_snapshot.target_age_ms,
         .command_send_count = g_cpu0_command_send_count,
     };
-    for (uint32_t index = 0U; index < ACTUATOR_SERVO_COUNT; index++) {
+    for (UW index = 0U; index < ACTUATOR_SERVO_COUNT; index++) {
         telemetry.servo_target_deg[index] = command_snapshot.last_sent_target.servo_target_deg[index];
     }
 
@@ -436,9 +436,9 @@ static fsp_err_t cpu0_audio_telemetry_start(void) {
         return FSP_ERR_INVALID_SIZE;
     }
 
-    fsp_err_t const err = g_usb_on_usb.write(&g_basic0_ctrl, audio_tx_buffer, (uint32_t) length, audio_device_address);
+    fsp_err_t const err = g_usb_on_usb.write(&g_basic0_ctrl, audio_tx_buffer, (UW) length, audio_device_address);
     if (FSP_SUCCESS == err) {
-        audio_write_pending = true;
+        audio_write_pending = TRUE;
         audio_last_telemetry_ms = audio_now_ms;
         audio_telemetry_sequence++;
     } else if (FSP_ERR_USB_BUSY == err) {
@@ -449,47 +449,47 @@ static fsp_err_t cpu0_audio_telemetry_start(void) {
 
 /** =================================================================*
  * @brief  sequence新旧判定
- * @details uint32_t wrapを許容し、同値または逆行フレームを破棄する。
+ * @details UW wrapを許容し、同値または逆行フレームを破棄する。
  * @param[in] sequence 受信sequence
  * @return 受理可能ならtrue
  * ================================================================= */
-static bool cpu0_audio_sequence_accept(uint32_t sequence) {
+LOCAL BOOL cpu0_audio_sequence_accept(UW sequence) {
     if (!audio_sequence_valid) {
-        audio_sequence_valid = true;
+        audio_sequence_valid = TRUE;
         audio_last_sequence = sequence;
-        return true;
+        return TRUE;
     }
 
-    if ((int32_t) (sequence - audio_last_sequence) <= 0) {
+    if ((W) (sequence - audio_last_sequence) <= 0) {
         g_cpu0_audio_sequence_drop_count++;
-        return false;
+        return FALSE;
     }
 
     audio_last_sequence = sequence;
-    return true;
+    return TRUE;
 }
 
 /** =================================================================*
  * @brief  正常フレーム反映
  * @param[in] p_frame CRC検証済みフレーム
  * ================================================================= */
-static void cpu0_audio_frame_handle(const acoustic_frame_t * p_frame) {
+LOCAL void cpu0_audio_frame_handle(const acoustic_frame_t * p_frame) {
     acoustic_hello_t hello;
 
     if ((ACOUSTIC_MESSAGE_HELLO == p_frame->type) && acoustic_protocol_decode_hello(p_frame, &hello)) {
         if (audio_boot_id_valid && (audio_boot_id != hello.boot_id)) {
-            audio_sequence_valid = false;
-            g_cpu0_audio_hello_received = false;
+            audio_sequence_valid = FALSE;
+            g_cpu0_audio_hello_received = FALSE;
             cpu0_audio_observation_reset();
         }
         if (!cpu0_audio_sequence_accept(p_frame->sequence)) {
             return;
         }
 
-        uint32_t const required = ACOUSTIC_CAPABILITY_DOA | ACOUSTIC_CAPABILITY_VAD | ACOUSTIC_CAPABILITY_LEVEL;
+        UW const required = ACOUSTIC_CAPABILITY_DOA | ACOUSTIC_CAPABILITY_VAD | ACOUSTIC_CAPABILITY_LEVEL;
         audio_hello = hello;
         audio_boot_id = hello.boot_id;
-        audio_boot_id_valid = true;
+        audio_boot_id_valid = TRUE;
         g_cpu0_audio_hello_received = required == (hello.capabilities & required);
         return;
     }
@@ -514,13 +514,13 @@ static void cpu0_audio_frame_handle(const acoustic_frame_t * p_frame) {
  * @brief  USB受信データ処理
  * @param[in] length 有効受信長
  * ================================================================= */
-static void cpu0_audio_receive(uint32_t length) {
+LOCAL void cpu0_audio_receive(UW length) {
     if (length > sizeof(audio_rx_buffer)) {
         length = sizeof(audio_rx_buffer);
         g_cpu0_audio_format_error_count++;
     }
 
-    for (uint32_t index = 0U; index < length; index++) {
+    for (UW index = 0U; index < length; index++) {
         acoustic_frame_t frame;
         acoustic_parse_result_t const result =
             acoustic_protocol_parser_push(&audio_parser, audio_rx_buffer[index], &frame);
@@ -539,7 +539,7 @@ static void cpu0_audio_receive(uint32_t length) {
  * @brief  音響タスク本体
  * @details Bare Metal USBイベントをμT-Kernelタスクからポーリングする。
  * ================================================================= */
-static void cpu0_audio_task(INT stacd, void * exinf) {
+LOCAL void cpu0_audio_task(INT stacd, void * exinf) {
     (void) stacd;
     (void) exinf;
 
@@ -550,7 +550,7 @@ static void cpu0_audio_task(INT stacd, void * exinf) {
             (void) tk_dly_tsk(CPU0_AUDIO_USB_POLL_MS);
         }
     }
-    audio_usb_open = true;
+    audio_usb_open = TRUE;
     g_cpu0_audio_usb_state = CPU0_AUDIO_USB_STATE_WAIT_DEVICE;
 
     while (1) {
@@ -569,7 +569,7 @@ static void cpu0_audio_task(INT stacd, void * exinf) {
                 ER const lock_err = tk_loc_mtx(audio_mutex_id, TMO_FEVR);
                 if (E_OK == lock_err) {
                     cpu0_audio_link_reset();
-                    g_cpu0_audio_usb_configured = true;
+                    g_cpu0_audio_usb_configured = TRUE;
                     audio_device_address = event_info.device_address;
                     g_cpu0_audio_device_address = audio_device_address;
                     g_cpu0_audio_usb_state = CPU0_AUDIO_USB_STATE_SET_LINE_CODING;
@@ -577,7 +577,7 @@ static void cpu0_audio_task(INT stacd, void * exinf) {
                     (void) tk_unl_mtx(audio_mutex_id);
                 }
             } else if (USB_STATUS_READ_COMPLETE == event) {
-                audio_read_pending = false;
+                audio_read_pending = FALSE;
                 if ((USB_CLASS_HCDC == event_info.type) &&
                     ((FSP_SUCCESS == event_info.status) || (FSP_ERR_USB_SIZE_SHORT == event_info.status))) {
                     ER const lock_err = tk_loc_mtx(audio_mutex_id, TMO_FEVR);
@@ -589,7 +589,7 @@ static void cpu0_audio_task(INT stacd, void * exinf) {
                     g_cpu0_audio_last_error = event_info.status;
                 }
             } else if (USB_STATUS_WRITE_COMPLETE == event) {
-                audio_write_pending = false;
+                audio_write_pending = FALSE;
                 if ((USB_CLASS_HCDC == event_info.type) && (FSP_SUCCESS == event_info.status)) {
                     g_cpu0_audio_telemetry_send_count++;
                 } else if (USB_CLASS_HCDC == event_info.type) {

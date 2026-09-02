@@ -1,6 +1,6 @@
 # ローバー ファームウェア設計書
 
-最終更新: 2026-08-24 / 対象: RA8P1 CPU0/CPU1、ReSpeaker/XIAO統合の現行ファームウェア実装
+最終更新: 2026-09-01 / 対象: RA8P1 CPU0/CPU1、ReSpeaker/XIAO統合の現行ファームウェア実装
 
 現行ソースに対応するインタラクティブな全体図は、[現行コード構造図](archify/SEROV_ARCHITECTURE.html)を参照する。
 
@@ -13,7 +13,7 @@
 1. XVF3800はDoA/VADと処理済み音声を生成し、XIAO ESP32S3は音響・無線フロントエンドとして観測値を整形する。
 2. CPU0（Cortex-M85）はUSB hostとして音響観測を検証し、μT-Kernel上で音源追従判断と指令送信を行う。
 3. CPU0の`tk_audio`、`tk_think`、`tk_command`は、それぞれ`tk_cre_tsk()`で生成する独立カーネルタスクである。`tk_init.c`は`usermain()`から呼ばれるタスク登録・初期化モジュールである。
-4. CPU1（Cortex-M33）はベアメタルの約1 msループで指令を検証し、4サーボと論理左右DCモーターを駆動する。
+4. CPU1（Cortex-M33）はμT-Kernel上の1 msアクチュエータタスクで指令を検証し、4サーボと論理左右DCモーターを駆動する。
 5. 6個のアクチュエータ指示値は、IPCの`SEQUENCE`をcommit markerとして1つのスナップショットで確定する。
 6. USBや音響データが異常・timeoutになってもCPU1の実時間制御を巻き込まず、CPU0停止目標とCPU1ローカルtimeoutを重ねる。
 7. CPU0とCPU1は1個のRA8P1内の2コアであり、物理ピンを共有する。ピン多重化設定はSolutionを正として一元管理する。
@@ -25,7 +25,7 @@
 | XVF3800 | 専用audio firmware | 4マイクDSP、DoA、VAD、処理済みI2S音声 |
 | XIAO ESP32S3 | ESP-IDF / FreeRTOS | I2S/I2C取得、dBFS算出、USB CDC device、frontend health、Wi-Fi UDP診断gateway |
 | CPU0 / Cortex-M85 | μT-Kernel 3.0 | USB HCDC host、観測検証、思考、走行目標、IPC送信、青/緑LED |
-| CPU1 / Cortex-M33 | ベアメタル無限ループ | IPC受信、制限、安全監視、PWM/GPIO、encoder、赤LED |
+| CPU1 / Cortex-M33 | μT-Kernel 3.0 | IPC受信、1 msアクチュエータタスク、制限、安全監視、PWM/GPIO、encoder、赤LED状態タスク |
 
 CPU0の主周期はcommand 50 ms、think 100 msで、CPU1はnominal 1 msである。IPC channel 0はCPU0が送信ポーリング、CPU1が受信IRQ/callbackとして使う。USB eventはCPU0の`tk_audio`がtask contextからpollし、USB callbackからμT-Kernel APIを直接呼ばない。
 
@@ -57,18 +57,24 @@ flowchart LR
 
         FIFO["IPC message FIFO<br/>channel 0"]
 
-        subgraph CPU1["CPU1 / Cortex-M33 / bare metal"]
+        subgraph CPU1["CPU1 / Cortex-M33 / μT-Kernel"]
+            C1INIT["usermain / task registry<br/>全タスク生成・開始"]
             SERVER["IPC server<br/>staging・commit"]
-            APP["actuator_app / 約1 ms<br/>制限・安全状態・指令適用"]
+            ACTTASK["tk_actuator / 1 ms<br/>actuator_app周期実行"]
+            APP["actuator_app<br/>制限・安全状態・指令適用"]
+            STATUS["tk_status / 10 ms<br/>heartbeat・fault表示"]
             SERVO["servo driver<br/>論理FR / FL / RR / RL"]
             MOTOR["dc_motor driver<br/>論理左 / 論理右"]
             ENC["encoder driver<br/>左右代表A/B・4逓倍・RPM"]
             RED["赤LED<br/>CPU1状態"]
+            C1INIT --> ACTTASK
+            C1INIT --> STATUS
             SERVER --> APP
+            ACTTASK --> APP
             APP --> SERVO
             APP --> MOTOR
             ENC -.-> APP
-            APP --> RED
+            STATUS --> RED
         end
 
         CLIENT -->|"CPU0 → CPU1"| FIFO
@@ -100,13 +106,14 @@ firmware/
 │     ├─ usb_link.c/.h                TinyUSB CDC双方向device
 │     └─ wifi_telemetry.c/.h           Wi-Fi station・UDP JSON診断
 └─ ra8p1/
+   ├─ common/
+   │  ├─ ipc_message.h              CPU0/CPU1共通IPC契約
+   │  ├─ mtkernel/config.h          両コア共通μT-Kernel設定（1 ms tick）
+   │  └─ mtk3_bsp2/                 CPU0/CPU1共通μT-Kernel submodule・FSPポート
    ├─ SoundExplorationRover/
    │  └─ solution.xml                 デュアルコアSolution、共有ピン設定
-   ├─ common/
-   │  └─ ipc_message.h                CPU0/CPU1共通actuator IPC契約
    ├─ SoundExplorationRover_CPU0/
    │  ├─ configuration.xml            IPC、USB HCDC hostなどのFSP設定
-   │  ├─ mtk3_bsp2/                   μT-Kernel本体・FSPポート
    │  ├─ ra/、ra_cfg/、ra_gen/        FSPコード・設定・生成物
    │  └─ src/
    │     ├─ hal_entry.c               μT-Kernel起動入口
@@ -122,9 +129,15 @@ firmware/
    │     └─ cpu0_config.h             周期、閾値、優先度、LED設定
    └─ SoundExplorationRover_CPU1/
       ├─ configuration.xml            GPT、IPC、IRQ設定
+      ├─ mtk3_bsp2 -> ../common/       共通μT-Kernel submoduleへのlinked resource
       ├─ ra/、ra_cfg/、ra_gen/        FSPコード・設定・生成物
       └─ src/
-         ├─ hal_entry.c               約1 msループ、赤LED
+         ├─ hal_entry.c               μT-Kernel起動入口
+         ├─ mtkernel_config/include/  Cortex-M33、250 MHz、CPU1 RAM領域の上書き定義
+         ├─ app/main.c                CPU1タスク群初期化
+         ├─ app/tasks/tk_init.c       タスク登録配列、生成・開始・失敗時解放
+         ├─ app/tasks/tk_actuator.c   1 msアクチュエータ周期タスク
+         ├─ app/tasks/tk_status.c     10 ms状態表示タスク
          ├─ app/actuator_app.c        指令検証、安全状態、driver統合
          ├─ ipc/actuator_ipc_server.c IPC受信・スナップショット確定
          ├─ drivers/servo.c           4サーボPWM
@@ -138,7 +151,7 @@ firmware/
 - 共通契約: [`acoustic_protocol.h`](../../firmware/common/acoustic_protocol.h)、[`ipc_message.h`](../../firmware/ra8p1/common/ipc_message.h)
 - 音響frontend: [`acoustic_frontend.c`](../../firmware/esp32s3/src/acoustic_frontend.c)、[`xvf3800_control.c`](../../firmware/esp32s3/src/xvf3800_control.c)、[`audio_capture.c`](../../firmware/esp32s3/src/audio_capture.c)、[`usb_link.c`](../../firmware/esp32s3/src/usb_link.c)
 - CPU0: [`main.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/main.c)、[`tk_init.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_init.c)、[`tk_audio.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_audio.c)、[`tk_think.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_think.c)、[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/control/sound_follow_controller.c)、[`tk_command.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_command.c)
-- CPU1: [`actuator_app.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/actuator_app.c)、[`actuator_ipc_server.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/ipc/actuator_ipc_server.c)、[`servo.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/servo.c)、[`dc_motor.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/dc_motor.c)
+- CPU1: [`main.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/main.c)、[`tk_init.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/tasks/tk_init.c)、[`tk_actuator.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/tasks/tk_actuator.c)、[`tk_status.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/tasks/tk_status.c)、[`actuator_app.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/actuator_app.c)、[`actuator_ipc_server.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/ipc/actuator_ipc_server.c)、[`servo.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/servo.c)、[`dc_motor.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/dc_motor.c)
 
 `ra/`、`ra_cfg/`、`ra_gen/`、`configuration.xml`はFSP設定と生成処理に属する。特に`ra_gen/`は直接編集せず、設定変更後にGenerate Project Contentで再生成する。
 
@@ -152,7 +165,9 @@ sequenceDiagram
     participant AUDIO as CPU0 tk_audio
     participant CMD as CPU0 tk_command
     participant THINK as CPU0 tk_think
-    participant C1 as CPU1 actuator_app
+    participant C1MAIN as CPU1 usermain
+    participant C1ACT as CPU1 tk_actuator
+    participant C1STAT as CPU1 tk_status
 
     RESET->>MAIN: μT-Kernel起動後にusermain()
     MAIN->>C1: R_BSP_SecondaryCoreStart()
@@ -174,19 +189,32 @@ sequenceDiagram
         loop 100 ms
             THINK->>AUDIO: 最新音響snapshot取得
             THINK->>THINK: 音源追従・目標生成・LED更新
-        end
+    end
     and CPU1
-        C1->>C1: driverとIPC server初期化
-        C1->>C1: 全出力safe stop
+        RESET->>C1MAIN: CPU1 μT-Kernel起動後にusermain()
+        C1MAIN->>C1ACT: driver・IPC初期化、task生成・開始
+        C1MAIN->>C1STAT: status task生成・開始
+        C1MAIN->>C1MAIN: tk_slp_tsk(TMO_FEVR)で永久休止
         loop nominal 1 ms
-            C1->>C1: 指令取得・制限・PWM反映
+            C1ACT->>C1ACT: 指令取得・制限・PWM反映
+        end
+        loop nominal 10 ms
+            C1STAT->>C1STAT: heartbeat・fault LED更新
         end
     end
 ```
 
-`usermain()`はμT-Kernelが生成した高優先度の初期タスクから呼ばれる。CPU1起動後、`tk_init.c`の登録配列を介して全タスクの資源を生成し、すべて成功してから各タスクを開始して永久休止する。登録処理に失敗した場合は、失敗した要素を含む生成済みリソースを登録の逆順で解放し、青・緑LEDによるfault表示を続ける。開始APIの呼び出し中は初期タスクが実行中であり、休止後はタスク優先度に従って`tk_command`、`tk_audio`、`tk_think`がスケジュールされる。
+各コアの`usermain()`は、それぞれのμT-Kernelが生成した高優先度の初期タスクから呼ばれる。CPU0はCPU1を起動してから、CPU0側`tk_init.c`の登録配列で`tk_command`、`tk_audio`、`tk_think`を生成・開始する。CPU1はCPU1側`tk_init.c`の登録配列で`tk_actuator`と`tk_status`を生成・開始する。どちらも、全タスクの生成成功後に登録順で開始し、失敗時は生成済みリソースを逆順で解放する。初期化完了後の`usermain()`は`tk_slp_tsk(TMO_FEVR)`で永久休止し、各独立タスクが優先度に従って実行される。
 
-`tk_dly_tsk()`およびCPU1の`R_BSP_SoftwareDelay()`を使うため、記載周期は処理時間を含まないnominal値であり、ハードウェアタイマー基準の厳密な周期ではない。
+両コアのμT-Kernel tickは1 msに統一している。周期タスクは`tk_dly_tsk()`を使うため、記載周期は処理時間を含まないnominal値であり、ハードウェアタイマー基準の厳密な周期ではない。
+
+### 4.1 μT-Kernelの両コア構成
+
+CPU0とCPU1は、`firmware/ra8p1/common/mtk3_bsp2` submoduleにある同一のμT-Kernel sourceをコンパイルする。共通設定は`firmware/ra8p1/common/mtkernel/config.h`へ置き、各プロジェクトのinclude順でBSP既定設定より優先する。両プロジェクトはe² studioのlinked resourceとして共通submoduleを参照するため、カーネルsourceを複製しない。
+
+RA8P1向け既定BSPはCortex-M85とCPU0メモリを前提にするため、CPU1だけ`src/mtkernel_config/include/`からCortex-M33、250 MHz、CPU1 SRAM領域を上書きする。CPU0は`0x22000000`から`0x000EA000` bytes、CPU1は`0x220EA000`から`0x000EA000` bytesを使用し、カーネルの動的メモリ領域を重ねない。CPU1ではCPU0とSCI8を競合させないためT-Monitorとsystem messageを無効にする。
+
+RA8P1ユーザーコードの整数・真偽値とリンケージは、μT-Kernelの`B/UB/H/UH/W/UW/D/UD/BOOL`および`LOCAL/EXPORT/IMPORT/Inline`へ統一する。FSP API型と、ESP32S3にも共有する`firmware/common/acoustic_protocol.*`の固定幅wire型は境界契約として維持する。
 
 ## 5. CPU0タスク設計
 
@@ -257,7 +285,7 @@ sequenceDiagram
     participant CMD as CPU0 tk_command
     participant FIFO as IPC FIFO ch.0
     participant ISR as CPU1 IPC callback
-    participant APP as CPU1 1 ms loop
+    participant APP as CPU1 tk_actuator
     participant OUT as 4 servo + 2 motor
 
     CMD->>FIFO: CONTROL
@@ -269,18 +297,25 @@ sequenceDiagram
     ISR->>ISR: SEQUENCE受信時に<br/>staging全体をcommittedへコピー
     APP->>ISR: take_command()
     ISR-->>APP: 完全なcommand snapshot
-    APP->>OUT: 同じ約1 ms周期内で全指令を適用
+    APP->>OUT: 同じ1 msタスク周期内で全指令を適用
 ```
 
-ここで「同時」とは、6値を分割受信中の中途半端な組合せで適用せず、1つのcommit済みスナップショットとしてCPU1の同じ制御ループで適用することを意味する。物理PWM波形が完全に同一クロックエッジで変化することを保証するものではない。
+ここで「同時」とは、6値を分割受信中の中途半端な組合せで適用せず、1つのcommit済みスナップショットとしてCPU1の同じ`tk_actuator`周期で適用することを意味する。物理PWM波形が完全に同一クロックエッジで変化することを保証するものではない。
 
-CONTROLでemergency stopを受けた場合だけは、残りのワードとSEQUENCEを待たずにcommitする。実際の出力停止はIRQ内ではなくCPU1の次回ループで行う。CPU0はFIFO overflow時に1 ms待って同じワードを再送する。
+CONTROLでemergency stopを受けた場合だけは、残りのワードとSEQUENCEを待たずにcommitする。実際の出力停止はIRQ内ではなくCPU1の次回`tk_actuator`周期で行う。CPU0はFIFO overflow時に1 ms待って同じワードを再送する。
 
 ## 7. CPU1アクチュエータ設計
 
-### 7.1 制御ループと安全状態
+| タスク | 優先度 | スタック | 実行 | 責務 |
+|---|---:|---:|---|---|
+| `cpu1_actuator_task` | 4 | 2048 B | nominal 1 ms | IPC確定指令、encoder、PWMランプ、安全停止 |
+| `cpu1_status_task` | 12 | 512 B | nominal 10 ms | 赤LED heartbeat、driver/FSP fault表示 |
 
-`actuator_app_run_1ms()`は、driver housekeeping、IPC異常取得、新しいcommit済み指令の取得、期限監視、サーボとモーターへの適用、status更新を行う。最終IPC指令から1500 ms以上経過するとローカルsafe stopへ移行する。
+数値が小さいほど高優先度であり、アクチュエータ周期処理を状態表示より優先する。IPC callbackはFSPのIRQ contextでstaging/commitだけを行い、μT-Kernelのtask APIとPWM driver APIを直接呼ばない。
+
+### 7.1 タスクと安全状態
+
+CPU1の`usermain()`は、登録配列から`tk_actuator`と`tk_status`を生成・開始する。優先度4の`tk_actuator`は1 msごとに`actuator_app_run_1ms()`を呼び、driver housekeeping、IPC異常取得、新しいcommit済み指令の取得、期限監視、サーボとモーターへの適用を行う。優先度12の`tk_status`は10 msごとに状態を確認し、正常時500 ms、driver/FSP異常時50 ms周期で赤LEDを反転する。最終IPC指令から1500 ms以上経過するとローカルsafe stopへ移行する。
 
 ```mermaid
 stateDiagram-v2
@@ -434,15 +469,15 @@ P801、P803、P808をサーボへ転用しているため、現行構成ではOc
 
 ## 11. ビルド・生成・書き込み
 
-基準環境はFSP 6.4.0、GNU Arm Embedded 13.2.1、e² studio 2025-12である。2026-08-24に現行RA8P1 source一式を手動で完全compile/linkし、SREC生成まで確認した。
+基準環境はFSP 6.4.0、GNU Arm Embedded 13.2.1、e² studio 2025-12である。2026-08-24にはCPU1をμT-Kernel化する前のRA8P1 source一式で完全compile/linkとSREC生成を確認した。2026-09-02のCPU1 μT-Kernel移行後は、CPU0/CPU1の全ユーザーC sourceと、CPU1 Cortex-M33設定でμT-Kernel C source 223ファイルおよびRA8P1 ARMv8-M dispatch assemblyのコンパイル検証を完了している。
 
 | project | 検証結果 | text | data | bss | total |
 |---|---|---:|---:|---:|---:|
-| CPU0 | manual full compile/link/SREC成功、SREC 159,292 B、`nm`で未解決symbol 0 | 52,816 | 200 | 24,060 | 77,076 |
-| CPU1 | full build/link/SREC成功 | 11,996 | 8 | 1,668 | 13,672 |
+| CPU0 | 移行前full link成功、移行後ユーザーsource構文検証成功 | 52,816（移行前） | 200（移行前） | 24,060（移行前） | 77,076（移行前） |
+| CPU1 | 移行前full link成功、移行後ユーザーsource・μT-Kernel C/assemblyコンパイル検証成功 | 11,996（移行前） | 8（移行前） | 1,668（移行前） | 13,672（移行前） |
 | XIAO ESP32S3 | ESP-IDF未導入のため実build未実施 | - | - | - | - |
 
-RA8P1のsourceとlink成立は確認済みだが、CPU0の既存`Debug` make metadataは今回追加したsourceをまだ列挙していない。既存のincremental build結果をそのまま書き込まず、実機IDEでprojectをRefreshし、Generate Project Content、Clean、Buildを順に行う。XIAO ESP32S3は別途ESP-IDF環境でbuild/flashを完了するまでend-to-end検証済みとは扱わない。
+CPU1 μT-Kernel移行後の完全linkと実機起動は未確認である。既存`Debug` make metadataは追加したCPU1タスクとlinked μT-Kernel sourceをまだ列挙していないため、古いincremental build結果をそのまま書き込まない。e² studioでCPU0/CPU1 projectをRefreshし、Generate Project Content、Clean、Buildを順に行い、CPU0/CPU1のELFを同じビルド世代として書き込む。XIAO ESP32S3は別途ESP-IDF環境でbuild/flashを完了するまでend-to-end検証済みとは扱わない。
 
 ピンまたはFSPモジュール変更後は次の順で更新する。
 

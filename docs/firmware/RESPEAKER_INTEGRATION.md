@@ -31,7 +31,7 @@ CPU0、XVF3800、ESP32S3を「耳を含む頭部」、CPU1を「手足へつな�
 | RA8P1 CPU0 / Cortex-M85 | 判断・統合 | USB host、観測検証、DoA座標変換、音源追従状態機械、走行目標生成、CPU1へのIPC、上位fault管理 | 音響DSP、PWM/encoder割り込み処理 |
 | RA8P1 CPU1 / Cortex-M33 | 実時間アクチュエータ | IPC指令検証、4サーボ、左右DCモーター、encoder、安全制限、指令timeout、safe stop | USB/Wi-Fi、音源判断、探索戦略 |
 
-この分割により、Wi-Fiの再接続や音響処理の負荷がCPU1の約1 msアクチュエータループへ入り込まない。また、ESP32S3が誤った方向を送っても、CPU0が値・時刻・連続性を検証し、CPU1が最終的な角度・出力・timeoutを制限する。ネットワークからCPU1へ直接PWMを指示する経路は作らない。
+この分割により、Wi-Fiの再接続や音響処理の負荷がCPU1の1 msアクチュエータタスクへ入り込まない。また、ESP32S3が誤った方向を送っても、CPU0が値・時刻・連続性を検証し、CPU1が最終的な角度・出力・timeoutを制限する。ネットワークからCPU1へ直接PWMを指示する経路は作らない。
 
 ```mermaid
 flowchart LR
@@ -101,7 +101,7 @@ EK-RA8P1側はJ7をUSB High Speed hostとして使う。J7のhost modeではPD07
 
 J11のUSB Full Speedや`USB_FS_VBUSEN`はこの接続には使わない。USB設定はhost処理を担当するCPU0だけに置き、CPU1へ重複生成しない。物理ピンは従来どおりSolutionを正として一元管理し、Generate Project Content後もCPU1の`pin_data.c`は0ピンを維持する。
 
-FSPはBare Metal構成でもHCDC ACM hostをサポートする。本プロジェクトではFSP側RTOS連携を有効にせず、`tk_audio`がμT-Kernel task contextからUSB eventをpollする。USB callback/IRQ contextから`tk_loc_mtx()`などのtask APIを直接呼ばない。FSP 6.4で生成したUSB source、config、`hal_data`、`vector_data`はCPU0 projectへ反映し、CPU1とSolutionのpin ownershipは変更しない。
+FSPの`BSP_CFG_RTOS`は0のままHCDC ACM hostを使用し、FSPとは独立にμT-Kernelを起動する。`tk_audio`はμT-Kernel task contextからUSB eventをpollし、USB callback/IRQ contextから`tk_loc_mtx()`などのtask APIを直接呼ばない。FSP 6.4で生成したUSB source、config、`hal_data`、`vector_data`はCPU0 projectへ反映し、CPU1とSolutionのpin ownershipは変更しない。
 
 ### 4.2 電源条件
 
@@ -339,7 +339,7 @@ VADは音声活動検出であり、任意の衝撃音、機械音、警報音�
 5. SolutionのJ7関連ピンを確認し、CPU0/CPU1 projectをRefreshしてから、CPU0、CPU1の順にGenerate Project Contentを実行する。
 6. CPU0/CPU1をClean/Buildし、同じbuild世代の2個のELFをmulticore launch groupで書き込む。
 
-現行RA8P1 CPU0/CPU1とXIAO ESP32S3は、VS Codeタスクからのcompile/linkとバイナリ生成まで成功している。新規sourceやFSP stackを追加した場合は、上記のRefresh、Generate、Clean Buildを省略しない。詳細な検証結果は[RA8P1ソフトウェア設計書のビルド節](ARCHITECTURE.md#11-ビルド生成書き込み)、ESP-IDF projectの設定・build・flash手順は[`firmware/esp32s3/README.md`](../../firmware/esp32s3/README.md)を参照する。
+CPU1のμT-Kernel移行前にはRA8P1のcompile/linkとバイナリ生成を確認している。移行後はCPU0/CPU1のユーザーsourceとCPU1用μT-Kernel sourceのコンパイル検証まで完了しており、最終的なcompile/linkと実機書込みは保留中である。新規sourceやFSP stackを追加した場合は、上記のRefresh、Generate、Clean Buildを省略しない。詳細な検証結果は[RA8P1ソフトウェア設計書のビルド節](ARCHITECTURE.md#11-ビルド生成書き込み)、ESP-IDF projectの設定・build・flash手順は[`firmware/esp32s3/README.md`](../../firmware/esp32s3/README.md)を参照する。
 
 ### 8.2 USBだけの試験
 

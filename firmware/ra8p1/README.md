@@ -17,10 +17,12 @@ CPU0 / Cortex-M85 / μT-Kernel
                                  IPC message FIFO channel 0
                                       │
                                       v
-CPU1 / Cortex-M33 / bare metal
-  IPC callback ──> actuator_app_run_1ms()
-                    └─ drivers/{servo,dc_motor,encoder}
-                         └─ FSP生成インスタンス / BSP API
+CPU1 / Cortex-M33 / μT-Kernel
+  usermain() ──> CPU1 task registry
+                   ├─ tk_actuator (priority 4 / 1 ms)
+                   │    └─ actuator_app ──> drivers/{servo,dc_motor,encoder}
+                   └─ tk_status   (priority 12 / 10 ms)
+                        └─ 赤LED heartbeat／fault表示
 ```
 
 FSPのIPC FIFOは4段、1要素32 bitです。上位8 bitをメッセージID、下位24 bitをペイロードとして使います。CPU0側は送信専用なのでIPC割り込みを使わず、CPU1側だけIPC受信割り込みとコールバックを有効にしています。
@@ -36,7 +38,7 @@ CPU1は4輪操舵サーボ、左右BTS7960、左右代表エンコーダを起�
 
 購入時の仕様表記は100 rpmですが、今回の実機確認では約300 rpmを測定したため、開ループ換算上限を300 rpmへ変更しています。この値が無負荷測定である場合、車体搭載時の速度・トルクは別途確認してください。
 
-CPU0はCPU1を起動した後、μT-Kernel初期タスクから呼ばれる`usermain()`で`cpu0_tasks_init()`を実行します。`tk_init.c`の登録配列を基に`tk_think`、`tk_command`、`tk_audio`の全リソースを生成してから全タスクを開始し、`usermain()`は永久休止します。`tk_think`は停止中の音響観測が閾値と方向安定条件を満たした場合だけ、短時間の操舵・前進目標を生成します。CPU1は左右代表エンコーダの実測RPMを使い、左右別にPWMを比例補正します。
+CPU0はCPU1を起動した後、μT-Kernel初期タスクから呼ばれる`usermain()`で`cpu0_tasks_init()`を実行します。`tk_init.c`の登録配列を基に`tk_think`、`tk_command`、`tk_audio`の全リソースを生成してから全タスクを開始し、`usermain()`は永久休止します。CPU1も独立したμT-Kernelを起動し、CPU1側`usermain()`から`tk_actuator`と`tk_status`を生成・開始して永久休止します。`tk_think`は停止中の音響観測が閾値と方向安定条件を満たした場合だけ、短時間の操舵・前進目標を生成します。CPU1は左右代表エンコーダの実測RPMを使い、左右別にPWMを比例補正します。
 
 `tk_command`は高優先度の50 ms周期で最新目標を読み、FR、FL、RR、RLと左右モーターの6指示値を1つのIPCスナップショットとして送信します。思考目標が500 ms途絶した場合は緊急停止へ切り替えます。
 
@@ -74,7 +76,7 @@ EK-RA8P1は既定でSW4-4がOFFで、Arduinoヘッダが切り離されていま
 
 ピン設定を変更した後はCPU0/CPU1 projectをRefreshし、CPU0、CPU1の順にGenerate Project Contentを実行し、両プロジェクトをCleanしてから両方をBuildします。書き込みには`SoundExplorationRover Debug_Multicore Launch Group`を使います。この構成はCPU0の`Debug/SoundExplorationRover_CPU0.elf`とCPU1の`Debug/SoundExplorationRover_CPU1.elf`を組で読み込むため、別フォルダーに残った古いSRECを個別選択しないでください。
 
-現行RA8P1 sourceは手動の完全compile/linkとSREC生成まで成功していますが、CPU0の古い`Debug` make metadataには新規sourceが未列挙です。実機へ書き込む前に上記のRefresh、Generate、Clean Buildを必ず実行してください。XIAO ESP32S3側はESP-IDF未導入のため実build前です。検証結果とsizeは[ローバー ファームウェア設計書のビルド節](../../docs/firmware/ARCHITECTURE.md#11-ビルド生成書き込み)を参照してください。
+CPU1 μT-Kernel移行後のユーザーsourceとカーネルsourceはコンパイル検証済みですが、完全linkと実機起動は未確認です。古い`Debug` make metadataには追加sourceが未列挙のため、実機へ書き込む前に上記のRefresh、Generate、Clean Buildを必ず実行してください。検証状況は[ローバー ファームウェア設計書のビルド節](../../docs/firmware/ARCHITECTURE.md#11-ビルド生成書き込み)を参照してください。
 
 サーボの赤線は外部安定化電源+4.8～6.8 V、黒線は外部電源GNDへ接続し、外部電源GNDとEK-RA8P1のGNDを共通化します。
 

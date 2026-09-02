@@ -19,6 +19,36 @@ firmware/**/common/
 - 単位、対象プロセッサ、IPCなどの通信の意味、タイムアウトなど、誤解しやすい情報は明記する。
 - FSP/e² studioなど、SDKまたはIDEが生成するコードには、原則としてユーザーコメントを追加・編集しない。
 
+## 型とリンケージ
+
+### RA8P1ユーザーコード
+
+`firmware/ra8p1/`配下のCPU0、CPU1およびRA8P1共通ユーザーコードでは、μT-Kernelの基本型とリンケージマクロを使用する。
+
+| 意味 | μT-Kernel型 |
+|---|---|
+| 符号付き8/16/32/64 bit | `B` / `H` / `W` / `D` |
+| 符号なし8/16/32/64 bit | `UB` / `UH` / `UW` / `UD` |
+| 自然な整数、符号なし整数 | `INT` / `UINT` |
+| 真偽値 | `BOOL`（`TRUE` / `FALSE`） |
+| エラー、ID | `ER` / `ID` |
+
+- ファイル内だけで使う関数・変数は`LOCAL`、他ファイルへ公開する定義は`EXPORT`、他ファイルが所有する宣言は`IMPORT`を付ける。
+- ヘッダ内で完結するインライン関数は`Inline`を使用する。
+- FSP APIとの境界では`fsp_err_t`、`bsp_*`、各callback引数など、FSPが定義した型をそのまま使用する。
+- `firmware/common/`のようにESP32S3とRA8P1で共有する通信契約では、移植性とwire formatを優先して`stdint.h`の固定幅型と`stdbool.h`の`bool`を使用する。
+- 共有通信契約などのAPI境界で`size_t`が宣言されている場合は、そのシグネチャを維持する。RA8P1内部の件数・添字には`UW`を使用する。
+- `ra/`、`ra_cfg/`、`ra_gen/`などの生成コードは型やリンケージマクロの統一対象に含めず、直接編集しない。
+
+```c
+LOCAL UW command_age_ms;                                  /**< 最終指令からの経過時間 */
+IMPORT volatile UW g_command_sequence;                    /**< 他モジュールが所有する最終sequence */
+
+EXPORT ER command_send(H left_rpm, H right_rpm);           /* 左右回転数指令送信 */
+```
+
+ESP32S3などμT-Kernelを使用しないCファームウェアでは、標準Cの固定幅型、`bool`、`static`、`extern`を使用する。
+
 ## ファイルヘッダ
 
 ファイルヘッダはDoxygen形式とし、`=`で上下をデコレーションします。
@@ -70,7 +100,7 @@ EXPORT INT usermain(void) {
 - 戻り値がある場合は`@return`を記載する。
 - 呼び出し条件、単位、安全動作、戻らない条件などが重要な場合だけ`@details`や`@note`、`@attention`を追加する。
 - 関数内部の処理コメントにはDoxygen形式を使わない。
-- static関数も、他の関数と同じ形式で記載する。
+- `LOCAL`関数（μT-Kernelを使用しないコードでは`static`関数）も、他の関数と同じ形式で記載する。
 
 関数内部では、必要な箇所だけ通常コメントを使用し、対象となる文の直前に同じインデントで配置します。関数内部の行末コメントや61桁目への位置揃えは使用しません。
 
@@ -120,60 +150,60 @@ command.left_target_rpm = 0;
 #define CPU0_COMMAND_TARGET_TIMEOUT_MS     (500U)
 ```
 
-## extern変数
+## 外部変数
 
-`extern`変数は、宣言行の末尾に簡易的なDoxygenコメントを1行で記載します。
+RA8P1の`IMPORT`変数、その他のファームウェアの`extern`変数は、宣言行の末尾に簡易的なDoxygenコメントを1行で記載します。
 
 ```c
-extern bsp_leds_t g_bsp_leds;                /**< BSPが管理するLED構成情報 */
+IMPORT bsp_leds_t g_bsp_leds;                              /**< BSPが管理するLED構成情報 */
 ```
 
 実体の定義場所や所有者が重要な場合は、短く補足します。
 
 ```c
-extern bsp_leds_t g_bsp_leds;                /**< BSP/SDK生成コードが管理するLED構成情報 */
+IMPORT bsp_leds_t g_bsp_leds;                              /**< BSP/SDK生成コードが管理するLED構成情報 */
 ```
 
-## static変数
+## 内部変数
 
-static変数は、宣言位置によってコメント形式を分けます。
+RA8P1の`LOCAL`変数、その他のファームウェアの`static`変数は、宣言位置によってコメント形式を分けます。
 
-- 関数内の`static`変数は、宣言直前に同じインデントの通常コメントを付ける。
-- ファイルスコープの`static`変数は、宣言行末に簡易的なDoxygenコメントを付ける。
+- 関数内の内部変数は、宣言直前に同じインデントの通常コメントを付ける。
+- ファイルスコープの内部変数は、宣言行末に簡易的なDoxygenコメントを付ける。
 
 ```c
 /* 次回出力するLEDレベル */
-static bsp_io_level_t level = BSP_IO_LEVEL_LOW;
+LOCAL bsp_io_level_t level = BSP_IO_LEVEL_LOW;
 ```
 
-ファイルスコープの配列など、宣言が複数行になる`static`変数は、宣言の前の行へ`/**< ... */`形式のコメントを置きます。
+ファイルスコープの配列など、宣言が複数行になる内部変数は、宣言の前の行へ`/**< ... */`形式のコメントを置きます。
 
 ```c
 /**< IPC経由で送信する制御値試験列 */
-static int16_t const control_test_sequence[] = {
+LOCAL H const control_test_sequence[] = {
     CONTROL_TEST_CENTER,
     CONTROL_TEST_MINIMUM,
     CONTROL_TEST_MAXIMUM,
 };
 ```
 
-### static constの配置
+### 内部constの配置
 
-`static const`変数は、原則として関数の外側、ファイルスコープへ置きます。モジュール内の定数・テーブルとしてまとめて確認できるようにするためです。
+`LOCAL const`変数（μT-Kernelを使用しないコードでは`static const`変数）は、原則として関数の外側、ファイルスコープへ置きます。モジュール内の定数・テーブルとしてまとめて確認できるようにするためです。
 
 ```c
 /* モジュール定数 */
 /**< IPC経由で送信する制御値試験列 */
-static int16_t const control_test_sequence[] = {
+LOCAL H const control_test_sequence[] = {
     CONTROL_TEST_CENTER,
     CONTROL_TEST_MINIMUM,
     CONTROL_TEST_MAXIMUM,
 };
 ```
 
-`static`だけの可変状態は、これまでどおり使用範囲が最小になる場所へ置きます。関数専用の状態は関数内、複数の関数で共有する状態はファイルスコープとします。
+内部の可変状態は、これまでどおり使用範囲が最小になる場所へ置きます。関数専用の状態は関数内、複数の関数で共有する状態はファイルスコープとします。
 
-ファイルスコープの`static const`は、同じ`.c`ファイル内からだけ参照でき、他のファイルへ公開されません。複数のプロセッサまたはコンポーネントで共有する定数は、必要に応じて共有ヘッダへ定義します。
+ファイルスコープの`LOCAL const`または`static const`は、同じ`.c`ファイル内からだけ参照でき、他のファイルへ公開されません。複数のプロセッサまたはコンポーネントで共有する定数は、必要に応じて共有ヘッダへ定義します。
 
 ## 関数宣言
 
@@ -186,7 +216,7 @@ int app_main(void); /* ファームウェアアプリケーション初期化 */
 引数を含む宣言も、コメントを含めて120桁以内なら1行にまとめます。宣言部が60桁以内なら、通常どおりコメントを61桁目に揃えます。
 
 ```c
-static void acoustic_write_u16_le(uint8_t * p_output, uint16_t value); /* 16 bit LE書込 */
+LOCAL void acoustic_write_u16_le(UB * p_output, UH value); /* 16 bit LE書込 */
 ```
 
 関数の詳しい説明は、実装側のDoxygenコメントへ記載します。
@@ -194,7 +224,7 @@ static void acoustic_write_u16_le(uint8_t * p_output, uint16_t value); /* 16 bit
 関数名と引数リストの開き括弧の間にはスペースを入れません。
 
 ```c
-static void status_led_toggle(void) {
+LOCAL void status_led_toggle(void) {
     status_led_toggle();
 }
 ```
@@ -202,7 +232,7 @@ static void status_led_toggle(void) {
 次のような書式は使用しません。
 
 ```c
-static void status_led_toggle (void)
+LOCAL void status_led_toggle (void)
 ```
 
 ## 中括弧
@@ -210,7 +240,7 @@ static void status_led_toggle (void)
 関数、`if`、`for`、`while`、`switch`などの中括弧はK&Rスタイルとします。開き中括弧は宣言・制御文と同じ行に置きます。
 
 ```c
-static void cpu0_led_toggle(void) {
+LOCAL void cpu0_led_toggle(void) {
     if (leds.led_count > 0U) {
         R_BSP_PinAccessEnable();
     } else {
@@ -230,7 +260,7 @@ do {
 配列初期化子の中括弧も、宣言と同じ行から開始します。
 
 ```c
-static uint16_t const limits[] = {
+LOCAL UH const limits[] = {
     0U,
     100U,
 }; /**< 出力制限値 */
@@ -238,7 +268,7 @@ static uint16_t const limits[] = {
 
 ## 関数内部の変数
 
-staticでないローカル変数は、処理の理解に必要な場合だけ通常コメントを付けます。
+永続化しないローカル変数は、処理の理解に必要な場合だけ通常コメントを付けます。
 
 ```c
 /* IPC初期化・送信APIの戻り値 */
@@ -281,6 +311,8 @@ configuration.xml
 - [ ] `@brief`は説明口調ではなく、機能を示す短い動詞・名詞になっている。
 - [ ] 関数実装には必要な`@details`、`@param`、`@return`だけを付けている。
 - [ ] `#include`と関数宣言は1行の通常コメントになっている。
+- [ ] RA8P1ユーザーコードはμT-Kernel型と`LOCAL`、`EXPORT`、`IMPORT`、`Inline`を使用している。
+- [ ] FSP境界とクロスプラットフォーム共有契約の型は、それぞれの提供元・wire formatを維持している。
 - [ ] 通常のCコードを、120桁以内で機械的に折り返していない。
 - [ ] 関数外の行末コメントは61桁目から始まっている。
 - [ ] 関数宣言は、コメントを含めて120桁以内なら1行にまとめている。
@@ -289,10 +321,10 @@ configuration.xml
 - [ ] ファイルヘッダの終了行の直後に空行を置いていない。
 - [ ] `#include`同士の間に空行を置かず、コメントの開始位置を揃えている。
 - [ ] 関数名と引数リストの`()`の間にスペースを入れていない。
-- [ ] `extern`とファイルスコープの`static`変数は簡易Doxygenコメントになっている。
-- [ ] 関数内の`static`変数は、同じインデントの直前行コメントで説明されている。
-- [ ] 複数行の`static`変数は、宣言前の行に`/**< ... */`形式のコメントを置いている。
-- [ ] `static const`変数は、原則としてファイルスコープに配置している。
+- [ ] `IMPORT`/`extern`とファイルスコープの内部変数は簡易Doxygenコメントになっている。
+- [ ] 関数内の内部変数は、同じインデントの直前行コメントで説明されている。
+- [ ] 複数行の内部変数は、宣言前の行に`/**< ... */`形式のコメントを置いている。
+- [ ] `LOCAL const`/`static const`変数は、原則としてファイルスコープに配置している。
 - [ ] 中括弧はK&Rスタイルで、開き中括弧を宣言・制御文と同じ行に置いている。
 - [ ] 関数内部のコメントは必要最低限で、Doxygen形式を使っていない。
 - [ ] 生成コードを直接変更していない。

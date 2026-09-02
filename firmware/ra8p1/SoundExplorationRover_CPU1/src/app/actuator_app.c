@@ -9,13 +9,13 @@
 #include "../drivers/servo.h"                               /* サーボ制御API */
 #include "../ipc/actuator_ipc_server.h"                     /* CPU0-CPU1間IPCサーバーAPI */
 
-volatile fsp_err_t g_actuator_last_error = FSP_SUCCESS;     /**< 最後に発生したFSPエラー */
+EXPORT volatile fsp_err_t g_actuator_last_error = FSP_SUCCESS; /**< 最後に発生したFSPエラー */
 /**< アクチュエータ異常フラグ */
-volatile uint16_t g_actuator_fault_flags = ACTUATOR_FAULT_NONE;
+EXPORT volatile UH g_actuator_fault_flags = ACTUATOR_FAULT_NONE;
 
-static uint32_t g_command_elapsed_ms;                       /**< 最終指令受信からの経過時間 */
-static bool g_emergency_stop_latched;                       /**< 緊急停止ラッチ状態 */
-static bool g_initialized;                                  /**< アクチュエータ初期化完了状態 */
+LOCAL UW g_command_elapsed_ms;                       /**< 最終指令受信からの経過時間 */
+LOCAL BOOL g_emergency_stop_latched;                       /**< 緊急停止ラッチ状態 */
+LOCAL BOOL g_initialized;                                  /**< アクチュエータ初期化完了状態 */
 
 /** =================================================================*
  * @brief  16 bit値の範囲制限
@@ -25,13 +25,13 @@ static bool g_initialized;                                  /**< アクチュエ
  * @param[out] p_limited 制限発生フラグ
  * @return 範囲制限後の値
  * ================================================================= */
-static int16_t clamp_i16(int16_t value, int16_t minimum, int16_t maximum, bool * p_limited) {
+LOCAL H clamp_i16(H value, H minimum, H maximum, BOOL * p_limited) {
     if (value < minimum) {
-        *p_limited = true;
+        *p_limited = TRUE;
         return minimum;
     }
     if (value > maximum) {
-        *p_limited = true;
+        *p_limited = TRUE;
         return maximum;
     }
 
@@ -41,14 +41,14 @@ static int16_t clamp_i16(int16_t value, int16_t minimum, int16_t maximum, bool *
 /** =================================================================*
  * @brief  アクチュエータ安全停止
  * ================================================================= */
-static void actuator_safe_stop(void) {
+LOCAL void actuator_safe_stop(void) {
     fsp_err_t const motor_err = dc_motor_stop();
 
     if (FSP_SUCCESS != motor_err) {
         g_actuator_last_error = motor_err;
         g_actuator_fault_flags |= ACTUATOR_FAULT_DRIVER;
     }
-    for (uint32_t i = 0U; i < SERVO_COUNT; i++) {
+    for (UW i = 0U; i < SERVO_COUNT; i++) {
         fsp_err_t const servo_err = servo_disable(i);
         if (FSP_SUCCESS != servo_err) {
             g_actuator_last_error = servo_err;
@@ -61,18 +61,18 @@ static void actuator_safe_stop(void) {
  * @brief  アクチュエータ指令適用
  * @param[in] p_received CPU0から受信した指令
  * ================================================================= */
-static void actuator_apply_command(const actuator_command_t * p_received) {
+LOCAL void actuator_apply_command(const actuator_command_t * p_received) {
     actuator_command_t command = *p_received;
-    bool limited = false;
+    BOOL limited = FALSE;
 
     command.left_target_rpm = clamp_i16(command.left_target_rpm, -JGA25_TARGET_RPM_MAX, JGA25_TARGET_RPM_MAX, &limited);
     command.right_target_rpm =
         clamp_i16(command.right_target_rpm, -JGA25_TARGET_RPM_MAX, JGA25_TARGET_RPM_MAX, &limited);
-    for (uint32_t i = 0U; i < SERVO_COUNT; i++) {
+    for (UW i = 0U; i < SERVO_COUNT; i++) {
         command.servo_target_deg[i] =
             clamp_i16(command.servo_target_deg[i], STEERING_MIN_DEG, STEERING_MAX_DEG, &limited);
     }
-    g_actuator_fault_flags &= (uint16_t) ~(ACTUATOR_FAULT_COMMAND_TIMEOUT | ACTUATOR_FAULT_COMMAND_LIMITED);
+    g_actuator_fault_flags &= (UH) ~(ACTUATOR_FAULT_COMMAND_TIMEOUT | ACTUATOR_FAULT_COMMAND_LIMITED);
     if (limited) {
         g_actuator_fault_flags |= ACTUATOR_FAULT_COMMAND_LIMITED;
     }
@@ -80,7 +80,7 @@ static void actuator_apply_command(const actuator_command_t * p_received) {
     g_command_elapsed_ms = 0U;
 
     if (0U != command.emergency_stop) {
-        g_emergency_stop_latched = true;
+        g_emergency_stop_latched = TRUE;
         g_actuator_fault_flags |= ACTUATOR_FAULT_EMERGENCY_STOP_ACTIVE;
         actuator_safe_stop();
         return;
@@ -90,8 +90,8 @@ static void actuator_apply_command(const actuator_command_t * p_received) {
     if (g_emergency_stop_latched) {
         actuator_safe_stop();
         if (0U == command.actuator_enable) {
-            g_emergency_stop_latched = false;
-            g_actuator_fault_flags &= (uint16_t) ~ACTUATOR_FAULT_EMERGENCY_STOP_ACTIVE;
+            g_emergency_stop_latched = FALSE;
+            g_actuator_fault_flags &= (UH) ~ACTUATOR_FAULT_EMERGENCY_STOP_ACTIVE;
         }
         return;
     }
@@ -101,7 +101,7 @@ static void actuator_apply_command(const actuator_command_t * p_received) {
         return;
     }
 
-    for (uint32_t i = 0U; i < SERVO_COUNT; i++) {
+    for (UW i = 0U; i < SERVO_COUNT; i++) {
         fsp_err_t const err = servo_set_target_deg(i, command.servo_target_deg[i]);
         if (FSP_SUCCESS != err) {
             g_actuator_last_error = err;
@@ -123,10 +123,10 @@ static void actuator_apply_command(const actuator_command_t * p_received) {
  * @brief  CPU1アクチュエータアプリケーション初期化
  * @return FSPエラーコード
  * ================================================================= */
-fsp_err_t actuator_app_init(void) {
-    g_initialized = false;
+EXPORT fsp_err_t actuator_app_init(void) {
+    g_initialized = FALSE;
     g_command_elapsed_ms = 0U;
-    g_emergency_stop_latched = false;
+    g_emergency_stop_latched = FALSE;
     g_actuator_last_error = FSP_SUCCESS;
     g_actuator_fault_flags = ACTUATOR_FAULT_NONE;
 
@@ -150,14 +150,14 @@ fsp_err_t actuator_app_init(void) {
 
     /* 完全な有効指令を受信するまで出力を無効にする。 */
     actuator_safe_stop();
-    g_initialized = true;
+    g_initialized = TRUE;
     return FSP_SUCCESS;
 }
 
 /** =================================================================*
  * @brief  CPU1アクチュエータ1 ms周期処理
  * ================================================================= */
-void actuator_app_run_1ms(void) {
+EXPORT void actuator_app_run_1ms(void) {
     if (!g_initialized) {
         actuator_safe_stop();
         return;
@@ -189,4 +189,12 @@ void actuator_app_run_1ms(void) {
         g_actuator_fault_flags |= ACTUATOR_FAULT_COMMAND_TIMEOUT;
         actuator_safe_stop();
     }
+}
+
+/** =================================================================*
+ * @brief  CPU1アクチュエータ安全停止
+ * ================================================================= */
+EXPORT void actuator_app_shutdown(void) {
+    g_initialized = FALSE;
+    actuator_safe_stop();
 }

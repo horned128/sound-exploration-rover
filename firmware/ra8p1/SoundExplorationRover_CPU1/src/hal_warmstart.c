@@ -5,9 +5,10 @@
 */
 
 #include "hal_data.h"
+#include <tk/tkernel.h>
 
 FSP_CPP_HEADER
-void R_BSP_WarmStart(bsp_warm_start_event_t event);
+EXPORT void R_BSP_WarmStart(bsp_warm_start_event_t event);
 
 FSP_CPP_FOOTER
 
@@ -17,7 +18,7 @@ FSP_CPP_FOOTER
  *
  * @param[in]  event    Where at in the start up process the code is currently at
  **********************************************************************************************************************/
-void R_BSP_WarmStart (bsp_warm_start_event_t event)
+EXPORT void R_BSP_WarmStart (bsp_warm_start_event_t event)
 {
     if (BSP_WARM_START_RESET == event)
     {
@@ -35,7 +36,7 @@ void R_BSP_WarmStart (bsp_warm_start_event_t event)
     if (BSP_WARM_START_POST_CLOCK == event)
     {
         /* Setup OSPI_B SiP flash and initialize it. */
-        R_BSP_OspiBInit(BSP_CFG_OSPI_B_STARTUP_FN, true);
+        R_BSP_OspiBInit(BSP_CFG_OSPI_B_STARTUP_FN, TRUE);
     }
 #endif
 
@@ -49,7 +50,7 @@ void R_BSP_WarmStart (bsp_warm_start_event_t event)
 #if BSP_CFG_SDRAM_ENABLED
 
         /* Setup SDRAM and initialize it. Must configure pins first. */
-        R_BSP_SdramInit(true);
+        R_BSP_SdramInit(TRUE);
 #endif
     }
 }

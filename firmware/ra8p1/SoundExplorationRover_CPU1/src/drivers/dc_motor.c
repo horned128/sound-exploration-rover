@@ -7,16 +7,16 @@
 #include "../cpu1_config.h"                                 /* モーター制御設定 */
 #include "encoder.h"                                        /* 左右代表エンコーダ速度 */
 
-volatile int16_t g_drive_left_duty_permille = 0;            /**< 左モーター出力指令（単位: 1/1000） */
-volatile int16_t g_drive_right_duty_permille = 0;           /**< 右モーター出力指令（単位: 1/1000） */
+EXPORT volatile H g_drive_left_duty_permille = 0;            /**< 左モーター出力指令（単位: 1/1000） */
+EXPORT volatile H g_drive_right_duty_permille = 0;           /**< 右モーター出力指令（単位: 1/1000） */
 
-static int16_t g_left_target_rpm;                           /**< 左モーター目標回転数（単位: RPM） */
-static int16_t g_right_target_rpm;                          /**< 右モーター目標回転数（単位: RPM） */
-static int16_t g_left_target_duty_permille;                 /**< 左モーター目標デューティ（単位: 1/1000） */
-static int16_t g_right_target_duty_permille;                /**< 右モーター目標デューティ（単位: 1/1000） */
-static uint32_t g_pwm_update_elapsed_ms;                    /**< PWM更新周期の経過時間（単位: ms） */
-static uint32_t g_speed_feedback_elapsed_ms;                /**< 指令変更後の速度観測待機時間（単位: ms） */
-static bool g_pwm_running;                                  /**< PWMタイマの動作状態 */
+LOCAL H g_left_target_rpm;                           /**< 左モーター目標回転数（単位: RPM） */
+LOCAL H g_right_target_rpm;                          /**< 右モーター目標回転数（単位: RPM） */
+LOCAL H g_left_target_duty_permille;                 /**< 左モーター目標デューティ（単位: 1/1000） */
+LOCAL H g_right_target_duty_permille;                /**< 右モーター目標デューティ（単位: 1/1000） */
+LOCAL UW g_pwm_update_elapsed_ms;                    /**< PWM更新周期の経過時間（単位: ms） */
+LOCAL UW g_speed_feedback_elapsed_ms;                /**< 指令変更後の速度観測待機時間（単位: ms） */
+LOCAL BOOL g_pwm_running;                                  /**< PWMタイマの動作状態 */
 
 /** =================================================================*
  * @brief  回転数をデューティへ変換
@@ -24,14 +24,14 @@ static bool g_pwm_running;                                  /**< PWMタイマの
  * @param[in] forward_sign 論理前進方向の極性
  * @return 符号付きデューティ（単位: 1/1000）
  * ================================================================= */
-static int16_t motor_rpm_to_duty_permille(int16_t target_rpm, int8_t forward_sign) {
-    int32_t const signed_rpm = (int32_t) target_rpm * (int32_t) forward_sign;
+LOCAL H motor_rpm_to_duty_permille(H target_rpm, B forward_sign) {
+    W const signed_rpm = (W) target_rpm * (W) forward_sign;
     if (0 == signed_rpm) {
         return 0;
     }
 
-    int32_t const magnitude = (signed_rpm < 0) ? -signed_rpm : signed_rpm;
-    int32_t duty = (magnitude * 1000) / JGA25_TARGET_RPM_MAX;
+    W const magnitude = (signed_rpm < 0) ? -signed_rpm : signed_rpm;
+    W duty = (magnitude * 1000) / JGA25_TARGET_RPM_MAX;
     if (duty < MOTOR_PWM_MIN_DUTY_PERMILLE) {
         duty = MOTOR_PWM_MIN_DUTY_PERMILLE;
     }
@@ -39,7 +39,7 @@ static int16_t motor_rpm_to_duty_permille(int16_t target_rpm, int8_t forward_sig
         duty = MOTOR_PWM_MAX_DUTY_PERMILLE;
     }
 
-    return (signed_rpm < 0) ? (int16_t) -duty : (int16_t) duty;
+    return (signed_rpm < 0) ? (H) -duty : (H) duty;
 }
 
 /** =================================================================*
@@ -53,30 +53,30 @@ static int16_t motor_rpm_to_duty_permille(int16_t target_rpm, int8_t forward_sig
  * @param[in] feedback_ready 実測値を制御に使える場合true
  * @return BTS7960出力極性を反映した符号付きデューティ（単位: 1/1000）
  * ================================================================= */
-static int16_t motor_rpm_to_feedback_duty_permille(int16_t target_rpm, int8_t forward_sign,
-                                                   uint16_t duty_scale_permille, int16_t measured_rpm,
-                                                   bool feedback_ready) {
-    int16_t const raw_base_duty = motor_rpm_to_duty_permille(target_rpm, forward_sign);
-    int32_t base_magnitude = (raw_base_duty < 0) ? -(int32_t) raw_base_duty : raw_base_duty;
+LOCAL H motor_rpm_to_feedback_duty_permille(H target_rpm, B forward_sign,
+                                                   UH duty_scale_permille, H measured_rpm,
+                                                   BOOL feedback_ready) {
+    H const raw_base_duty = motor_rpm_to_duty_permille(target_rpm, forward_sign);
+    W base_magnitude = (raw_base_duty < 0) ? -(W) raw_base_duty : raw_base_duty;
     base_magnitude = (base_magnitude * duty_scale_permille) / 1000;
     if (base_magnitude > MOTOR_PWM_MAX_DUTY_PERMILLE) {
         base_magnitude = MOTOR_PWM_MAX_DUTY_PERMILLE;
     }
-    int16_t const base_duty = (raw_base_duty < 0) ? (int16_t) -base_magnitude : (int16_t) base_magnitude;
+    H const base_duty = (raw_base_duty < 0) ? (H) -base_magnitude : (H) base_magnitude;
     if ((0U == MOTOR_SPEED_FEEDBACK_ENABLE) || !feedback_ready || (0 == target_rpm)) {
         return base_duty;
     }
 
-    int32_t const target_magnitude = (target_rpm < 0) ? -(int32_t) target_rpm : target_rpm;
-    int32_t const measured_in_target_direction = (target_rpm < 0) ? -(int32_t) measured_rpm : measured_rpm;
-    int32_t correction = (target_magnitude - measured_in_target_direction) * MOTOR_SPEED_FEEDBACK_KP_PERMILLE_PER_RPM;
+    W const target_magnitude = (target_rpm < 0) ? -(W) target_rpm : target_rpm;
+    W const measured_in_target_direction = (target_rpm < 0) ? -(W) measured_rpm : measured_rpm;
+    W correction = (target_magnitude - measured_in_target_direction) * MOTOR_SPEED_FEEDBACK_KP_PERMILLE_PER_RPM;
     if (correction > MOTOR_SPEED_FEEDBACK_MAX_CORRECTION_PERMILLE) {
         correction = MOTOR_SPEED_FEEDBACK_MAX_CORRECTION_PERMILLE;
     } else if (correction < -MOTOR_SPEED_FEEDBACK_MAX_CORRECTION_PERMILLE) {
         correction = -MOTOR_SPEED_FEEDBACK_MAX_CORRECTION_PERMILLE;
     }
 
-    int32_t duty_magnitude = (base_duty < 0) ? -(int32_t) base_duty : base_duty;
+    W duty_magnitude = (base_duty < 0) ? -(W) base_duty : base_duty;
     duty_magnitude += correction;
     if (duty_magnitude < MOTOR_PWM_MIN_DUTY_PERMILLE) {
         duty_magnitude = MOTOR_PWM_MIN_DUTY_PERMILLE;
@@ -84,7 +84,7 @@ static int16_t motor_rpm_to_feedback_duty_permille(int16_t target_rpm, int8_t fo
         duty_magnitude = MOTOR_PWM_MAX_DUTY_PERMILLE;
     }
 
-    return (base_duty < 0) ? (int16_t) -duty_magnitude : (int16_t) duty_magnitude;
+    return (base_duty < 0) ? (H) -duty_magnitude : (H) duty_magnitude;
 }
 
 /** =================================================================*
@@ -93,14 +93,14 @@ static int16_t motor_rpm_to_feedback_duty_permille(int16_t target_rpm, int8_t fo
  * @param[in] target 目標値（単位: 1/1000）
  * @return 更新後のデューティ（単位: 1/1000）
  * ================================================================= */
-static int16_t motor_ramp_value(int16_t current, int16_t target) {
+LOCAL H motor_ramp_value(H current, H target) {
     if (current < target) {
-        int32_t const next = (int32_t) current + MOTOR_PWM_RAMP_PER_MS;
-        return (int16_t) ((next > target) ? target : next);
+        W const next = (W) current + MOTOR_PWM_RAMP_PER_MS;
+        return (H) ((next > target) ? target : next);
     }
     if (current > target) {
-        int32_t const next = (int32_t) current - MOTOR_PWM_RAMP_PER_MS;
-        return (int16_t) ((next < target) ? target : next);
+        W const next = (W) current - MOTOR_PWM_RAMP_PER_MS;
+        return (H) ((next < target) ? target : next);
     }
 
     return current;
@@ -112,7 +112,7 @@ static int16_t motor_ramp_value(int16_t current, int16_t target) {
  * @details 方向切替時は旧出力を先に0へ戻し、BTS7960のRPWMとLPWMを同時に
  *          有効にしない。デューティが0のときは共通ENも無効にする。
  * ================================================================= */
-static fsp_err_t motor_pwm_apply(void) {
+LOCAL fsp_err_t motor_pwm_apply(void) {
     timer_info_t rpwm_info = {0};
     timer_info_t lpwm_info = {0};
     fsp_err_t err = MOTOR_RPWM_INSTANCE->p_api->infoGet(MOTOR_RPWM_INSTANCE->p_ctrl, &rpwm_info);
@@ -125,19 +125,19 @@ static fsp_err_t motor_pwm_apply(void) {
         return err;
     }
 
-    int16_t const left_duty = g_drive_left_duty_permille;
-    int16_t const right_duty = g_drive_right_duty_permille;
-    uint16_t const left_magnitude = (uint16_t) ((left_duty < 0) ? -left_duty : left_duty);
-    uint16_t const right_magnitude = (uint16_t) ((right_duty < 0) ? -right_duty : right_duty);
-    uint16_t const left_rpwm = (left_duty > 0) ? left_magnitude : 0U;
-    uint16_t const left_lpwm = (left_duty < 0) ? left_magnitude : 0U;
-    uint16_t const right_rpwm = (right_duty > 0) ? right_magnitude : 0U;
-    uint16_t const right_lpwm = (right_duty < 0) ? right_magnitude : 0U;
+    H const left_duty = g_drive_left_duty_permille;
+    H const right_duty = g_drive_right_duty_permille;
+    UH const left_magnitude = (UH) ((left_duty < 0) ? -left_duty : left_duty);
+    UH const right_magnitude = (UH) ((right_duty < 0) ? -right_duty : right_duty);
+    UH const left_rpwm = (left_duty > 0) ? left_magnitude : 0U;
+    UH const left_lpwm = (left_duty < 0) ? left_magnitude : 0U;
+    UH const right_rpwm = (right_duty > 0) ? right_magnitude : 0U;
+    UH const right_lpwm = (right_duty < 0) ? right_magnitude : 0U;
 
-    uint32_t const left_rpwm_counts = (uint32_t) (((uint64_t) rpwm_info.period_counts * left_rpwm) / 1000U);
-    uint32_t const right_rpwm_counts = (uint32_t) (((uint64_t) rpwm_info.period_counts * right_rpwm) / 1000U);
-    uint32_t const left_lpwm_counts = (uint32_t) (((uint64_t) lpwm_info.period_counts * left_lpwm) / 1000U);
-    uint32_t const right_lpwm_counts = (uint32_t) (((uint64_t) lpwm_info.period_counts * right_lpwm) / 1000U);
+    UW const left_rpwm_counts = (UW) (((UD) rpwm_info.period_counts * left_rpwm) / 1000U);
+    UW const right_rpwm_counts = (UW) (((UD) rpwm_info.period_counts * right_rpwm) / 1000U);
+    UW const left_lpwm_counts = (UW) (((UD) lpwm_info.period_counts * left_lpwm) / 1000U);
+    UW const right_lpwm_counts = (UW) (((UD) lpwm_info.period_counts * right_lpwm) / 1000U);
 
     /* 方向を切り替える前に4出力を停止し、RPWMとLPWMの同時有効を防ぐ。 */
     err = MOTOR_RPWM_INSTANCE->p_api->dutyCycleSet(MOTOR_RPWM_INSTANCE->p_ctrl, 0U, MOTOR_LEFT_RPWM_OUTPUT);
@@ -167,7 +167,7 @@ static fsp_err_t motor_pwm_apply(void) {
                                                        MOTOR_RIGHT_LPWM_OUTPUT);
     }
 
-    bool const should_run = (0U != left_magnitude) || (0U != right_magnitude);
+    BOOL const should_run = (0U != left_magnitude) || (0U != right_magnitude);
     if ((FSP_SUCCESS == err) && should_run && !g_pwm_running) {
         err = MOTOR_RPWM_INSTANCE->p_api->start(MOTOR_RPWM_INSTANCE->p_ctrl);
         if (FSP_SUCCESS == err) {
@@ -175,7 +175,7 @@ static fsp_err_t motor_pwm_apply(void) {
             if (FSP_SUCCESS != err) {
                 (void) MOTOR_RPWM_INSTANCE->p_api->stop(MOTOR_RPWM_INSTANCE->p_ctrl);
             } else {
-                g_pwm_running = true;
+                g_pwm_running = TRUE;
             }
         }
     }
@@ -189,7 +189,7 @@ static fsp_err_t motor_pwm_apply(void) {
             if (FSP_SUCCESS == err) {
                 err = MOTOR_LPWM_INSTANCE->p_api->stop(MOTOR_LPWM_INSTANCE->p_ctrl);
                 if (FSP_SUCCESS == err) {
-                    g_pwm_running = false;
+                    g_pwm_running = FALSE;
                 }
             }
         }
@@ -202,7 +202,7 @@ static fsp_err_t motor_pwm_apply(void) {
  * @brief  DCモーター制御初期化
  * @return FSPエラーコード
  * ================================================================= */
-fsp_err_t dc_motor_init(void) {
+EXPORT fsp_err_t dc_motor_init(void) {
     g_left_target_rpm = 0;
     g_right_target_rpm = 0;
     g_left_target_duty_permille = 0;
@@ -211,7 +211,7 @@ fsp_err_t dc_motor_init(void) {
     g_drive_right_duty_permille = 0;
     g_pwm_update_elapsed_ms = 0U;
     g_speed_feedback_elapsed_ms = 0U;
-    g_pwm_running = false;
+    g_pwm_running = FALSE;
 
     fsp_err_t err = MOTOR_RPWM_INSTANCE->p_api->open(MOTOR_RPWM_INSTANCE->p_ctrl, MOTOR_RPWM_INSTANCE->p_cfg);
     if (FSP_SUCCESS == err) {
@@ -227,7 +227,7 @@ fsp_err_t dc_motor_init(void) {
  * @brief  DCモーターを即時停止
  * @return FSPエラーコード
  * ================================================================= */
-fsp_err_t dc_motor_stop(void) {
+EXPORT fsp_err_t dc_motor_stop(void) {
     g_left_target_rpm = 0;
     g_right_target_rpm = 0;
     g_left_target_duty_permille = 0;
@@ -250,7 +250,7 @@ fsp_err_t dc_motor_stop(void) {
         if (FSP_SUCCESS != err) {
             return err;
         }
-        g_pwm_running = false;
+        g_pwm_running = FALSE;
     }
 
     return FSP_SUCCESS;
@@ -262,7 +262,7 @@ fsp_err_t dc_motor_stop(void) {
  * @param[in] right_rpm 右モーター目標回転数（単位: RPM）
  * @return FSPエラーコード
  * ================================================================= */
-fsp_err_t dc_motor_request_rpm(int16_t left_rpm, int16_t right_rpm) {
+EXPORT fsp_err_t dc_motor_request_rpm(H left_rpm, H right_rpm) {
     if ((left_rpm < -JGA25_TARGET_RPM_MAX) || (left_rpm > JGA25_TARGET_RPM_MAX) ||
         (right_rpm < -JGA25_TARGET_RPM_MAX) || (right_rpm > JGA25_TARGET_RPM_MAX)) {
         return FSP_ERR_INVALID_ARGUMENT;
@@ -272,14 +272,14 @@ fsp_err_t dc_motor_request_rpm(int16_t left_rpm, int16_t right_rpm) {
         return dc_motor_stop();
     }
 
-    bool const target_changed = (left_rpm != g_left_target_rpm) || (right_rpm != g_right_target_rpm);
+    BOOL const target_changed = (left_rpm != g_left_target_rpm) || (right_rpm != g_right_target_rpm);
     if (target_changed) {
         g_speed_feedback_elapsed_ms = 0U;
     }
     g_left_target_rpm = left_rpm;
     g_right_target_rpm = right_rpm;
 
-    bool const feedback_ready = (g_speed_feedback_elapsed_ms >= MOTOR_SPEED_FEEDBACK_START_DELAY_MS);
+    BOOL const feedback_ready = (g_speed_feedback_elapsed_ms >= MOTOR_SPEED_FEEDBACK_START_DELAY_MS);
     g_left_target_duty_permille = motor_rpm_to_feedback_duty_permille(
         left_rpm, MOTOR_LEFT_FORWARD_SIGN, MOTOR_LEFT_DUTY_SCALE_PERMILLE, encoder_left_rpm_get(), feedback_ready);
     g_right_target_duty_permille = motor_rpm_to_feedback_duty_permille(
@@ -291,7 +291,7 @@ fsp_err_t dc_motor_request_rpm(int16_t left_rpm, int16_t right_rpm) {
  * @brief  モーターPWMを1 ms周期で更新
  * @return FSPエラーコード
  * ================================================================= */
-fsp_err_t dc_motor_housekeeping_1ms(void) {
+EXPORT fsp_err_t dc_motor_housekeeping_1ms(void) {
     if ((0 != g_left_target_rpm) || (0 != g_right_target_rpm)) {
         if (g_speed_feedback_elapsed_ms < UINT32_MAX) {
             g_speed_feedback_elapsed_ms++;
@@ -316,7 +316,7 @@ fsp_err_t dc_motor_housekeeping_1ms(void) {
  * @brief  左モーター目標回転数取得
  * @return 目標回転数（単位: RPM）
  * ================================================================= */
-int16_t dc_motor_left_target_rpm_get(void) {
+EXPORT H dc_motor_left_target_rpm_get(void) {
     return g_left_target_rpm;
 }
 
@@ -324,6 +324,6 @@ int16_t dc_motor_left_target_rpm_get(void) {
  * @brief  右モーター目標回転数取得
  * @return 目標回転数（単位: RPM）
  * ================================================================= */
-int16_t dc_motor_right_target_rpm_get(void) {
+EXPORT H dc_motor_right_target_rpm_get(void) {
     return g_right_target_rpm;
 }
