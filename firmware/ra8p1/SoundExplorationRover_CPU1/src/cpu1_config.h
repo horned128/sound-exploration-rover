@@ -18,6 +18,7 @@
 #define CPU1_ACTUATOR_TASK_STACK_SIZE      (2048U)
 #define CPU1_STATUS_TASK_STACK_SIZE        (512U)
 #define CPU1_STATUS_TASK_PERIOD_MS         (10U)
+#define CPU1_STATUS_TELEMETRY_PERIOD_MS    (100U)
 #define CPU1_STATUS_LED_INDEX              (2U)
 #define CPU1_STATUS_HEARTBEAT_PERIOD_MS    (500U)
 #define CPU1_STATUS_FAULT_BLINK_PERIOD_MS  (50U)
@@ -77,10 +78,10 @@
 /* P603 / GPT7A */
 #define MOTOR_RIGHT_LPWM_OUTPUT (GPT_IO_PIN_GTIOCA)
 /*
- * 正のRPMはローバー前進を表す。現在の実機配線では左右ともRPWMが前進である。
+ * 正のRPMはローバー前進を表す。現在の実機配線では左右ともLPWMが前進である。
  * モーター配線や取付けを変更した場合は、左右個別の符号で吸収する。
  */
-#define MOTOR_CHASSIS_FORWARD_SIGN         (+1)
+#define MOTOR_CHASSIS_FORWARD_SIGN         (-1)
 #define MOTOR_LEFT_MOUNT_SIGN              (+1)
 #define MOTOR_RIGHT_MOUNT_SIGN             (+1)
 #define MOTOR_LEFT_FORWARD_SIGN            (MOTOR_CHASSIS_FORWARD_SIGN * MOTOR_LEFT_MOUNT_SIGN)
@@ -91,10 +92,10 @@
 #define MOTOR_PWM_MAX_DUTY_PERMILLE        (700)
 #define MOTOR_PWM_RAMP_PER_MS              (2)
 #define MOTOR_PWM_UPDATE_PERIOD_MS         (5U)
-/* 右側の無負荷速度差を補正する初期デューティ比。速度フィードバックで追従する。 */
+/* 右側の無負荷速度差を補正する初期デューティ比。実測RPMは現在診断専用とする。 */
 #define MOTOR_LEFT_DUTY_SCALE_PERMILLE               (1000U)
 #define MOTOR_RIGHT_DUTY_SCALE_PERMILLE              (750U)
-#define MOTOR_SPEED_FEEDBACK_ENABLE                  (1U)
+#define MOTOR_SPEED_FEEDBACK_ENABLE                  (0U)
 #define MOTOR_SPEED_FEEDBACK_START_DELAY_MS          (150U)
 #define MOTOR_SPEED_FEEDBACK_KP_PERMILLE_PER_RPM     (2)
 #define MOTOR_SPEED_FEEDBACK_MAX_CORRECTION_PERMILLE (250)

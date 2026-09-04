@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import socket
+import uvicorn
 from contextlib import asynccontextmanager
 from pathlib import Path
 

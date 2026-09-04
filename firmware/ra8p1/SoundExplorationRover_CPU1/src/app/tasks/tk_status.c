@@ -5,6 +5,7 @@
 #include "tk_status.h"                                      /* 状態表示タスクAPI */
 #include "../../cpu1_config.h"                              /* LED番号、周期、優先度、スタックサイズ */
 #include "../actuator_app.h"                                /* アクチュエータ異常状態 */
+#include "../../ipc/actuator_ipc_server.h"                  /* CPU1実出力状態IPC送信 */
 #include "hal_data.h"                                       /* BSP LED、I/OポートAPI */
 
 IMPORT bsp_leds_t g_bsp_leds;                               /* BSPが管理するLED構成情報 */
@@ -68,17 +69,39 @@ LOCAL void cpu1_status_task(INT start_code, void * p_extended_information) {
     (void) p_extended_information;
 
     UW elapsed_ms = 0U;
+    UW telemetry_elapsed_ms = 0U;
+    UW telemetry_sequence = 0U;
+    UB telemetry_word_index = ACTUATOR_IPC_STATUS_WORD_COUNT;
+    actuator_status_t telemetry_status = {0};
     bsp_io_level_t level = BSP_IO_LEVEL_LOW;
 
     while (1) {
-        UW const blink_period_ms =
-            (FSP_SUCCESS == g_actuator_last_error) ? CPU1_STATUS_HEARTBEAT_PERIOD_MS : CPU1_STATUS_FAULT_BLINK_PERIOD_MS;
+        UW const blink_period_ms = (FSP_SUCCESS == g_actuator_last_error) ? CPU1_STATUS_HEARTBEAT_PERIOD_MS
+                                                                         : CPU1_STATUS_FAULT_BLINK_PERIOD_MS;
 
         elapsed_ms += CPU1_STATUS_TASK_PERIOD_MS;
+        if (telemetry_word_index >= ACTUATOR_IPC_STATUS_WORD_COUNT) {
+            telemetry_elapsed_ms += CPU1_STATUS_TASK_PERIOD_MS;
+        }
         if (elapsed_ms >= blink_period_ms) {
             cpu1_status_led_write(level);
             level = (BSP_IO_LEVEL_LOW == level) ? BSP_IO_LEVEL_HIGH : BSP_IO_LEVEL_LOW;
             elapsed_ms = 0U;
+        }
+
+        if ((telemetry_word_index >= ACTUATOR_IPC_STATUS_WORD_COUNT) &&
+            (telemetry_elapsed_ms >= CPU1_STATUS_TELEMETRY_PERIOD_MS)) {
+            telemetry_status = (actuator_status_t){.sequence_number = telemetry_sequence};
+            actuator_app_status_get(&telemetry_status);
+            telemetry_word_index = 0U;
+            telemetry_elapsed_ms = 0U;
+        }
+        if ((telemetry_word_index < ACTUATOR_IPC_STATUS_WORD_COUNT) &&
+            (FSP_SUCCESS == actuator_ipc_server_send_status_word(&telemetry_status, telemetry_word_index))) {
+            telemetry_word_index++;
+            if (telemetry_word_index >= ACTUATOR_IPC_STATUS_WORD_COUNT) {
+                telemetry_sequence = (telemetry_sequence + 1U) & ACTUATOR_IPC_SEQUENCE_MASK;
+            }
         }
 
         (void) tk_dly_tsk(CPU1_STATUS_TASK_PERIOD_MS);

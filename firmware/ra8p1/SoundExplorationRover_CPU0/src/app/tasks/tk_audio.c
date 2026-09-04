@@ -4,6 +4,7 @@
  * ================================================================= */
 #include "tk_audio.h"                                       /* CPU0音響タスクAPI */
 #include "../../cpu0_config.h"                              /* USB受信周期、優先度、バッファ長 */
+#include "../../ipc/actuator_ipc_client.h"                 /* CPU1実出力状態取得API */
 #include "tk_command.h"                                     /* 最新指令状態取得API */
 #include "tk_sensor.h"                                      /* 最新I2Cセンサー状態取得API */
 #include "tk_think.h"                                       /* 思考タスクへの異常通知 */
@@ -22,6 +23,7 @@ LOCAL void cpu0_audio_observation_reset(void);             /* 旧音響観測無
 LOCAL fsp_err_t cpu0_audio_control_start(void);            /* CDC class request開始 */
 LOCAL void cpu0_audio_control_complete(const usb_event_info_t * p_event_info); /* CDC class request完了 */
 LOCAL fsp_err_t cpu0_audio_read_start(void);               /* USB Bulk IN開始 */
+LOCAL fsp_err_t cpu0_audio_actuator_telemetry_start(void); /* CPU1診断Bulk OUT開始 */
 LOCAL fsp_err_t cpu0_audio_telemetry_start(void);          /* USB Bulk OUT開始 */
 LOCAL void cpu0_audio_receive(UW length);            /* USB受信データ処理 */
 LOCAL void cpu0_audio_frame_handle(const acoustic_frame_t * p_frame); /* 正常フレーム反映 */
@@ -49,6 +51,7 @@ LOCAL BOOL audio_task_started;                             /**< 音響タスク�
 LOCAL BOOL audio_usb_open;                                 /**< USBドライバopen状態 */
 LOCAL BOOL audio_read_pending;                             /**< Bulk IN要求実行中 */
 LOCAL BOOL audio_write_pending;                            /**< Bulk OUT要求実行中 */
+LOCAL BOOL audio_actuator_telemetry_pending;               /**< CPU1診断送信待ち */
 LOCAL BOOL audio_control_pending;                          /**< CDC class request実行中 */
 LOCAL BOOL audio_sequence_valid;                           /**< sequence初回受信済み */
 LOCAL BOOL audio_boot_id_valid;                            /**< boot ID初回受信済み */
@@ -59,8 +62,12 @@ LOCAL UW audio_observation_at_ms;                    /**< 最終観測受信時�
 LOCAL UW audio_last_sequence;                        /**< 最終受信sequence */
 LOCAL UW audio_observation_sequence;                 /**< 最終観測sequence */
 LOCAL UW audio_telemetry_sequence;                   /**< 診断送信sequence */
+LOCAL UW audio_actuator_telemetry_sequence;          /**< CPU1診断送信sequence */
 LOCAL UW audio_last_telemetry_ms;                    /**< 最終診断送信要求時刻 */
+LOCAL UW audio_actuator_status_at_ms;                /**< CPU1状態最終更新時刻 */
+LOCAL UW audio_actuator_status_sequence;             /**< CPU1状態最終sequence */
 LOCAL UW audio_boot_id;                              /**< ESP32 boot ID */
+LOCAL BOOL audio_actuator_status_sequence_valid;           /**< CPU1状態sequence受信済み */
 LOCAL acoustic_protocol_parser_t audio_parser;             /**< CDCストリームパーサー */
 LOCAL acoustic_hello_t audio_hello;                        /**< 最新HELLO */
 LOCAL acoustic_health_t audio_health;                      /**< 最新HEALTH */
@@ -119,6 +126,7 @@ EXPORT cpu0_fault_t cpu0_audio_task_create(void) {
     audio_usb_open = FALSE;
     audio_read_pending = FALSE;
     audio_write_pending = FALSE;
+    audio_actuator_telemetry_pending = FALSE;
     audio_control_pending = FALSE;
     audio_now_ms = 0U;
     g_cpu0_audio_usb_state = CPU0_AUDIO_USB_STATE_CLOSED;
@@ -207,12 +215,17 @@ LOCAL void cpu0_audio_link_reset(void) {
     audio_boot_id_valid = FALSE;
     audio_read_pending = FALSE;
     audio_write_pending = FALSE;
+    audio_actuator_telemetry_pending = FALSE;
     audio_control_pending = FALSE;
     audio_device_address = 0U;
     audio_configured_at_ms = audio_now_ms;
     audio_last_sequence = 0U;
     audio_telemetry_sequence = 0U;
+    audio_actuator_telemetry_sequence = 0U;
     audio_last_telemetry_ms = audio_now_ms;
+    audio_actuator_status_at_ms = audio_now_ms;
+    audio_actuator_status_sequence = 0U;
+    audio_actuator_status_sequence_valid = FALSE;
     audio_boot_id = 0U;
     acoustic_protocol_parser_init(&audio_parser);
 }
@@ -354,6 +367,51 @@ LOCAL fsp_err_t cpu0_audio_read_start(void) {
 }
 
 /** =================================================================*
+ * @brief  CPU1アクチュエータ診断情報のUSB Bulk OUT開始
+ * @return FSPエラーコード
+ * ================================================================= */
+LOCAL fsp_err_t cpu0_audio_actuator_telemetry_start(void) {
+    actuator_status_t actuator_status = {0};
+    BOOL const status_valid = actuator_ipc_client_status_get(&actuator_status);
+    if (status_valid &&
+        (!audio_actuator_status_sequence_valid ||
+         (audio_actuator_status_sequence != actuator_status.sequence_number))) {
+        audio_actuator_status_sequence = actuator_status.sequence_number;
+        audio_actuator_status_at_ms = audio_now_ms;
+        audio_actuator_status_sequence_valid = TRUE;
+    }
+
+    acoustic_actuator_telemetry_t const telemetry = {
+        .schema_version = 1U,
+        .status_valid = status_valid ? 1U : 0U,
+        .fault_flags = actuator_status.fault_flags,
+        .actuator_status_age_ms = status_valid ? (audio_now_ms - audio_actuator_status_at_ms) : UINT32_MAX,
+        .actuator_status_sequence = actuator_status.sequence_number,
+        .actuator_applied_command_sequence = actuator_status.applied_command_sequence,
+        .actuator_left_duty_permille = actuator_status.left_duty_permille,
+        .actuator_right_duty_permille = actuator_status.right_duty_permille,
+        .actuator_left_encoder_rpm_x10 = actuator_status.left_encoder_rpm_x10,
+        .actuator_right_encoder_rpm_x10 = actuator_status.right_encoder_rpm_x10,
+    };
+    size_t const length = acoustic_protocol_encode_actuator_telemetry(audio_actuator_telemetry_sequence, audio_now_ms,
+                                                                      &telemetry, audio_tx_buffer,
+                                                                      sizeof(audio_tx_buffer));
+    if (0U == length) {
+        return FSP_ERR_INVALID_SIZE;
+    }
+
+    fsp_err_t const err = g_usb_on_usb.write(&g_basic0_ctrl, audio_tx_buffer, (UW) length, audio_device_address);
+    if (FSP_SUCCESS == err) {
+        audio_write_pending = TRUE;
+        audio_actuator_telemetry_pending = FALSE;
+        audio_actuator_telemetry_sequence++;
+    } else if (FSP_ERR_USB_BUSY == err) {
+        g_cpu0_audio_telemetry_busy_count++;
+    }
+    return err;
+}
+
+/** =================================================================*
  * @brief  CPU0診断情報のUSB Bulk OUT開始
  * @details 音響受信を止めず、最新判断とIPC指令をESP32へ返送する。
  * @return FSPエラーコード
@@ -363,7 +421,13 @@ LOCAL fsp_err_t cpu0_audio_telemetry_start(void) {
         (0U == audio_device_address)) {
         return FSP_ERR_NOT_OPEN;
     }
-    if (audio_write_pending || ((audio_now_ms - audio_last_telemetry_ms) < CPU0_AUDIO_TELEMETRY_PERIOD_MS)) {
+    if (audio_write_pending) {
+        return FSP_SUCCESS;
+    }
+    if (audio_actuator_telemetry_pending) {
+        return cpu0_audio_actuator_telemetry_start();
+    }
+    if ((audio_now_ms - audio_last_telemetry_ms) < CPU0_AUDIO_TELEMETRY_PERIOD_MS) {
         return FSP_SUCCESS;
     }
 
@@ -472,6 +536,7 @@ LOCAL fsp_err_t cpu0_audio_telemetry_start(void) {
     fsp_err_t const err = g_usb_on_usb.write(&g_basic0_ctrl, audio_tx_buffer, (UW) length, audio_device_address);
     if (FSP_SUCCESS == err) {
         audio_write_pending = TRUE;
+        audio_actuator_telemetry_pending = TRUE;
         audio_last_telemetry_ms = audio_now_ms;
         audio_telemetry_sequence++;
     } else if (FSP_ERR_USB_BUSY == err) {

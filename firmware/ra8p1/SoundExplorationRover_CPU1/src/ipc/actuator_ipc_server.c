@@ -10,6 +10,15 @@ LOCAL volatile BOOL g_command_pending;                     /**< 新しい指令�
 LOCAL volatile BOOL g_rx_fault_pending;                    /**< IPC受信異常の有無 */
 
 /** =================================================================*
+ * @brief  CPU1状態IPCワード送信
+ * @param[in] word 送信する32 bitワード
+ * @return FSPエラーコード
+ * ================================================================= */
+LOCAL fsp_err_t actuator_ipc_server_send_word(UW word) {
+    return g_actuator_ipc.p_api->messageSend(g_actuator_ipc.p_ctrl, word);
+}
+
+/** =================================================================*
  * @brief  IPCサーバー初期化
  * @return FSPエラーコード
  * ================================================================= */
@@ -57,6 +66,45 @@ EXPORT BOOL actuator_ipc_server_take_rx_fault(void) {
     g_rx_fault_pending = FALSE;
     FSP_CRITICAL_SECTION_EXIT;
     return pending;
+}
+
+/** =================================================================*
+ * @brief  CPU1実出力状態1ワード送信
+ * @details 4段FIFOをあふれさせないよう、状態タスクから1ワードずつ呼び出す。
+ * @param[in] p_status 送信するCPU1実出力状態
+ * @param[in] word_index 状態内の送信ワード番号
+ * @return FSPエラーコード
+ * ================================================================= */
+EXPORT fsp_err_t actuator_ipc_server_send_status_word(const actuator_status_t * p_status, UB word_index) {
+    if (NULL == p_status) {
+        return FSP_ERR_INVALID_POINTER;
+    }
+
+    switch (word_index) {
+    case 0U:
+        return actuator_ipc_server_send_word(
+            actuator_ipc_make_word(ACTUATOR_IPC_STATUS_FAULT_FLAGS, p_status->fault_flags));
+    case 1U:
+        return actuator_ipc_server_send_word(
+            actuator_ipc_make_i16_word(ACTUATOR_IPC_STATUS_LEFT_DUTY, p_status->left_duty_permille));
+    case 2U:
+        return actuator_ipc_server_send_word(
+            actuator_ipc_make_i16_word(ACTUATOR_IPC_STATUS_RIGHT_DUTY, p_status->right_duty_permille));
+    case 3U:
+        return actuator_ipc_server_send_word(
+            actuator_ipc_make_i16_word(ACTUATOR_IPC_STATUS_LEFT_ENCODER_RPM_X10, p_status->left_encoder_rpm_x10));
+    case 4U:
+        return actuator_ipc_server_send_word(
+            actuator_ipc_make_i16_word(ACTUATOR_IPC_STATUS_RIGHT_ENCODER_RPM_X10, p_status->right_encoder_rpm_x10));
+    case 5U:
+        return actuator_ipc_server_send_word(actuator_ipc_make_word(
+            ACTUATOR_IPC_STATUS_APPLIED_SEQUENCE, p_status->applied_command_sequence & ACTUATOR_IPC_SEQUENCE_MASK));
+    case 6U:
+        /* 最後のsequenceワードでCPU0側のスナップショットを確定する。 */
+        return actuator_ipc_server_send_word(actuator_ipc_make_status_sequence_word(p_status->sequence_number));
+    default:
+        return FSP_ERR_INVALID_ARGUMENT;
+    }
 }
 
 /** =================================================================*

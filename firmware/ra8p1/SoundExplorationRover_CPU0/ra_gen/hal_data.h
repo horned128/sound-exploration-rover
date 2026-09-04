@@ -52,8 +52,8 @@ extern const ipc_instance_t g_actuator_ipc;
 extern ipc_instance_ctrl_t g_actuator_ipc_ctrl;
 extern const ipc_cfg_t g_actuator_ipc_cfg;
 
-#ifndef NULL
-void NULL(ipc_callback_args_t *p_args);
+#ifndef actuator_ipc_client_callback
+void actuator_ipc_client_callback(ipc_callback_args_t *p_args);
 #endif
 void hal_entry(void);
 void g_hal_init(void);

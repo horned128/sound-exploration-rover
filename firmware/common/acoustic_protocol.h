@@ -22,6 +22,7 @@
 #define ACOUSTIC_HELLO_PAYLOAD_SIZE           (12U)
 #define ACOUSTIC_HEALTH_PAYLOAD_SIZE          (12U)
 #define ACOUSTIC_ROVER_TELEMETRY_PAYLOAD_SIZE (96U)
+#define ACOUSTIC_ACTUATOR_TELEMETRY_PAYLOAD_SIZE (24U)
 
 #define ACOUSTIC_CAPABILITY_DOA            (1UL << 0)
 #define ACOUSTIC_CAPABILITY_VAD            (1UL << 1)
@@ -50,6 +51,7 @@ typedef enum e_acoustic_message_type {
     ACOUSTIC_MESSAGE_SET_CONFIG = 0x10U,
     ACOUSTIC_MESSAGE_ACK = 0x11U,
     ACOUSTIC_MESSAGE_ROVER_TELEMETRY = 0x20U,
+    ACOUSTIC_MESSAGE_ACTUATOR_TELEMETRY = 0x21U,
     ACOUSTIC_MESSAGE_LOG = 0x7FU,
 } acoustic_message_type_t;
 
@@ -125,6 +127,19 @@ typedef struct st_acoustic_rover_telemetry {
     uint32_t sensor_age_ms;
 } acoustic_rover_telemetry_t;
 
+typedef struct st_acoustic_actuator_telemetry {
+    uint8_t schema_version;
+    uint8_t status_valid;
+    uint16_t fault_flags;
+    uint32_t actuator_status_age_ms;
+    uint32_t actuator_status_sequence;
+    uint32_t actuator_applied_command_sequence;
+    int16_t actuator_left_duty_permille;
+    int16_t actuator_right_duty_permille;
+    int16_t actuator_left_encoder_rpm_x10;
+    int16_t actuator_right_encoder_rpm_x10;
+} acoustic_actuator_telemetry_t;
+
 typedef struct st_acoustic_frame {
     uint8_t version;
     acoustic_message_type_t type;
@@ -166,6 +181,9 @@ size_t acoustic_protocol_encode_rover_telemetry(uint32_t sequence, uint32_t upti
                                                 const acoustic_rover_telemetry_t * p_telemetry, uint8_t * p_output,
                                                             /* ローバ診断符号化 */
                                                 size_t output_capacity);
+size_t acoustic_protocol_encode_actuator_telemetry(uint32_t sequence, uint32_t uptime_ms,
+                                                   const acoustic_actuator_telemetry_t * p_telemetry,
+                                                   uint8_t * p_output, size_t output_capacity);
 void acoustic_protocol_parser_init(acoustic_protocol_parser_t * p_parser); /* パーサー初期化 */
 acoustic_parse_result_t acoustic_protocol_parser_push(acoustic_protocol_parser_t * p_parser, uint8_t byte,
                                                             /* 1 byte受信 */
@@ -180,5 +198,7 @@ bool acoustic_protocol_decode_health(const acoustic_frame_t * p_frame,
 bool acoustic_protocol_decode_rover_telemetry(const acoustic_frame_t * p_frame,
                                                             /* ローバ診断復号 */
                                               acoustic_rover_telemetry_t * p_telemetry);
+bool acoustic_protocol_decode_actuator_telemetry(const acoustic_frame_t * p_frame,
+                                                 acoustic_actuator_telemetry_t * p_telemetry);
 
 #endif /* SEROV_ACOUSTIC_PROTOCOL_H */

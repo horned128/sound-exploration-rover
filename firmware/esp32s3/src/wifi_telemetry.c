@@ -42,7 +42,10 @@ static void wifi_telemetry_event_handler(void * argument, esp_event_base_t event
 static esp_err_t wifi_telemetry_station_start(void);        /* Wi-Fiステーション開始 */
 /* CPU0テレメトリーのJSON整形 */
 static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rover_telemetry_t const * telemetry,
-                                      acoustic_frame_t const * frame, uint32_t received_at_ms, int rssi_dbm);
+                                      acoustic_frame_t const * frame,
+                                      acoustic_actuator_telemetry_t const * actuator_telemetry,
+                                      bool actuator_frame_valid, uint32_t received_at_ms,
+                                      uint32_t actuator_received_at_ms, int rssi_dbm);
 static int wifi_telemetry_format_heartbeat(char * json, size_t capacity, int rssi_dbm); /* 接続状態JSON整形 */
 static void wifi_telemetry_task(void * argument);           /* USB受信・UDP送信タスク */
 
@@ -185,18 +188,29 @@ static esp_err_t wifi_telemetry_station_start(void) {
  * @param[in] capacity JSON格納先容量[byte]
  * @param[in] telemetry CPU0から受信した状態
  * @param[in] frame 受信フレーム情報
+ * @param[in] actuator_telemetry CPU1から返された実出力状態
+ * @param[in] actuator_frame_valid 実出力フレーム受信済みならtrue
  * @param[in] received_at_ms ESP32での受信時刻[ms]
+ * @param[in] actuator_received_at_ms 実出力フレーム受信時刻[ms]
  * @param[in] rssi_dbm Wi-Fi受信強度[dBm]
  * @return 整形した文字数。容量不足時はcapacity以上
  * ================================================================= */
 static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rover_telemetry_t const * telemetry,
-                                      acoustic_frame_t const * frame, uint32_t received_at_ms, int rssi_dbm) {
+                                      acoustic_frame_t const * frame,
+                                      acoustic_actuator_telemetry_t const * actuator_telemetry,
+                                      bool actuator_frame_valid, uint32_t received_at_ms,
+                                      uint32_t actuator_received_at_ms, int rssi_dbm) {
     uint32_t const now_ms = wifi_telemetry_uptime_ms();
     uint8_t const flags = telemetry->flags;
+    bool const actuator_valid = actuator_frame_valid && (actuator_telemetry->status_valid != 0U);
+    uint32_t const actuator_age_ms = actuator_valid
+                                         ? actuator_telemetry->actuator_status_age_ms +
+                                               (now_ms - actuator_received_at_ms)
+                                         : UINT32_MAX;
 
     return snprintf(
         json, capacity,
-        "{\"schema\":1,\"esp_ms\":%lu,\"cpu_valid\":true,"
+        "{\"schema\":2,\"esp_ms\":%lu,\"cpu_valid\":true,"
         "\"cpu_age_ms\":%lu,\"wifi\":{\"connected\":1,"
         "\"rssi_dbm\":%d,\"reconnects\":%lu},"
         "\"udp\":{\"sent\":%lu,\"errors\":%lu},"
@@ -217,9 +231,14 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         "\"emergency_stop\":%d,\"stale\":%d,"
         "\"target_age_ms\":%lu,\"sequence\":%lu,"
         "\"sent\":%lu,\"last_error\":%ld},"
-        "\"sensors\":{\"mode\":%u,\"mode_name\":\"%s\",\"rule\":%u,\"rule_name\":\"%s\","
+        "\"sensors\":{\"mode\":%u,\"mode_name\":\"%s\",\"rule\":%u,\"rule_name\":\"%s\"," 
         "\"valid_flags\":%u,\"tof_mm\":[%u,%u,%u],\"accel_mg\":[%d,%d,%d],"
-        "\"gyro_dps_x10\":[%d,%d,%d],\"error_flags\":%u,\"last_error\":%ld,\"age_ms\":%lu}}\n",
+        "\"gyro_dps_x10\":[%d,%d,%d],\"error_flags\":%u,\"last_error\":%ld,\"age_ms\":%lu},"
+        "\"actuator\":{\"valid\":%u,\"age_ms\":%lu,"
+        "\"status_sequence\":%lu,\"applied_command_sequence\":%lu,"
+        "\"faults\":%u,\"left_duty_permille\":%d,"
+        "\"right_duty_permille\":%d,\"left_encoder_rpm_x10\":%d,"
+        "\"right_encoder_rpm_x10\":%d}}\n",
         (unsigned long) now_ms, (unsigned long) (now_ms - received_at_ms), rssi_dbm,
         (unsigned long) s_wifi_reconnect_count, (unsigned long) s_udp_send_count, (unsigned long) s_udp_error_count,
         usb_link_is_mounted() ? 1 : 0, (unsigned long) usb_link_rx_drop_count(), (unsigned long) frame->uptime_ms,
@@ -249,7 +268,13 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         (unsigned int) telemetry->tof_distance_mm[1], (unsigned int) telemetry->tof_distance_mm[2],
         telemetry->accel_mg[0], telemetry->accel_mg[1], telemetry->accel_mg[2], telemetry->gyro_dps_x10[0],
         telemetry->gyro_dps_x10[1], telemetry->gyro_dps_x10[2], (unsigned int) telemetry->sensor_error_flags,
-        (long) telemetry->sensor_last_error, (unsigned long) telemetry->sensor_age_ms);
+        (long) telemetry->sensor_last_error, (unsigned long) telemetry->sensor_age_ms,
+        actuator_valid ? 1U : 0U, (unsigned long) actuator_age_ms,
+        (unsigned long) actuator_telemetry->actuator_status_sequence,
+        (unsigned long) actuator_telemetry->actuator_applied_command_sequence,
+        (unsigned int) actuator_telemetry->fault_flags, actuator_telemetry->actuator_left_duty_permille,
+        actuator_telemetry->actuator_right_duty_permille, actuator_telemetry->actuator_left_encoder_rpm_x10,
+        actuator_telemetry->actuator_right_encoder_rpm_x10);
 }
 
 /** =================================================================*
@@ -261,7 +286,7 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
  * ================================================================= */
 static int wifi_telemetry_format_heartbeat(char * json, size_t capacity, int rssi_dbm) {
     return snprintf(json, capacity,
-                    "{\"schema\":1,\"esp_ms\":%lu,\"cpu_valid\":false,"
+                    "{\"schema\":2,\"esp_ms\":%lu,\"cpu_valid\":false,"
                     "\"wifi\":{\"connected\":1,\"rssi_dbm\":%d,"
                     "\"reconnects\":%lu},\"udp\":{\"sent\":%lu,"
                     "\"errors\":%lu},\"usb\":{\"mounted\":%d,"
@@ -281,10 +306,13 @@ static void wifi_telemetry_task(void * argument) {
 
     acoustic_protocol_parser_t parser;
     acoustic_rover_telemetry_t latest_telemetry = {0};
+    acoustic_actuator_telemetry_t latest_actuator_telemetry = {0};
     acoustic_frame_t latest_frame = {0};
     uint32_t received_at_ms = 0U;
+    uint32_t actuator_received_at_ms = 0U;
     uint32_t last_send_ms = 0U;
     bool telemetry_valid = false;
+    bool actuator_frame_valid = false;
     int socket_fd = -1;
     uint8_t rx_data[CONFIG_TINYUSB_CDC_RX_BUFSIZE];
     acoustic_protocol_parser_init(&parser);
@@ -298,11 +326,15 @@ static void wifi_telemetry_task(void * argument) {
                 acoustic_frame_t frame;
                 acoustic_parse_result_t const parse_result =
                     acoustic_protocol_parser_push(&parser, rx_data[index], &frame);
-                if ((parse_result == ACOUSTIC_PARSE_FRAME_READY) &&
-                    acoustic_protocol_decode_rover_telemetry(&frame, &latest_telemetry)) {
-                    latest_frame = frame;
-                    received_at_ms = wifi_telemetry_uptime_ms();
-                    telemetry_valid = true;
+                if (parse_result == ACOUSTIC_PARSE_FRAME_READY) {
+                    if (acoustic_protocol_decode_rover_telemetry(&frame, &latest_telemetry)) {
+                        latest_frame = frame;
+                        received_at_ms = wifi_telemetry_uptime_ms();
+                        telemetry_valid = true;
+                    } else if (acoustic_protocol_decode_actuator_telemetry(&frame, &latest_actuator_telemetry)) {
+                        actuator_received_at_ms = wifi_telemetry_uptime_ms();
+                        actuator_frame_valid = true;
+                    }
                 }
             }
         }
@@ -336,9 +368,12 @@ static void wifi_telemetry_task(void * argument) {
         }
 
         char json[WIFI_TELEMETRY_JSON_CAPACITY];
-        int const json_length = telemetry_valid ? wifi_telemetry_format_json(json, sizeof(json), &latest_telemetry,
-                                                                             &latest_frame, received_at_ms, rssi_dbm)
-                                                : wifi_telemetry_format_heartbeat(json, sizeof(json), rssi_dbm);
+        int const json_length = telemetry_valid
+                                    ? wifi_telemetry_format_json(
+                                          json, sizeof(json), &latest_telemetry, &latest_frame,
+                                          &latest_actuator_telemetry, actuator_frame_valid, received_at_ms,
+                                          actuator_received_at_ms, rssi_dbm)
+                                    : wifi_telemetry_format_heartbeat(json, sizeof(json), rssi_dbm);
         if ((json_length <= 0) || ((size_t) json_length >= sizeof(json))) {
             s_udp_error_count++;
             continue;

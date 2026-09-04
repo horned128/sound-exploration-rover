@@ -142,6 +142,7 @@
                 <h3 class="panel-title">System & USB</h3>
                 <div class="data-grid">
                     <span class="data-label">ESP Time</span><span class="data-value" id="val_esp_ms">0 ms</span>
+                    <span class="data-label">Telemetry Schema</span><span class="data-value" id="val_schema">-</span>
                     <span class="data-label">CPU Valid</span><span class="data-value" id="val_cpu_valid">-</span>
                     <span class="data-label">CPU Age</span><span class="data-value" id="val_cpu_age">0 ms</span>
                     <span class="data-label">USB Mounted</span><span class="data-value" id="val_usb_mounted">-</span>
@@ -199,6 +200,18 @@
                     <span class="data-label">Rule</span><span class="data-value" id="val_sensor_rule">-</span>
                     <span class="data-label">Accel (mg)</span><span class="data-value" id="val_accel" style="font-size:11px;">[-,-,-]</span>
                     <span class="data-label">Gyro (dps)</span><span class="data-value" id="val_gyro" style="font-size:11px;">[-,-,-]</span>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3 class="panel-title">CPU1 Actuator Feedback</h3>
+                <div class="data-grid">
+                    <span class="data-label">Status</span><span class="data-value" id="val_act_valid">-</span>
+                    <span class="data-label">Age</span><span class="data-value" id="val_act_age">-</span>
+                    <span class="data-label">Applied Seq</span><span class="data-value" id="val_act_applied_seq">-</span>
+                    <span class="data-label">Faults</span><span class="data-value" id="val_act_faults">-</span>
+                    <span class="data-label">Duty L / R</span><span class="data-value" id="val_act_duty">-</span>
+                    <span class="data-label">RPM L / R</span><span class="data-value" id="val_act_rpm">-</span>
                 </div>
             </div>
         </div>
@@ -271,9 +284,11 @@
             });
         }
 
-        const rpmChart = createChart(document.getElementById('rpmChart').getContext('2d'), 'Motors RPM (Left/Right)', null, null, [
-            { label: 'Left RPM', borderColor: '#f44336', data: Array(MAX_POINTS).fill(0) },
-            { label: 'Right RPM', borderColor: '#2196f3', data: Array(MAX_POINTS).fill(0) }
+        const rpmChart = createChart(document.getElementById('rpmChart').getContext('2d'), 'Motor Target / Encoder RPM', null, null, [
+            { label: 'Left Target', borderColor: '#f44336', data: Array(MAX_POINTS).fill(0), borderDash: [5, 5] },
+            { label: 'Right Target', borderColor: '#2196f3', data: Array(MAX_POINTS).fill(0), borderDash: [5, 5] },
+            { label: 'Left Encoder', borderColor: '#ff9800', data: Array(MAX_POINTS).fill(0) },
+            { label: 'Right Encoder', borderColor: '#00bcd4', data: Array(MAX_POINTS).fill(0) }
         ]);
         const steerChart = createChart(document.getElementById('steerChart').getContext('2d'), 'Think Steering & Audio DoA (deg)', -180, 360, [
             { label: 'Steering', borderColor: '#4caf50', data: Array(MAX_POINTS).fill(0) },
@@ -458,10 +473,13 @@
         ws.onmessage = (event) => {
             const d = JSON.parse(event.data);
 
-            updateChartData(rpmChart, [d.command?.left_rpm || 0, d.command?.right_rpm || 0]);
+            updateChartData(rpmChart, [d.command?.left_rpm || 0, d.command?.right_rpm || 0,
+                (d.actuator?.left_encoder_rpm_x10 || 0) / 10,
+                (d.actuator?.right_encoder_rpm_x10 || 0) / 10]);
             updateChartData(steerChart, [d.think?.steering_deg || 0, d.audio?.doa_deg || 0]);
             updateChartData(audioChart, [(d.audio?.level_dbfs_x100||0)/100, (d.audio?.peak_dbfs_x100||0)/100]);
             setVal('val_esp_ms', `${d.esp_ms} ms`);
+            setVal('val_schema', d.schema, d.schema >= 2 ? 'val-ok' : 'val-warn');
             setVal('val_cpu_valid', d.cpu_valid ? 'TRUE' : 'FALSE', d.cpu_valid ? 'val-ok' : 'val-error');
             setVal('val_cpu_age', `${d.cpu_age_ms} ms`);
             setVal('val_usb_mounted', d.usb?.mounted ? 'YES' : 'NO', d.usb?.mounted ? 'val-ok' : 'val-warn');
@@ -512,6 +530,15 @@
             setVal('val_accel', formatVector(d.sensors?.accel_mg), validFlags & 0x08 ? 'val-ok' : 'val-warn');
             setVal('val_gyro', formatVector(d.sensors?.gyro_dps_x10, 10), validFlags & 0x08 ? 'val-ok' : 'val-warn');
             drawLocalObstacleMap(latestSensors);
+
+            setVal('val_act_valid', d.actuator?.valid ? 'VALID' : 'NO DATA', d.actuator?.valid ? 'val-ok' : 'val-error');
+            setVal('val_act_age', d.actuator?.valid ? `${d.actuator?.age_ms} ms` : '-');
+            setVal('val_act_applied_seq', d.actuator?.applied_command_sequence ?? '-');
+            setVal('val_act_faults', d.actuator?.faults ?? '-', d.actuator?.faults ? 'val-error' : 'val-ok');
+            setVal('val_act_duty', `${d.actuator?.left_duty_permille ?? '-'} / ${d.actuator?.right_duty_permille ?? '-'}`);
+            setVal('val_act_rpm', d.actuator?.valid
+                ? `${(d.actuator.left_encoder_rpm_x10 / 10).toFixed(1)} / ${(d.actuator.right_encoder_rpm_x10 / 10).toFixed(1)}`
+                : '-');
         };
 
         new ResizeObserver(() => drawLocalObstacleMap(latestSensors))

@@ -199,7 +199,9 @@ CPU0 parserは次を満たさないframeを走行判断へ渡さない。
 
 ### 5.2 CPU0診断返送
 
-`ROVER_TELEMETRY`は64 byte payloadで、CPU0が実際に判断に使った値をESP32S3へ返す。主な内容はUSB/HELLO/観測の有効状態、DoA・level・peak・VAD・XVF/audio flags、観測sequenceとage、`tk_think`状態・link判定・fault・操舵角、左右RPM、FR/FL/RR/RL角度、enable/非常停止、指令age/sequence/IPC結果である。CPU0の送信は非同期Bulk OUTとし、Bulk INの音響受信を停止して完了待ちしない。
+基本の`ROVER_TELEMETRY`は従来互換の64 byte payloadを維持し、CPU0が判断・送信した状態を返す。内容はUSB/HELLO/観測の有効状態、DoA・level・peak・VAD・XVF/audio flags、観測sequenceとage、`tk_think`状態・link判定・fault・操舵角、左右目標RPM、FR/FL/RR/RL角度、enable/非常停止、指令age/sequence/IPC結果である。
+
+CPU1から返された実出力は、24 byteの`ACTUATOR_TELEMETRY`追加フレームで送る。内容はCPU1状態のvalid/age/fault/sequence、適用済み指令sequence、左右実デューティ、左右encoder RPM×10である。旧ESP32S3 firmwareは未知の追加フレームだけを無視して基本診断を継続でき、新ESP32S3 firmwareは両フレームを統合してschema 2のUDP JSONを生成する。CPU0の送信はいずれも非同期Bulk OUTとし、Bulk INの音響受信を停止して完了待ちしない。
 
 ### 5.3 Wi-Fi UDP診断
 
@@ -259,7 +261,7 @@ stateDiagram-v2
 | 状態 | 出力 | 遷移判断 |
 |---|---|---|
 | `WAIT_LINK` | emergency stop、PWM停止 | USB列挙、`HELLO`、観測の連続受信を待つ |
-| `LISTEN` | motor停止、servo直進 | VAD、level、DoAの時間・方向安定性を評価 |
+| `LISTEN` | motor停止、servo直進 | VADとlevelで音イベントを開始し、DoA更新待ち後の方向安定性を評価 |
 | `STEER_PREP` | motor停止、4輪を目標操舵角へ | サーボ整定時間を確保し、急な同時始動を避ける |
 | `MOVE_STEP` | DoA前半球は前進、後半球は後進 | 側方は内輪を減速して500 msだけ回頭・移動する |
 | `SETTLE` | motor停止、servo直進 | 500 ms待ってモーター音と車体振動を減らす |
@@ -271,13 +273,14 @@ stateDiagram-v2
 | 設定 | 初期値 | 意味 |
 |---|---:|---|
 | trigger level | -45.00 dBFS | この値以上を反応候補とする |
-| release level | -52.00 dBFS | triggerより7 dB低いhysteresis |
-| VAD | 任意 | 現行値は無効。音声以外を含む一定以上の音へ反応する |
-| trigger hold | 300 ms | loud条件を連続して満たす時間 |
+| release level | -48.00 dBFS | triggerより3 dB低いhysteresis |
+| VAD | イベント開始時に必須 | 取得開始後は連続VADを要求しない |
+| DoA update wait | 500 ms | イベント開始前から保持されたselected azimuthを捨て、XVF3800の更新を待つ |
 | DoA stability | 5 sample、相互差20度以内 | 瞬間的な方向変動を除外 |
+| DoA acquisition timeout | 2000 ms | 安定した5 sampleが得られなければイベントを破棄 |
 | link stable | 500 ms | 列挙直後の走行開始を禁止 |
 | observation timeout | 600 ms | 超過時は即座に走行目標を停止へ更新 |
-| motor command | ±120 RPM | 前半球は正RPM、後半球は負RPM。CPU1が代表エンコーダで左右別PWMを比例補正 |
+| motor command | ±120 RPM | 前半球は正RPM、後半球は負RPM。現在は左右別の固定デューティ比で駆動 |
 | inner-wheel command | ±90 RPM相当 | 操舵時の内輪を減速し、回頭量を増やす |
 | steering | 20～45度 | 正面範囲外の方向を符号付きで制限 |
 | reverse boundary | ±100度 | この角度より後ろは後進を選ぶ |
@@ -286,9 +289,9 @@ stateDiagram-v2
 | front tolerance | ±15度 | 直進とみなす車体相対角 |
 | cooldown release | 200 ms | -48 dBFS以下のrelease条件を維持して次の音源イベントを再arm |
 
-triggerはhold時間と5 sampleの両方を満たす必要がある。1回のtriggerでDoA、操舵角、走行方向を固定し、servo整定と500 msの1 stepを完了した後は必ず`COOLDOWN`へ入る。これにより走行後に混ざるモーター音・反射音のDoAを、同じ音源への次の移動指令として使わない。ESP32S3は50 msごとに観測を送るが`tk_think`は100 ms周期で最新値を1点ずつ使うため、欠落がない場合も初回triggerには5点条件による約500 msが支配的になる。
+1回のloudかつVAD有効な観測で音イベントを開始する。開始直後の500 msはDoAを採用せず、その後の最新5 sampleが相互差20度以内になった時点でDoA、操舵角、走行方向を固定する。短い拍手ではVADが先に0へ戻るため、取得開始後はVADの継続を要求しない。開始から2000 ms以内に安定しなければイベントを破棄する。servo整定と500 msの1 stepを完了した後は必ず`COOLDOWN`へ入り、走行後に混ざるモーター音・反射音のDoAを次の移動指令として使わない。
 
-DoAの前半球（±100度未満）は前進、後半球は後進とする。後進では車体後方を進行方向としてDoAを再表現し、操舵符号を反転する。正面・真後ろはサーボ0度で直進・直後進する。側方では4輪を最大45度の逆相操舵とし、旋回内側のモーターを90 RPM相当に減速して回頭量を増やす。ReSpeakerはESP32S3実装面を上にして搭載しているため、DoAの左右は`CPU0_SOUND_DOA_CLOCKWISE_POSITIVE=0`で鏡映補正する。実測ログで車体正面のraw DoAは約180度だったため、`CPU0_SOUND_DOA_ZERO_OFFSET_DEG=180`として車体正面を0度へ補正する。正のサーボ指令は物理的な左操舵のため、`CPU0_STEERING_SERVO_OUTPUT_SIGN=-1`でサーボ出力だけを反転している。操舵角、リンク干渉、実際の車体回頭方向は必ず車輪を浮かせた試験から確認する。
+DoAの前半球（±100度未満）は前進、後半球は後進とする。後進では車体後方を進行方向としてDoAを再表現し、操舵符号を反転する。正面・真後ろはサーボ0度で直進・直後進する。側方では4輪を最大45度の逆相操舵とし、旋回内側のモーターを90 RPM相当に減速して回頭量を増やす。ReSpeakerはESP32S3実装面を上にして搭載しているため、DoAの左右は`CPU0_SOUND_DOA_CLOCKWISE_POSITIVE=0`で鏡映補正する。2026-09-04の方向別実測では車体正面のraw DoAが約0度、右が約288度、左が約82度、後方が約189度だったため、`CPU0_SOUND_DOA_ZERO_OFFSET_DEG=0`とする。正のサーボ指令は物理的な左操舵のため、`CPU0_STEERING_SERVO_OUTPUT_SIGN=-1`でサーボ出力だけを反転している。操舵角、リンク干渉、実際の車体回頭方向は必ず車輪を浮かせた試験から確認する。
 
 USB detach、観測timeout、CRC/version異常、XVF3800 I2C error、mute、I2S staleでは新しい移動を開始しない。CRC/version/format異常frameは破棄し、正常観測が600 ms途絶えると`WAIT_LINK`へ戻す。bit 0のI2S overrunは当該観測区間の一時的な欠落を示す診断値であり、単発ではlinkを切らない。移動中にtimeoutへ到達した場合もCPU0は停止目標をIPC送信する。さらにCPU0自体が停止してIPCが途絶えた場合は、CPU1の既存ローカルtimeoutがsafe stopを行う。
 
@@ -326,7 +329,7 @@ if raw DoA is not clockwise-positive:
 7. motor停止時、servo保持時、motor回転後のsettle中を比較し、500 msで自己雑音が十分下がるか確認する。Wi-Fi実装後は、送信中も同じ測定を追加する。
 8. 校正値をCPU0設定へ固定し、ReSpeakerの取付角を変えた場合だけ再校正する。
 
-VADは音声活動検出であり、任意の衝撃音、機械音、警報音を必ず検出する保証はない。現行設定は`CPU0_SOUND_REQUIRE_VAD=0`として、DoAが安定した一定以上の音全般へ反応する。会話だけへ限定する場合はこの設定を1へ戻す。目的音とモーター自己雑音の実測値を採り、trigger/release閾値は実機ごとに調整する。
+VADは音声活動検出であり、任意の衝撃音、機械音、警報音を必ず検出する保証はない。さらに、現在使用しているXVF3800 I2S firmwareでは公式GPO ServicerのDoA取得がstatus `0x41`で失敗するため、ESP32S3はselected azimuthへfallbackしている。この値は新しい音へ切り替わるまで直前の方向を保持し、fallback時のVADもAEC speech energyから生成した近似値である。そこで現行制御はVADをイベント開始条件にだけ使い、開始後500 msは保持値を捨て、その後の最新5 sampleで方向を確定する。目的音とモーター自己雑音の実測値を採り、trigger/release閾値、更新待ち時間、安定幅は実機ごとに調整する。
 
 ## 8. 安全な導入・検証順
 
@@ -353,7 +356,7 @@ CPU1のμT-Kernel移行前にはRA8P1のcompile/linkとバイナリ生成を確�
 
 1. motor・servo電源を切ったまま、無音時のlevel/peak、DoA valid率、VADを30秒以上記録する。
 2. 正面、左、右、後方から試験音を出し、DoA座標を校正する。
-3. trigger付近の音量を上下させ、-45/-52 dBFSのhysteresisでchatteringしないことを確認する。
+3. trigger付近の音量を上下させ、-45/-48 dBFSのhysteresisでchatteringしないことを確認する。
 4. UDP待受を開始し、Wi-Fi接続・切断や送信中にもUSB観測sequenceが継続し、CRC errorや`usb.rx_drops`が増えないことを確認する。
 
 ### 8.4 アクチュエータ試験

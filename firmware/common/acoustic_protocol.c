@@ -267,6 +267,38 @@ size_t acoustic_protocol_encode_rover_telemetry(uint32_t sequence, uint32_t upti
 }
 
 /** =================================================================*
+ * @brief  CPU1アクチュエータ診断情報符号化
+ * @param[in] sequence 送信シーケンス
+ * @param[in] uptime_ms CPU0起動後時間
+ * @param[in] p_telemetry CPU1アクチュエータ診断情報
+ * @param[out] p_output フレーム出力先
+ * @param[in] output_capacity 出力先容量
+ * @return 符号化長。引数不正時は0
+ * ================================================================= */
+size_t acoustic_protocol_encode_actuator_telemetry(uint32_t sequence, uint32_t uptime_ms,
+                                                   const acoustic_actuator_telemetry_t * p_telemetry,
+                                                   uint8_t * p_output, size_t output_capacity) {
+    if (NULL == p_telemetry) {
+        return 0U;
+    }
+
+    uint8_t payload[ACOUSTIC_ACTUATOR_TELEMETRY_PAYLOAD_SIZE];
+    payload[0] = p_telemetry->schema_version;
+    payload[1] = p_telemetry->status_valid;
+    acoustic_write_u16_le(&payload[2], p_telemetry->fault_flags);
+    acoustic_write_u32_le(&payload[4], p_telemetry->actuator_status_age_ms);
+    acoustic_write_u32_le(&payload[8], p_telemetry->actuator_status_sequence);
+    acoustic_write_u32_le(&payload[12], p_telemetry->actuator_applied_command_sequence);
+    acoustic_write_u16_le(&payload[16], (uint16_t) p_telemetry->actuator_left_duty_permille);
+    acoustic_write_u16_le(&payload[18], (uint16_t) p_telemetry->actuator_right_duty_permille);
+    acoustic_write_u16_le(&payload[20], (uint16_t) p_telemetry->actuator_left_encoder_rpm_x10);
+    acoustic_write_u16_le(&payload[22], (uint16_t) p_telemetry->actuator_right_encoder_rpm_x10);
+
+    return acoustic_protocol_encode(ACOUSTIC_MESSAGE_ACTUATOR_TELEMETRY, sequence, uptime_ms, payload,
+                                    (uint16_t) sizeof(payload), p_output, output_capacity);
+}
+
+/** =================================================================*
  * @brief  パーサー初期化
  * @param[out] p_parser パーサー状態
  * ================================================================= */
@@ -484,5 +516,31 @@ bool acoustic_protocol_decode_rover_telemetry(const acoustic_frame_t * p_frame,
     p_telemetry->sensor_error_flags = acoustic_read_u16_le(&p_frame->payload[86]);
     p_telemetry->sensor_last_error = (int32_t) acoustic_read_u32_le(&p_frame->payload[88]);
     p_telemetry->sensor_age_ms = acoustic_read_u32_le(&p_frame->payload[92]);
+    return true;
+}
+
+/** =================================================================*
+ * @brief  CPU1アクチュエータ診断情報復号
+ * @param[in] p_frame 受信フレーム
+ * @param[out] p_telemetry CPU1アクチュエータ診断情報
+ * @return フレームが正しいアクチュエータ診断情報ならtrue
+ * ================================================================= */
+bool acoustic_protocol_decode_actuator_telemetry(const acoustic_frame_t * p_frame,
+                                                 acoustic_actuator_telemetry_t * p_telemetry) {
+    if ((NULL == p_frame) || (NULL == p_telemetry) || (ACOUSTIC_MESSAGE_ACTUATOR_TELEMETRY != p_frame->type) ||
+        (ACOUSTIC_ACTUATOR_TELEMETRY_PAYLOAD_SIZE != p_frame->payload_length)) {
+        return false;
+    }
+
+    p_telemetry->schema_version = p_frame->payload[0];
+    p_telemetry->status_valid = p_frame->payload[1];
+    p_telemetry->fault_flags = acoustic_read_u16_le(&p_frame->payload[2]);
+    p_telemetry->actuator_status_age_ms = acoustic_read_u32_le(&p_frame->payload[4]);
+    p_telemetry->actuator_status_sequence = acoustic_read_u32_le(&p_frame->payload[8]);
+    p_telemetry->actuator_applied_command_sequence = acoustic_read_u32_le(&p_frame->payload[12]);
+    p_telemetry->actuator_left_duty_permille = (int16_t) acoustic_read_u16_le(&p_frame->payload[16]);
+    p_telemetry->actuator_right_duty_permille = (int16_t) acoustic_read_u16_le(&p_frame->payload[18]);
+    p_telemetry->actuator_left_encoder_rpm_x10 = (int16_t) acoustic_read_u16_le(&p_frame->payload[20]);
+    p_telemetry->actuator_right_encoder_rpm_x10 = (int16_t) acoustic_read_u16_le(&p_frame->payload[22]);
     return true;
 }

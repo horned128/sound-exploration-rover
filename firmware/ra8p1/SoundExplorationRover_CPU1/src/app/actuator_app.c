@@ -12,6 +12,7 @@
 EXPORT volatile fsp_err_t g_actuator_last_error = FSP_SUCCESS; /**< 最後に発生したFSPエラー */
 /**< アクチュエータ異常フラグ */
 EXPORT volatile UH g_actuator_fault_flags = ACTUATOR_FAULT_NONE;
+EXPORT volatile UW g_actuator_applied_sequence;                   /**< 最終適用指令sequence */
 
 LOCAL UW g_command_elapsed_ms;                       /**< 最終指令受信からの経過時間 */
 LOCAL BOOL g_emergency_stop_latched;                       /**< 緊急停止ラッチ状態 */
@@ -78,6 +79,7 @@ LOCAL void actuator_apply_command(const actuator_command_t * p_received) {
     }
 
     g_command_elapsed_ms = 0U;
+    g_actuator_applied_sequence = command.sequence_number;
 
     if (0U != command.emergency_stop) {
         g_emergency_stop_latched = TRUE;
@@ -129,6 +131,7 @@ EXPORT fsp_err_t actuator_app_init(void) {
     g_emergency_stop_latched = FALSE;
     g_actuator_last_error = FSP_SUCCESS;
     g_actuator_fault_flags = ACTUATOR_FAULT_NONE;
+    g_actuator_applied_sequence = 0U;
 
     fsp_err_t err = dc_motor_init();
     if (FSP_SUCCESS == err) {
@@ -197,4 +200,21 @@ EXPORT void actuator_app_run_1ms(void) {
 EXPORT void actuator_app_shutdown(void) {
     g_initialized = FALSE;
     actuator_safe_stop();
+}
+
+/** =================================================================*
+ * @brief  CPU1実出力状態取得
+ * @param[out] p_status 状態格納先
+ * ================================================================= */
+EXPORT void actuator_app_status_get(actuator_status_t * p_status) {
+    if (NULL == p_status) {
+        return;
+    }
+
+    p_status->left_duty_permille = g_drive_left_duty_permille;
+    p_status->right_duty_permille = g_drive_right_duty_permille;
+    p_status->left_encoder_rpm_x10 = (H) g_jga25_left_rpm_x10;
+    p_status->right_encoder_rpm_x10 = (H) g_jga25_right_rpm_x10;
+    p_status->fault_flags = g_actuator_fault_flags;
+    p_status->applied_command_sequence = g_actuator_applied_sequence;
 }

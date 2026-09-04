@@ -11,6 +11,7 @@ typedef struct st_sound_follow_context {
     UW link_stable_ms;
     UW trigger_elapsed_ms;
     UW quiet_elapsed_ms;
+    BOOL trigger_active;
     UB doa_sample_count;
     H desired_steering_deg;
     H desired_left_rpm;
@@ -22,7 +23,7 @@ LOCAL H sound_follow_angle_normalize(W angle_deg); /* 角度を-180～179度へ�
 LOCAL H sound_follow_relative_angle(UH doa_deg); /* DoAを車体座標へ変換 */
 LOCAL H sound_follow_angle_delta(H angle_deg, H reference_deg); /* 円周上の符号付き角度差 */
 LOCAL H sound_follow_abs_i16(H value);         /* int16_t絶対値 */
-LOCAL BOOL sound_follow_observation_usable(const acoustic_observation_t * p_observation); /* 走行判断可能な観測判定 */
+LOCAL BOOL sound_follow_observation_usable(const acoustic_observation_t * p_observation); /* DoA品質判定 */
 LOCAL BOOL sound_follow_observation_quiet(const acoustic_observation_t * p_observation); /* release条件判定 */
 LOCAL void sound_follow_detection_reset(void);             /* 音量・DoA履歴初期化 */
 LOCAL void sound_follow_doa_push(H angle_deg);       /* DoA履歴追加 */
@@ -95,24 +96,21 @@ LOCAL BOOL sound_follow_observation_usable(const acoustic_observation_t * p_obse
                 (ACOUSTIC_AUDIO_FLAG_I2C_ERROR | ACOUSTIC_AUDIO_FLAG_MUTED | ACOUSTIC_AUDIO_FLAG_I2S_STALE)))) {
         return FALSE;
     }
-    if ((0U != CPU0_SOUND_REQUIRE_VAD) && (0U == p_observation->vad)) {
-        return FALSE;
-    }
     return TRUE;
 }
 
 /** =================================================================*
  * @brief  音源追従解除に十分な静音か判定
  * @param[in] p_observation 音響観測
- * @return release閾値以下、またはVAD必須時の非音声ならtrue
+ * @return VADが非検出かつrelease閾値以下ならtrue
  * ================================================================= */
 LOCAL BOOL sound_follow_observation_quiet(const acoustic_observation_t * p_observation) {
     if (NULL == p_observation) {
         return TRUE;
     }
 
-    return (p_observation->level_dbfs_x100 <= CPU0_SOUND_RELEASE_DBFS_X100) ||
-           ((0U != CPU0_SOUND_REQUIRE_VAD) && (0U == p_observation->vad));
+    return (0U == p_observation->vad) &&
+           (p_observation->level_dbfs_x100 <= CPU0_SOUND_RELEASE_DBFS_X100);
 }
 
 /** =================================================================*
@@ -120,6 +118,7 @@ LOCAL BOOL sound_follow_observation_quiet(const acoustic_observation_t * p_obser
  * ================================================================= */
 LOCAL void sound_follow_detection_reset(void) {
     controller.trigger_elapsed_ms = 0U;
+    controller.trigger_active = FALSE;
     controller.doa_sample_count = 0U;
 }
 
@@ -305,20 +304,30 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
 
         if ((CPU0_THINK_STATE_LISTEN == controller.state) && p_input->new_observation) {
             BOOL const usable = sound_follow_observation_usable(&p_input->observation);
-            BOOL const loud = usable && (p_input->observation.level_dbfs_x100 >= CPU0_SOUND_TRIGGER_DBFS_X100);
+            BOOL const loud = p_input->observation.level_dbfs_x100 >= CPU0_SOUND_TRIGGER_DBFS_X100;
 
-            if (loud) {
-                sound_follow_doa_push(sound_follow_relative_angle(p_input->observation.doa_deg));
-                controller.trigger_elapsed_ms += elapsed_ms;
-            } else {
+            if (!controller.trigger_active) {
+                if (usable && loud && (0U != p_input->observation.vad)) {
+                    controller.trigger_active = TRUE;
+                    controller.trigger_elapsed_ms = 0U;
+                    controller.doa_sample_count = 0U;
+                }
+            } else if (!usable) {
                 sound_follow_detection_reset();
+            } else {
+                controller.trigger_elapsed_ms += elapsed_ms;
+                if (controller.trigger_elapsed_ms >= CPU0_SOUND_DOA_SETTLE_MS) {
+                    sound_follow_doa_push(sound_follow_relative_angle(p_input->observation.doa_deg));
+                }
             }
 
             H mean_doa_deg = 0;
-            if ((controller.trigger_elapsed_ms >= CPU0_SOUND_TRIGGER_HOLD_MS) &&
-                sound_follow_doa_stable(&mean_doa_deg)) {
+            if (controller.trigger_active && sound_follow_doa_stable(&mean_doa_deg)) {
                 sound_follow_motion_from_doa(mean_doa_deg);
                 sound_follow_state_enter(CPU0_THINK_STATE_STEER_PREP);
+            } else if (controller.trigger_active &&
+                       (controller.trigger_elapsed_ms >= CPU0_SOUND_DOA_ACQUIRE_TIMEOUT_MS)) {
+                sound_follow_detection_reset();
             }
         } else if ((CPU0_THINK_STATE_STEER_PREP == controller.state) &&
                    (controller.state_elapsed_ms >= CPU0_SOUND_STEER_SETTLE_MS)) {

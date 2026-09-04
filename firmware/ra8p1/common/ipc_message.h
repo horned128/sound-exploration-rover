@@ -21,6 +21,17 @@ typedef struct st_actuator_command {
     UW sequence_number;
 } actuator_command_t;
 
+/* CPU1で実際に適用しているアクチュエータ状態。 */
+typedef struct st_actuator_status {
+    H  left_duty_permille;
+    H  right_duty_permille;
+    H  left_encoder_rpm_x10;
+    H  right_encoder_rpm_x10;
+    UH fault_flags;
+    UW applied_command_sequence;
+    UW sequence_number;
+} actuator_status_t;
+
 typedef enum e_actuator_fault {
     ACTUATOR_FAULT_NONE                    = 0U,
     ACTUATOR_FAULT_COMMAND_TIMEOUT         = (1U << 0),
@@ -35,6 +46,7 @@ typedef enum e_actuator_fault {
 #define ACTUATOR_IPC_MESSAGE_ID_MASK        (0xFF000000UL)
 #define ACTUATOR_IPC_PAYLOAD_MASK           (0x00FFFFFFUL)
 #define ACTUATOR_IPC_SEQUENCE_MASK          (0x00FFFFFFUL)
+#define ACTUATOR_IPC_STATUS_WORD_COUNT      (7U)
 
 #define ACTUATOR_CONTROL_ENABLE_MASK         (1UL << 0)
 #define ACTUATOR_CONTROL_EMERGENCY_STOP_MASK (1UL << 1)
@@ -48,7 +60,13 @@ typedef enum e_actuator_ipc_message_id {
     ACTUATOR_IPC_COMMAND_FL_TARGET_DEG      = 0x06U,
     ACTUATOR_IPC_COMMAND_RR_TARGET_DEG      = 0x07U,
     ACTUATOR_IPC_COMMAND_RL_TARGET_DEG      = 0x08U,
-
+    ACTUATOR_IPC_STATUS_FAULT_FLAGS         = 0x81U,
+    ACTUATOR_IPC_STATUS_LEFT_DUTY           = 0x82U,
+    ACTUATOR_IPC_STATUS_RIGHT_DUTY          = 0x83U,
+    ACTUATOR_IPC_STATUS_LEFT_ENCODER_RPM_X10  = 0x84U,
+    ACTUATOR_IPC_STATUS_RIGHT_ENCODER_RPM_X10 = 0x85U,
+    ACTUATOR_IPC_STATUS_APPLIED_SEQUENCE    = 0x86U,
+    ACTUATOR_IPC_STATUS_SEQUENCE            = 0x87U,
 } actuator_ipc_message_id_t;
 
 /** =================================================================*
@@ -102,6 +120,15 @@ Inline UW actuator_ipc_make_i16_word(actuator_ipc_message_id_t id, H value) {
 Inline UW actuator_ipc_make_sequence_word(UW sequence_number) {
     return actuator_ipc_make_word(ACTUATOR_IPC_COMMAND_SEQUENCE,
                                   sequence_number & ACTUATOR_IPC_SEQUENCE_MASK);
+}
+
+/** =================================================================*
+ * @brief  CPU1状態シーケンス通信語生成
+ * @param[in] sequence_number 状態シーケンス番号
+ * @return シーケンス番号を含むIPC通信語
+ * ================================================================= */
+Inline UW actuator_ipc_make_status_sequence_word(UW sequence_number) {
+    return actuator_ipc_make_word(ACTUATOR_IPC_STATUS_SEQUENCE, sequence_number & ACTUATOR_IPC_SEQUENCE_MASK);
 }
 
 /** =================================================================*

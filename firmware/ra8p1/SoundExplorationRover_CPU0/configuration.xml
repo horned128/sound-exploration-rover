@@ -377,8 +377,8 @@
     <module id="module.driver.ipc_on_ipc.0">
       <property id="module.driver.ipc.name" value="g_actuator_ipc"/>
       <property id="module.driver.ipc.channel" value="enum.driver.ipc.channel.0"/>
-      <property id="module.driver.ipc.callback" value="NULL"/>
-      <property id="module.driver.ipc.ipl" value="_disabled"/>
+      <property id="module.driver.ipc.callback" value="actuator_ipc_client_callback"/>
+      <property id="module.driver.ipc.ipl" value="board.icu.common.irq.priority3"/>
     </module>
     <module id="module.driver.i2c_on_iic_master.0">
       <property id="module.driver.i2c_master.name" value="g_i2c_sensor"/>

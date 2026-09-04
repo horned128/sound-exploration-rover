@@ -24,10 +24,10 @@
 |---|---|---|
 | XVF3800 | 専用audio firmware | 4マイクDSP、DoA、VAD、処理済みI2S音声 |
 | XIAO ESP32S3 | ESP-IDF / FreeRTOS | I2S/I2C取得、dBFS算出、USB CDC device、frontend health、Wi-Fi UDP診断gateway |
-| CPU0 / Cortex-M85 | μT-Kernel 3.0 | USB HCDC host、I2C1センサー取得、観測検証、思考、走行目標、IPC送信、青/緑LED |
-| CPU1 / Cortex-M33 | μT-Kernel 3.0 | IPC受信、1 msアクチュエータタスク、制限、安全監視、PWM/GPIO、encoder、赤LED状態タスク |
+| CPU0 / Cortex-M85 | μT-Kernel 3.0 | USB HCDC host、I2C1センサー取得、観測検証、思考、走行目標、IPC指令送信・状態受信、青/緑LED |
+| CPU1 / Cortex-M33 | μT-Kernel 3.0 | IPC指令受信・状態送信、1 msアクチュエータタスク、制限、安全監視、PWM/GPIO、encoder、赤LED状態タスク |
 
-CPU0の主周期はcommand 50 ms、think 100 msで、CPU1はnominal 1 msである。IPC channel 0はCPU0が送信ポーリング、CPU1が受信IRQ/callbackとして使う。USB eventはCPU0の`tk_audio`がtask contextからpollし、USB callbackからμT-Kernel APIを直接呼ばない。
+CPU0の主周期はcommand 50 ms、think 100 msで、CPU1はnominal 1 msである。IPC channel 0はCPU0→CPU1の指令とCPU1→CPU0の診断に双方向利用し、両CPUの受信をIRQ/callbackで処理する。USB eventはCPU0の`tk_audio`がtask contextからpollし、USB callbackからμT-Kernel APIを直接呼ばない。
 
 ```mermaid
 flowchart LR
@@ -65,7 +65,7 @@ flowchart LR
             SERVER["IPC server<br/>staging・commit"]
             ACTTASK["tk_actuator / 1 ms<br/>actuator_app周期実行"]
             APP["actuator_app<br/>制限・安全状態・指令適用"]
-            STATUS["tk_status / 10 ms<br/>heartbeat・fault表示"]
+            STATUS["tk_status / 10 ms<br/>heartbeat・fault表示・実出力診断"]
             SERVO["servo driver<br/>論理FR / FL / RR / RL"]
             MOTOR["dc_motor driver<br/>論理左 / 論理右"]
             ENC["encoder driver<br/>左右代表A/B・4逓倍・RPM"]
@@ -82,6 +82,8 @@ flowchart LR
 
         CLIENT -->|"CPU0 → CPU1"| FIFO
         FIFO -->|"受信IRQ"| SERVER
+        STATUS -->|"CPU1 → CPU0<br/>実デューティ・encoder RPM"| FIFO
+        FIFO -.->|"受信IRQ"| CLIENT
     end
 
     ESP -->|"J7 USB HS<br/>音響frame"| AUDIO
@@ -294,6 +296,13 @@ FSPのIPC FIFOは4段、1要素32 bitである。共有C構造体を直接書か
 | `0x07` | RR_TARGET_DEG | signed 16 bit |
 | `0x08` | RL_TARGET_DEG | signed 16 bit |
 | `0x05` | SEQUENCE | 24 bit、1フレームのcommit marker |
+| `0x81` | STATUS_FAULT_FLAGS | CPU1 actuator fault flags |
+| `0x82` | STATUS_LEFT_DUTY | 左の実適用PWM、signed 16 bit permille |
+| `0x83` | STATUS_RIGHT_DUTY | 右の実適用PWM、signed 16 bit permille |
+| `0x84` | STATUS_LEFT_ENCODER_RPM_X10 | 左encoder RPM×10、signed 16 bit |
+| `0x85` | STATUS_RIGHT_ENCODER_RPM_X10 | 右encoder RPM×10、signed 16 bit |
+| `0x86` | STATUS_APPLIED_SEQUENCE | CPU1が最後に処理した指令sequence、24 bit |
+| `0x87` | STATUS_SEQUENCE | CPU1状態snapshotのcommit marker、24 bit |
 
 ### 6.2 6出力の一括commit
 
@@ -321,18 +330,20 @@ sequenceDiagram
 
 CONTROLでemergency stopを受けた場合だけは、残りのワードとSEQUENCEを待たずにcommitする。実際の出力停止はIRQ内ではなくCPU1の次回`tk_actuator`周期で行う。CPU0はFIFO overflow時に1 ms待って同じワードを再送する。
 
+CPU1の`tk_status`は実デューティ、左右encoder RPM、fault、適用済み指令sequenceをsnapshot化し、4段FIFOをあふれさせないよう10 msごとに1ワードずつCPU0へ返す。CPU0は`STATUS_SEQUENCE`受信時だけsnapshotを確定する。USBでは従来互換の64 byte `ROVER_TELEMETRY`に続けて、CPU1状態を24 byte `ACTUATOR_TELEMETRY`として別送し、新旧ESP32S3間の基本診断互換性を保つ。この戻り値は診断専用であり、CPU1の1 ms制御を待たせない。
+
 ## 7. CPU1アクチュエータ設計
 
 | タスク | 優先度 | スタック | 実行 | 責務 |
 |---|---:|---:|---|---|
 | `cpu1_actuator_task` | 4 | 2048 B | nominal 1 ms | IPC確定指令、encoder、PWMランプ、安全停止 |
-| `cpu1_status_task` | 12 | 512 B | nominal 10 ms | 赤LED heartbeat、driver/FSP fault表示 |
+| `cpu1_status_task` | 12 | 512 B | nominal 10 ms | 赤LED、driver/FSP fault表示、CPU1実出力診断送信 |
 
 数値が小さいほど高優先度であり、アクチュエータ周期処理を状態表示より優先する。IPC callbackはFSPのIRQ contextでstaging/commitだけを行い、μT-Kernelのtask APIとPWM driver APIを直接呼ばない。
 
 ### 7.1 タスクと安全状態
 
-CPU1の`usermain()`は、登録配列から`tk_actuator`と`tk_status`を生成・開始する。優先度4の`tk_actuator`は1 msごとに`actuator_app_run_1ms()`を呼び、driver housekeeping、IPC異常取得、新しいcommit済み指令の取得、期限監視、サーボとモーターへの適用を行う。優先度12の`tk_status`は10 msごとに状態を確認し、正常時500 ms、driver/FSP異常時50 ms周期で赤LEDを反転する。最終IPC指令から1500 ms以上経過するとローカルsafe stopへ移行する。
+CPU1の`usermain()`は、登録配列から`tk_actuator`と`tk_status`を生成・開始する。優先度4の`tk_actuator`は1 msごとに`actuator_app_run_1ms()`を呼び、driver housekeeping、IPC異常取得、新しいcommit済み指令の取得、期限監視、サーボとモーターへの適用を行う。優先度12の`tk_status`は10 msごとに状態を確認し、正常時500 ms、driver/FSP異常時50 ms周期で赤LEDを反転し、100 msごとに診断snapshotの送信を開始する。最終IPC指令から1500 ms以上経過するとローカルsafe stopへ移行する。
 
 ```mermaid
 stateDiagram-v2
@@ -367,7 +378,7 @@ stateDiagram-v2
 
 ### 7.3 DCモーター制御
 
-論理左右各1台のBTS7960へ、RPWM用GPT10A/BとLPWM用GPT7A/Bの20 kHz PWMを出す。実機の前後認識に合わせ、`cpu1_config.h`で論理左右を初期の物理左右から交換している。RPM指令を基本PWMへ換算し、各側の代表エンコーダ実測RPMとの差を比例補正する。
+論理左右各1台のBTS7960へ、RPWM用GPT10A/BとLPWM用GPT7A/Bの20 kHz PWMを出す。実機の前後認識に合わせ、`cpu1_config.h`で論理左右を初期の物理左右から交換している。RPM指令を基本PWMへ換算し、左右別の固定比を適用する。代表エンコーダ実測RPMによる比例補正は、入力方向を再確認するまで無効である。
 
 ```text
 target RPM -> duty permille = target * 1000 / 300 RPM
@@ -376,13 +387,13 @@ target RPM -> duty permille = target * 1000 / 300 RPM
 5 msごとにGPT10A/BおよびGPT7A/Bへ反映
 ```
 
-論理正RPMは車体前進として扱う。現在の実機配線では論理正RPMを左右ともRPWMへ、負RPMを左右ともLPWMへ出す。符号は`MOTOR_CHASSIS_FORWARD_SIGN=+1`、`MOTOR_LEFT_MOUNT_SIGN=+1`、`MOTOR_RIGHT_MOUNT_SIGN=+1`から合成する。同じ側のRPWM/LPWMは相互排他的に更新し、同時Highを避ける。停止時は4出力を0にしてから共通ENをLowにする。
+論理正RPMは車体前進として扱う。2026-09-04の実走確認に基づき、現在の実機配線では論理正RPMを左右ともLPWMへ、負RPMを左右ともRPWMへ出す。符号は`MOTOR_CHASSIS_FORWARD_SIGN=-1`、`MOTOR_LEFT_MOUNT_SIGN=+1`、`MOTOR_RIGHT_MOUNT_SIGN=+1`から合成する。同じ側のRPWM/LPWMは相互排他的に更新し、同時Highを避ける。停止時は4出力を0にしてから共通ENをLowにする。
 
-指令開始から150 msは停止直後の0 RPMを使わず、基本PWMだけで立ち上げる。その後は100 ms周期の代表エンコーダ実測値を使い、目標との差へ2 permille/RPMの比例補正を加える。右側は実機の無負荷速度差を`MOTOR_RIGHT_DUTY_SCALE_PERMILLE=750`で初期補正し、比例補正で目標RPMへ追従する。補正は±250 permille、最終PWMは0～700 permilleに制限する。左右RPMがともに0ならランプダウンを行わず、PWMと共通ENを即時停止する。左右の速度差には追従するが、各側3台のモーターを個別に制御するものではない。
+基本PWMは左右別の固定比で算出し、右側は実機の無負荷速度差を`MOTOR_RIGHT_DUTY_SCALE_PERMILLE=750`で抑える。代表エンコーダを使う比例補正機構は残しているが、右エンコーダーの方向異常を解決するまで`MOTOR_SPEED_FEEDBACK_ENABLE=0`として無効化している。再び有効にした場合は、指令開始から150 ms待った後、100 ms周期の実測RPMとの差へ2 permille/RPM、最大±250 permilleの補正を加える。最終PWMは0～700 permilleに制限する。左右RPMがともに0ならランプダウンを行わず、PWMと共通ENを即時停止する。各側3台のモーターを個別に制御するものではない。
 
 ## 8. 停止聴取型の音源追従
 
-`tk_think`は[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/control/sound_follow_controller.c)を100 msごとに更新する。USB linkと観測が500 ms安定した後だけ待受へ入り、-45 dBFS以上のlevelと5 sampleのDoA安定性を満たすと操舵する。VAD必須化は設定で選べるが、現行値は無効である。DoAの前半球では前進、後半球では後進を選ぶ。側方は最大45度の4輪逆相操舵に加え、内輪を90 RPM相当へ減速する。検出時にDoAと走行目標を固定し、500 msのservo整定後に500 msだけ移動する。servoを直進へ戻して500 ms停止した後は、500 msの静音を確認するまで次の検出を受け付けない。
+`tk_think`は[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/control/sound_follow_controller.c)を100 msごとに更新する。USB linkと観測が500 ms安定した後だけ待受へ入り、-45 dBFS以上かつVAD検出中の1観測を音源イベントの開始条件とする。開始直後の保持DoAを使わないよう500 ms待ち、その後の最新5 sampleが相互差20度以内になった場合だけ操舵する。取得開始から2000 ms以内に安定しなければイベントを破棄する。DoAの前半球では前進、後半球では後進を選ぶ。側方は最大45度の4輪逆相操舵に加え、内輪を90 RPM相当へ減速する。検出時にDoAと走行目標を固定し、500 msのservo整定後に500 msだけ移動する。servoを直進へ戻して500 ms停止した後は、静音を確認するまで次の検出を受け付けない。
 
 ```mermaid
 stateDiagram-v2
@@ -433,7 +444,7 @@ flowchart LR
 
 ### 9.1 USB High Speed割当
 
-XIAO ESP32S3はJ7へ接続し、CPU0のFSPにHCDC ACM host、High Speed、USB IP1を配置する。上位model名は`g_hcdc0`、USB Basic instanceは`g_basic0`である。DMA、hub、multi CDCは無効、callback/contextは`NULL`とし、USBHS main/D0FIFO/D1FIFOの3 IRQ priorityを12とする。CPU0は送信IPCとUSB hostを所有し、CPU1はアクチュエータだけを所有する。
+XIAO ESP32S3はJ7へ接続し、CPU0のFSPにHCDC ACM host、High Speed、USB IP1を配置する。上位model名は`g_hcdc0`、USB Basic instanceは`g_basic0`である。DMA、hub、multi CDCは無効、callback/contextは`NULL`とし、USBHS main/D0FIFO/D1FIFOの3 IRQ priorityを12とする。CPU0はUSB hostとIPC指令送信・状態受信を所有し、CPU1はアクチュエータ制御と実出力状態送信を所有する。
 
 | 用途 | FSP / GPIO | MCUピン | 外部コネクタ |
 |---|---|---|---|
@@ -488,7 +499,7 @@ P801、P803、P808をサーボへ転用しているため、現行構成ではOc
 | CPU1 `actuator_app` | IPC指令が1500 ms届かない | ローカルsafe stop |
 | CPU1 driver統合 | driver API error | DRIVER fault、safe stop |
 
-現状の制約は、ハードウェア非常停止入力なし、CPU間watchdogなし、各側3台の個別速度フィードバックなしである。論理左右代表モーターのA/Bを4逓倍で数え、実測値`JGA25_ENCODER_COUNTS_PER_REV=900`と100 msの差分からRPMを算出する。カウントとRPMの符号は左右とも前進が正、後進が負である。この代表RPMをCPU1内で左右別PWMの比例補正へ使う。また論理左右各3台を1台のBTS7960へ並列接続しているため、6台の個別制御には対応しない。
+現状の制約は、ハードウェア非常停止入力なし、CPU間watchdogなし、各側3台の個別速度フィードバックなしである。論理左右代表モーターのA/Bを4逓倍で数え、実測値`JGA25_ENCODER_COUNTS_PER_REV=900`と100 msの差分からRPMを算出する。カウントとRPMは前進正、後進負を契約とするが、2026-09-04のログでは右側が両方向で負を返したため、現在は`MOTOR_SPEED_FEEDBACK_ENABLE=0`として比例補正を無効化している。また論理左右各3台を1台のBTS7960へ並列接続しているため、6台の個別制御には対応しない。
 
 ## 11. ビルド・生成・書き込み
 

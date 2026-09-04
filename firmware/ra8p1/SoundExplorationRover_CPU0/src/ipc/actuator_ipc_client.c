@@ -14,6 +14,10 @@ LOCAL actuator_ipc_message_id_t const servo_target_message_ids[ACTUATOR_SERVO_CO
     ACTUATOR_IPC_COMMAND_RL_TARGET_DEG,
 };
 
+LOCAL actuator_status_t g_staging_status;                  /**< 受信中のCPU1状態 */
+LOCAL actuator_status_t g_committed_status;                /**< 確定したCPU1状態 */
+LOCAL volatile BOOL g_status_valid;                        /**< CPU1状態受信済み */
+
 /** =================================================================*
  * @brief  IPCワード送信
  * @param[in] word 送信する32 bitワード
@@ -37,6 +41,9 @@ LOCAL fsp_err_t actuator_ipc_send_word(UW word) {
  * @return FSPエラーコード
  * ================================================================= */
 EXPORT fsp_err_t actuator_ipc_client_init(void) {
+    g_staging_status = (actuator_status_t){0};
+    g_committed_status = g_staging_status;
+    g_status_valid = FALSE;
     return g_actuator_ipc.p_api->open(g_actuator_ipc.p_ctrl, g_actuator_ipc.p_cfg);
 }
 
@@ -94,4 +101,64 @@ EXPORT fsp_err_t actuator_ipc_client_emergency_stop(UW sequence_number) {
     }
 
     return err;
+}
+
+/** =================================================================*
+ * @brief  CPU1実出力状態取得
+ * @param[out] p_status 最新状態の格納先
+ * @return CPU1から完全な状態を受信済みならtrue
+ * ================================================================= */
+EXPORT BOOL actuator_ipc_client_status_get(actuator_status_t * p_status) {
+    if (NULL == p_status) {
+        return FALSE;
+    }
+
+    BOOL valid;
+    FSP_CRITICAL_SECTION_DEFINE;
+    FSP_CRITICAL_SECTION_ENTER;
+    valid = g_status_valid;
+    if (valid) {
+        *p_status = g_committed_status;
+    }
+    FSP_CRITICAL_SECTION_EXIT;
+    return valid;
+}
+
+/** =================================================================*
+ * @brief  CPU1状態受信コールバック
+ * @param[in] p_args FSP IPCコールバック情報
+ * ================================================================= */
+EXPORT void actuator_ipc_client_callback(ipc_callback_args_t * p_args) {
+    if ((NULL == p_args) || (0U == (p_args->event & IPC_EVENT_MESSAGE_RECEIVED))) {
+        return;
+    }
+
+    UW const payload = actuator_ipc_get_payload(p_args->message);
+    switch (actuator_ipc_get_message_id(p_args->message)) {
+    case ACTUATOR_IPC_STATUS_FAULT_FLAGS:
+        g_staging_status.fault_flags = (UH) payload;
+        break;
+    case ACTUATOR_IPC_STATUS_LEFT_DUTY:
+        g_staging_status.left_duty_permille = actuator_ipc_get_i16_payload(p_args->message);
+        break;
+    case ACTUATOR_IPC_STATUS_RIGHT_DUTY:
+        g_staging_status.right_duty_permille = actuator_ipc_get_i16_payload(p_args->message);
+        break;
+    case ACTUATOR_IPC_STATUS_LEFT_ENCODER_RPM_X10:
+        g_staging_status.left_encoder_rpm_x10 = actuator_ipc_get_i16_payload(p_args->message);
+        break;
+    case ACTUATOR_IPC_STATUS_RIGHT_ENCODER_RPM_X10:
+        g_staging_status.right_encoder_rpm_x10 = actuator_ipc_get_i16_payload(p_args->message);
+        break;
+    case ACTUATOR_IPC_STATUS_APPLIED_SEQUENCE:
+        g_staging_status.applied_command_sequence = payload & ACTUATOR_IPC_SEQUENCE_MASK;
+        break;
+    case ACTUATOR_IPC_STATUS_SEQUENCE:
+        g_staging_status.sequence_number = payload & ACTUATOR_IPC_SEQUENCE_MASK;
+        g_committed_status = g_staging_status;
+        g_status_valid = TRUE;
+        break;
+    default:
+        break;
+    }
 }

@@ -128,13 +128,14 @@ const i2c_master_instance_t g_i2c_sensor = { .p_ctrl = &g_i2c_sensor_ctrl,
 ipc_instance_ctrl_t g_actuator_ipc_ctrl;
 
 /** IPC configuration */
-const ipc_cfg_t g_actuator_ipc_cfg = { .channel = 0, .p_callback = NULL,
+const ipc_cfg_t g_actuator_ipc_cfg = { .channel = 0, .p_callback =
+		actuator_ipc_client_callback,
 #if defined(NULL)
                 .p_context = NULL,
 #else
 		.p_context = (void*) &NULL,
 #endif
-		.ipl = (BSP_IRQ_DISABLED),
+		.ipl = (3),
 #if defined(VECTOR_NUMBER_IPC_IRQ0)
                 .irq = VECTOR_NUMBER_IPC_IRQ0,
 #else

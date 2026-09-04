@@ -25,7 +25,7 @@ CPU1 / Cortex-M33 / μT-Kernel
                         └─ 赤LED heartbeat／fault表示
 ```
 
-FSPのIPC FIFOは4段、1要素32 bitです。上位8 bitをメッセージID、下位24 bitをペイロードとして使います。CPU0側は送信専用なのでIPC割り込みを使わず、CPU1側だけIPC受信割り込みとコールバックを有効にしています。
+FSPのIPC FIFOは方向ごとに4段、1要素32 bitです。上位8 bitをメッセージID、下位24 bitをペイロードとして使います。CPU0→CPU1は走行指令、CPU1→CPU0は実デューティ・エンコーダRPM・fault・適用済み指令sequenceの診断に使い、両CPUで受信割り込みとコールバックを有効にします。
 
 ## 現在の動作
 
@@ -38,7 +38,7 @@ CPU1は4輪操舵サーボ、左右BTS7960、左右代表エンコーダを起�
 
 購入時の仕様表記は100 rpmですが、今回の実機確認では約300 rpmを測定したため、開ループ換算上限を300 rpmへ変更しています。この値が無負荷測定である場合、車体搭載時の速度・トルクは別途確認してください。
 
-CPU0はCPU1を起動した後、μT-Kernel初期タスクから呼ばれる`usermain()`で`cpu0_tasks_init()`を実行します。`tk_init.c`の登録配列を基に`tk_think`、`tk_command`、`tk_audio`の全リソースを生成してから全タスクを開始し、`usermain()`は永久休止します。CPU1も独立したμT-Kernelを起動し、CPU1側`usermain()`から`tk_actuator`と`tk_status`を生成・開始して永久休止します。`tk_think`は停止中の音響観測が閾値と方向安定条件を満たした場合だけ、短時間の操舵・前進目標を生成します。CPU1は左右代表エンコーダの実測RPMを使い、左右別にPWMを比例補正します。
+CPU0はCPU1を起動した後、μT-Kernel初期タスクから呼ばれる`usermain()`で`cpu0_tasks_init()`を実行します。`tk_init.c`の登録配列を基に`tk_think`、`tk_command`、`tk_audio`の全リソースを生成してから全タスクを開始し、`usermain()`は永久休止します。CPU1も独立したμT-Kernelを起動し、CPU1側`usermain()`から`tk_actuator`と`tk_status`を生成・開始して永久休止します。`tk_think`は停止中の音響観測が閾値と方向安定条件を満たした場合だけ、短時間の操舵・前進目標を生成します。CPU1は左右代表エンコーダの実測RPMを診断へ返します。速度フィードバックは左右エンコーダーの方向と1回転カウント数を再確認するまで無効です。
 
 `tk_command`は高優先度の50 ms周期で最新目標を読み、FR、FL、RR、RLと左右モーターの6指示値を1つのIPCスナップショットとして送信します。思考目標が500 ms途絶した場合は緊急停止へ切り替えます。
 
@@ -119,7 +119,7 @@ A相だけでも指令方向を前提に速度の大きさは測れますが、�
 
 購入品は300 RPM品であり、旧100 RPM品を仮定した2024 count/revは使用できません。出力軸2回転で約1800カウントを実測したため、`JGA25_ENCODER_COUNTS_PER_REV=900`として100 msごとに左右のRPMを算出します。より正確な値が必要な場合は、出力軸10回転の平均で再校正します。測定方法は[JGA25-370 12 V・300 RPM仕様書](../../hardware/actuator/spec/jga25-370-12v-300rpm.md)を参照してください。
 
-`g_jga25_left_encoder_count`と`g_jga25_right_encoder_count`は、左右とも前進で増加し、後進で減少する4逓倍累積カウントです。`g_jga25_left_rpm_x10`と`g_jga25_right_rpm_x10`も同じ符号規則の推定RPMの10倍であり、`-1234`は後進方向の`-123.4 RPM`を表します。CPU1は100 msごとの実測RPMを使い、指令開始から150 ms後にPWMを比例補正して左右の速度差を抑えます。
+`g_jga25_left_encoder_count`と`g_jga25_right_encoder_count`は、左右とも前進で増加し、後進で減少する4逓倍累積カウントです。`g_jga25_left_rpm_x10`と`g_jga25_right_rpm_x10`も同じ符号規則の推定RPMの10倍であり、`-1234`は後進方向の`-123.4 RPM`を表します。2026-09-04の走行ログでは右側が物理的な前進・後進の両方で負値を返したため、現在は`MOTOR_SPEED_FEEDBACK_ENABLE=0`として実測RPMを診断だけに使用します。
 
 最終的に6台すべての速度を個別に閉ループ制御する場合は、6組（A/B計12入力）と6チャンネルのモーター駆動、または各側のエンコーダ値を集約する外部回路が必要です。現行の左右2台のBTS7960構成では、まず左右代表2組で十分です。
 
@@ -144,15 +144,15 @@ DCモーターをEK-RA8P1へ直接接続してはいけません。左右それ�
 
 電源はArduino電源コネクタJ18から分岐できますが、電圧を混在させないでください。BTS7960のVCCはモジュール仕様で5 Vが要求される場合が多いため、仕様が3.3 V対応と明記されていない限りJ18-5（+5 V）へ接続します。左右2台のBTS7960のVCCをそこから分岐し、左右代表エンコーダのVCCはJ18-4（+3.3 V）から分岐します。4機器のGNDはJ18-6またはJ18-7から分岐して共通化します。J18-4とJ18-5は接続せず、エンコーダ出力が3.3 Vを超えないことを確認してください。BTS7960のVCC電流がEK-RA8P1の電源容量を超える場合は、外部の安定化5 V電源を使い、GNDだけを共通化します。
 
-RPWMとLPWMは同じ側で同時にHighにせず、同じ側では1方向のPWMだけを出します。現在の実機配線では、論理正RPM（前進）を左右ともRPWMへ変換します。負RPM（後退）は左右ともLPWMへ変換します。前後基準の設定は`MOTOR_CHASSIS_FORWARD_SIGN`、左右個別の補正は`MOTOR_LEFT_MOUNT_SIGN`、`MOTOR_RIGHT_MOUNT_SIGN`です。P602/P603はPmod2へ接続し、Octo-SPI（OSPI0）のP100～P106、P800～P804とは別のOSPI1系ピンを使用しています。BTS7960のVCC、EK-RA8P1、外部モーター電源は必ずGNDを共通化します。
+RPWMとLPWMは同じ側で同時にHighにせず、同じ側では1方向のPWMだけを出します。2026-09-04の実走確認でRPWMが後進、LPWMが前進と確定したため、論理正RPM（前進）を左右ともLPWMへ、負RPM（後退）をRPWMへ変換します。前後基準の設定は`MOTOR_CHASSIS_FORWARD_SIGN=-1`、左右個別の補正は`MOTOR_LEFT_MOUNT_SIGN`、`MOTOR_RIGHT_MOUNT_SIGN`です。P602/P603はPmod2へ接続し、Octo-SPI（OSPI0）のP100～P106、P800～P804とは別のOSPI1系ピンを使用しています。BTS7960のVCC、EK-RA8P1、外部モーター電源は必ずGNDを共通化します。
 
-左右RPM指令は基本PWMデューティへ換算した後、各側の代表エンコーダ実測RPMとの差を比例補正します。右側の無負荷速度差は`MOTOR_RIGHT_DUTY_SCALE_PERMILLE=750`で初期デューティを下げ、比例補正で目標RPMへ追従させます。補正量は±250 permille、最終デューティは0～700 permilleに制限されるため、エンコーダ未接続や機械抵抗が大きい場合にも無制限には上がりません。左右各3台を1台のBTS7960へ並列接続しているため、補正対象は各側の代表モーターであり、3台個別の速度一致は保証しません。左右RPMがともに0の停止指令では、ランプダウンを待たずPWMと共通ENを即時に停止します。
+左右RPM指令は基本PWMデューティへ換算し、右側だけ`MOTOR_RIGHT_DUTY_SCALE_PERMILLE=750`で初期デューティを下げます。代表エンコーダ実測RPMによる比例補正機構は残していますが、右エンコーダーの方向異常を解決するまで無効です。左右各3台を1台のBTS7960へ並列接続しているため、補正対象は各側の代表モーターであり、3台個別の速度一致は保証しません。左右RPMがともに0の停止指令では、ランプダウンを待たずPWMと共通ENを即時に停止します。
 
 ## 音源追従の動作確認
 
-初回は車輪を浮かせ、モーター電源を電流制限付きにします。USB linkと音響観測が成立するまでCPU0はemergency stopを維持します。成立後は停止して音を聴き、一定条件を満たした方向へservoを500 ms整定し、左右+60 RPM相当で300 msだけ前進して500 ms停止します。
+初回は車輪を浮かせ、モーター電源を電流制限付きにします。USB linkと音響観測が成立するまでCPU0はemergency stopを維持します。成立後は停止して音を聴き、DoA更新待ちと5点の安定確認を行ってからservoを500 ms整定し、最大左右120 RPM相当で500 msだけ移動して500 ms停止します。
 
-USB接続だけの試験、静止音響試験、DoA座標校正、車輪を浮かせたアクチュエータ試験、接地試験の順序は[ReSpeaker統合設計の「安全な導入・検証順」](../../docs/firmware/RESPEAKER_INTEGRATION.md#8-安全な導入検証順)に従ってください。目標RPMは20 kHz PWMの基本値とし、代表エンコーダで左右差だけを補正します。
+USB接続だけの試験、静止音響試験、DoA座標校正、車輪を浮かせたアクチュエータ試験、接地試験の順序は[ReSpeaker統合設計の「安全な導入・検証順」](../../docs/firmware/RESPEAKER_INTEGRATION.md#8-安全な導入検証順)に従ってください。目標RPMは20 kHz PWMの基本値へ変換し、現在の代表エンコーダ値は診断にだけ使用します。
 
 ### CPU0状態LED
 
@@ -217,10 +217,10 @@ CPU0では次の変数をLive Watchへ追加します。
 | `SoundExplorationRover_CPU0/src/app/tasks/tk_think.c` | 音響snapshot取得、目標展開、青・緑LED、CPU0 faultラッチ |
 | `SoundExplorationRover_CPU0/src/app/control/sound_follow_controller.c` | 停止聴取型の音源追従状態機械 |
 | `SoundExplorationRover_CPU0/src/app/tasks/tk_command.c` | 最新目標の共有、期限監視、全アクチュエータのIPC一括送信 |
-| `SoundExplorationRover_CPU0/src/ipc/` | CPU0側IPCコマンド送信 |
+| `SoundExplorationRover_CPU0/src/ipc/` | CPU0側IPCコマンド送信・CPU1状態受信 |
 | `SoundExplorationRover_CPU1/src/app/` | CPU1初期化、周期処理、フェイルセーフ |
 | `SoundExplorationRover_CPU1/src/drivers/` | DCモーター、エンコーダ、サーボとFSP/BSP APIの呼び出し |
-| `SoundExplorationRover_CPU1/src/ipc/` | CPU1側IPCコマンド受信・コミット |
+| `SoundExplorationRover_CPU1/src/ipc/` | CPU1側IPCコマンド受信・コミット・実出力状態送信 |
 | `SoundExplorationRover_CPU0/src/cpu0_config.h` | CPU0周期、優先度、音量/DoA/移動、LED設定 |
 | `SoundExplorationRover_CPU1/src/cpu1_config.h` | ピン、周期、制限値、安全タイムアウト |
 | `SoundExplorationRover_CPU1/src/hal_entry.c` | 生成コードとユーザーアプリを接続する入口 |
@@ -235,4 +235,4 @@ CPU0では次の変数をLive Watchへ追加します。
 | `tk_audio.c` | `cpu0_audio_task` | 8 | 1 ms poll | USB HCDC受信、frame parser、音響snapshot |
 | `tk_think.c` | `cpu0_think_task` | 10 | 100 ms | 音源追従目標、LED、faultラッチ |
 
-IPCの構成方法と、送信側は割り込み不要・受信側はコールバックが必要という条件は、Renesasの[Getting Started with IPC on Dual Core MCU](https://www.renesas.com/en/document/apn/getting-started-ipc-dual-core-mcu)に準拠しています。
+IPCの構成方法と、受信側に割り込み・コールバックが必要という条件は、Renesasの[Getting Started with IPC on Dual Core MCU](https://www.renesas.com/en/document/apn/getting-started-ipc-dual-core-mcu)に準拠しています。
