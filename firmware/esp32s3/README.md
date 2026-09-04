@@ -11,7 +11,7 @@
 - I2S形式: XIAO master、16 kHz、stereo、32 bit、Philips I2S
 - USB: XIAO側USB-CをTinyUSBのCDC-ACM deviceとして使用
 - 送信: `HELLO`（接続時と1 s周期）、`ACOUSTIC_OBSERVATION`（50 ms周期）、`HEALTH`（1 s周期）
-- 受信: CPU0の`ROVER_TELEMETRY`（250 ms周期）
+- 受信: CPU0の`ROVER_TELEMETRY`（250 ms周期、schema 2でToF/BMI270診断を含む）
 - Wi-Fi: station mode、自動再接続、指定PCへのUDP JSON Lines（250 ms周期）
 - フレーム: `firmware/common/acoustic_protocol.h` の共有バイナリプロトコル
 

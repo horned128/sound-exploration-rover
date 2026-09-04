@@ -14,12 +14,59 @@
 #define CPU0_AUDIO_TELEMETRY_PERIOD_MS     (250U)
 #define CPU0_IPC_RETRY_DELAY_MS            (1U)
 
+/* I2C1センサータスクを登録する。センサー未接続時は安全停止用の無効状態を公開する。 */
+#define CPU0_SENSOR_I2C_ENABLED             (1U)
+#define CPU0_SENSOR_PERIOD_MS                (50U)
+#define CPU0_SENSOR_RETRY_PERIOD_MS          (1000U)
+#define CPU0_SENSOR_STALE_TIMEOUT_MS         (200U)
+#define CPU0_SENSOR_I2C_TIMEOUT_MS           (20U)
+#define CPU0_TOF_DATA_READY_TIMEOUT_MS        (100U)
+
+/* TCA9548A配下のVL53L1Xは全台0x29のまま使用する。 */
+#define CPU0_TCA9548A_ADDRESS                (0x70U)
+#define CPU0_TCA9548A_CHANNEL_LEFT           (0U)
+#define CPU0_TCA9548A_CHANNEL_CENTER         (1U)
+#define CPU0_TCA9548A_CHANNEL_RIGHT          (2U)
+#define CPU0_VL53L1X_ADDRESS                 (0x29U)
+#define CPU0_TOF_MIN_VALID_MM                (40U)
+#define CPU0_TOF_MAX_VALID_MM                (4000U)
+
+/* BMI270は4g、500dps、100Hzでraw accel/gyroを取得する。 */
+#define CPU0_BMI270_RESET_DELAY_MS           (10U)
+#define CPU0_BMI270_STARTUP_DELAY_MS         (50U)
+#define CPU0_BMI270_ACCEL_LSB_PER_G          (8192)
+#define CPU0_BMI270_GYRO_RANGE_DPS_X10       (5000)
+
+/* 自律モード。センサー構成の実機確認後にSENSOR_RULEへ切り替える。 */
+#define CPU0_AUTONOMY_MODE_SOUND_FOLLOW      (0U)
+#define CPU0_AUTONOMY_MODE_SENSOR_RULE       (1U)
+#define CPU0_AUTONOMY_MODE                   (CPU0_AUTONOMY_MODE_SOUND_FOLLOW)
+
+/* ルールベース走行の距離[mm]・速度[RPM]・操舵[deg]。 */
+#define CPU0_SENSOR_CLEAR_DISTANCE_MM        (1000U)
+#define CPU0_SENSOR_CAUTION_DISTANCE_MM      (650U)
+#define CPU0_SENSOR_SIDE_DISTANCE_MM         (450U)
+#define CPU0_SENSOR_HARD_STOP_DISTANCE_MM    (250U)
+#define CPU0_SENSOR_BLOCKED_DISTANCE_MM      (350U)
+#define CPU0_SENSOR_FORWARD_RPM              (55)
+#define CPU0_SENSOR_CAUTION_RPM              (35)
+#define CPU0_SENSOR_TURN_OUTER_RPM           (45)
+#define CPU0_SENSOR_TURN_INNER_RPM           (25)
+#define CPU0_SENSOR_TURN_STEERING_DEG        (35)
+
+/* BMI270のZ軸を車体上向きとして取り付ける。傾き・衝撃時は停止する。 */
+#define CPU0_SENSOR_IMU_MAX_TILT_MG          (700)
+#define CPU0_SENSOR_IMU_MAX_SHOCK_L1_MG      (2400)
+#define CPU0_SENSOR_IMU_MAX_GYRO_DPS_X10     (2000)
+
 /* 数値が小さいほど高優先度。IPC keep-aliveを思考処理より優先する。 */
 #define CPU0_COMMAND_TASK_PRIORITY         (6)
 #define CPU0_AUDIO_TASK_PRIORITY           (8)
+#define CPU0_SENSOR_TASK_PRIORITY          (9)
 #define CPU0_THINK_TASK_PRIORITY           (10)
 #define CPU0_COMMAND_TASK_STACK_SIZE       (1024U)
 #define CPU0_AUDIO_TASK_STACK_SIZE         (2048U)
+#define CPU0_SENSOR_TASK_STACK_SIZE        (2048U)
 #define CPU0_THINK_TASK_STACK_SIZE         (1024U)
 
 /* ReSpeakerはESP32S3実装面を上にして搭載する。DoA原点と回転方向は車体上で校正する。 */

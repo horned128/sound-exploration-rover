@@ -6,6 +6,7 @@
 #define SEROV_CPU0_TK_THINK_H
 
 #include "../control/sound_follow_controller.h"             /* 思考状態型 */
+#include "../control/obstacle_avoidance_controller.h"      /* センサー走行ルール型 */
 #include "task_common.h"                                    /* CPU0タスク共通異常型 */
 #include <tk/tkernel.h>                                     /* μT-Kernel型 */
 
@@ -27,6 +28,7 @@ IMPORT volatile H g_cpu0_think_left_rpm;              /**< 左RPM判断値（Liv
 IMPORT volatile H g_cpu0_think_right_rpm;             /**< 右RPM判断値（Live Watch用） */
 IMPORT volatile BOOL g_cpu0_think_actuator_enable;          /**< 出力許可判断（Live Watch用） */
 IMPORT volatile BOOL g_cpu0_think_emergency_stop;           /**< 非常停止判断（Live Watch用） */
+IMPORT volatile cpu0_sensor_rule_t g_cpu0_sensor_rule;      /**< センサー走行で選択したルール（Live Watch用） */
 IMPORT volatile UW g_cpu0_fault_flags;                /**< CPU0異常ラッチ（Live Watch用） */
 
 #endif /* SEROV_CPU0_TK_THINK_H */

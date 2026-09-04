@@ -5,7 +5,9 @@
 #include "tk_init.h"                                        /* CPU0タスク初期化API */
 #include "tk_audio.h"                                       /* 音響タスク生成・開始API */
 #include "tk_command.h"                                     /* 指令タスク生成・開始API */
+#include "tk_sensor.h"                                      /* センサータスク生成・開始API */
 #include "tk_think.h"                                       /* 思考タスク生成・開始API */
+#include "../../cpu0_config.h"                              /* I2Cセンサータスク有効化設定 */
 
 typedef cpu0_fault_t (*cpu0_task_create_t)(void);
 typedef cpu0_fault_t (*cpu0_task_start_t)(void);
@@ -21,6 +23,13 @@ LOCAL void cpu0_tasks_delete(UW task_count);               /* 登録済みタス
 
 /**< CPU0タスクの生成、開始、解放API登録。deleteはcreate失敗後にも安全に呼べること。 */
 LOCAL cpu0_task_registration_t const cpu0_task_registry[] = {
+#if (CPU0_SENSOR_I2C_ENABLED != 0U)
+    {
+        .create = cpu0_sensor_task_create,
+        .start = cpu0_sensor_task_start,
+        .delete = cpu0_sensor_task_delete,
+    },
+#endif
     {
         .create = cpu0_think_task_create,
         .start = cpu0_think_task_start,

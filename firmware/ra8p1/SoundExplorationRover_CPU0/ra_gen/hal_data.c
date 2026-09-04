@@ -77,6 +77,54 @@ const usb_cfg_t g_basic0_cfg = { .usb_mode = USB_MODE_HOST, .usb_speed =
 const usb_instance_t g_basic0 = { .p_ctrl = &g_basic0_ctrl, .p_cfg =
 		&g_basic0_cfg, .p_api = &g_usb_on_usb, };
 
+iic_master_instance_ctrl_t g_i2c_sensor_ctrl;
+const iic_master_extended_cfg_t g_i2c_sensor_extend =
+		{ .timeout_mode = IIC_MASTER_TIMEOUT_MODE_SHORT, .timeout_scl_low =
+				IIC_MASTER_TIMEOUT_SCL_LOW_ENABLED, .smbus_operation = 0,
+				/* Actual calculated bitrate: 393082. Actual calculated duty cycle: 50%. */.clock_settings.brl_value =
+						15, .clock_settings.brh_value = 15,
+				.clock_settings.cks_value = 2, .clock_settings.sddl_value = 0,
+				.clock_settings.dlcs_value = 0, };
+const i2c_master_cfg_t g_i2c_sensor_cfg = { .channel = 1, .rate =
+		I2C_MASTER_RATE_FAST, .slave = 0x70, .addr_mode =
+		I2C_MASTER_ADDR_MODE_7BIT,
+#define RA_NOT_DEFINED (1)
+#if (RA_NOT_DEFINED == RA_NOT_DEFINED)
+		.p_transfer_tx = NULL,
+#else
+                .p_transfer_tx       = &RA_NOT_DEFINED,
+#endif
+#if (RA_NOT_DEFINED == RA_NOT_DEFINED)
+		.p_transfer_rx = NULL,
+#else
+                .p_transfer_rx       = &RA_NOT_DEFINED,
+#endif
+#undef RA_NOT_DEFINED
+		.p_callback = NULL, .p_context = NULL,
+#if defined(VECTOR_NUMBER_IIC1_RXI)
+    .rxi_irq             = VECTOR_NUMBER_IIC1_RXI,
+#else
+		.rxi_irq = FSP_INVALID_VECTOR,
+#endif
+#if defined(VECTOR_NUMBER_IIC1_TXI)
+    .txi_irq             = VECTOR_NUMBER_IIC1_TXI,
+#else
+		.txi_irq = FSP_INVALID_VECTOR,
+#endif
+#if defined(VECTOR_NUMBER_IIC1_TEI)
+    .tei_irq             = VECTOR_NUMBER_IIC1_TEI,
+#else
+		.tei_irq = FSP_INVALID_VECTOR,
+#endif
+#if defined(VECTOR_NUMBER_IIC1_ERI)
+    .eri_irq             = VECTOR_NUMBER_IIC1_ERI,
+#else
+		.eri_irq = FSP_INVALID_VECTOR,
+#endif
+		.ipl = (12), .p_extend = &g_i2c_sensor_extend, };
+/* Instance structure to use this module. */
+const i2c_master_instance_t g_i2c_sensor = { .p_ctrl = &g_i2c_sensor_ctrl,
+		.p_cfg = &g_i2c_sensor_cfg, .p_api = &g_i2c_master_on_iic };
 ipc_instance_ctrl_t g_actuator_ipc_ctrl;
 
 /** IPC configuration */

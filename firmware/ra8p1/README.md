@@ -1,6 +1,6 @@
 # EK-RA8P1 アクチュエータ制御
 
-CPU0がReSpeaker/XIAOからUSBで音響観測を受けて短距離の音源追従目標を生成し、CPU1がPWM出力とエンコーダ処理を担当します。この文書は主にアクチュエータ配線と単体確認を扱います。全体構造は[ローバー ファームウェア設計書](../../docs/firmware/ARCHITECTURE.md)、USB接続、音響protocol、DoA校正、音源追従試験は[ReSpeaker統合設計](../../docs/firmware/RESPEAKER_INTEGRATION.md)を参照してください。
+CPU0がReSpeaker/XIAOからUSBで音響観測を受けて短距離の音源追従目標を生成し、CPU1がPWM出力とエンコーダ処理を担当します。この文書は主にアクチュエータ配線と単体確認を扱います。全体構造は[ローバー ファームウェア設計書](../../docs/firmware/ARCHITECTURE.md)、USB接続、音響protocol、DoA校正、音源追従試験は[ReSpeaker統合設計](../../docs/firmware/RESPEAKER_INTEGRATION.md)、I2Cセンサーとルールベース走行は[I2Cセンサー・ルールベース走行](../../docs/firmware/SENSOR_AUTONOMY.md)を参照してください。
 
 ```text
 CPU0 / Cortex-M85 / μT-Kernel

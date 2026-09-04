@@ -4,15 +4,19 @@
  * ================================================================= */
 #include "tk_think.h"                                       /* CPU0思考タスクAPI */
 #include "../../cpu0_config.h"                              /* 思考周期、LED設定 */
+#include "../control/obstacle_avoidance_controller.h"      /* ToF・IMU走行判断 */
 #include "../control/sound_follow_controller.h"             /* 音源追従状態機械 */
 #include "hal_data.h"                                       /* BSP LED情報、ピンAPI */
 #include "tk_audio.h"                                       /* 最新音響状態取得API */
 #include "tk_command.h"                                     /* 最新アクチュエータ目標更新API */
+#include "tk_sensor.h"                                      /* 最新I2Cセンサー状態取得API */
 
 IMPORT bsp_leds_t g_bsp_leds;                               /**< BSPのLED構成情報 */
 
 LOCAL void cpu0_think_task(INT stacd, void * exinf);       /* 思考タスク本体 */
 LOCAL ER cpu0_think_publish_target(const sound_follow_output_t * p_output); /* 追従指令の4輪展開 */
+LOCAL ER cpu0_think_publish_motion(H steering_deg, H left_rpm, H right_rpm, BOOL actuator_enable,
+                                   BOOL emergency_stop); /* 共通走行指令の4輪展開 */
 LOCAL void cpu0_think_led_write(BOOL blue_on, BOOL green_on); /* 2LED一括更新 */
 LOCAL UW cpu0_think_fault_code(UW fault_flags);/* LED表示用異常番号 */
 /* 状態LED更新 */
@@ -49,6 +53,7 @@ EXPORT volatile H g_cpu0_think_left_rpm;                     /**< 左RPM判断�
 EXPORT volatile H g_cpu0_think_right_rpm;                    /**< 右RPM判断値 */
 EXPORT volatile BOOL g_cpu0_think_actuator_enable;                 /**< 出力許可判断 */
 EXPORT volatile BOOL g_cpu0_think_emergency_stop;                  /**< 非常停止判断 */
+EXPORT volatile cpu0_sensor_rule_t g_cpu0_sensor_rule;             /**< 選択センサー走行ルール */
 EXPORT volatile UW g_cpu0_fault_flags;                       /**< CPU0異常ラッチ */
 
 /** =================================================================*
@@ -70,8 +75,12 @@ EXPORT cpu0_fault_t cpu0_think_task_create(void) {
     g_cpu0_think_right_rpm = 0;
     g_cpu0_think_actuator_enable = FALSE;
     g_cpu0_think_emergency_stop = TRUE;
+    g_cpu0_sensor_rule = CPU0_SENSOR_RULE_SAFE_STOP;
     g_cpu0_fault_flags = CPU0_FAULT_NONE;
     sound_follow_controller_init();
+#if (CPU0_SENSOR_I2C_ENABLED != 0U)
+    obstacle_avoidance_controller_init();
+#endif
 
     think_fault_flag_id = tk_cre_flg(&think_fault_flag_config);
     if (think_fault_flag_id <= 0) {
@@ -152,14 +161,31 @@ LOCAL ER cpu0_think_publish_target(const sound_follow_output_t * p_output) {
         return E_PAR;
     }
 
+    return cpu0_think_publish_motion(p_output->steering_deg, p_output->left_rpm, p_output->right_rpm,
+                                     p_output->actuator_enable, p_output->emergency_stop);
+}
+
+/** =================================================================*
+ * @brief  共通走行指令を4輪操舵・左右DCモーターの目標へ展開
+ * @details 前後輪を逆相操舵し、左右DCモーターを同じ更新で指令する。
+ * @param[in] steering_deg 右正の車体操舵角
+ * @param[in] left_rpm 論理左モーター目標RPM
+ * @param[in] right_rpm 論理右モーター目標RPM
+ * @param[in] actuator_enable 出力許可
+ * @param[in] emergency_stop 非常停止指定
+ * @return μT-Kernelエラーコード
+ * ================================================================= */
+LOCAL ER cpu0_think_publish_motion(H steering_deg, H left_rpm, H right_rpm, BOOL actuator_enable,
+                                   BOOL emergency_stop) {
+
     rover_motion_target_t target = {
-        .left_target_rpm = p_output->left_rpm,
-        .right_target_rpm = p_output->right_rpm,
-        .actuator_enable = p_output->actuator_enable,
-        .emergency_stop = p_output->emergency_stop,
+        .left_target_rpm = left_rpm,
+        .right_target_rpm = right_rpm,
+        .actuator_enable = actuator_enable,
+        .emergency_stop = emergency_stop,
     };
 
-    H const front_steering_deg = (H) (CPU0_STEERING_SERVO_OUTPUT_SIGN * p_output->steering_deg);
+    H const front_steering_deg = (H) (CPU0_STEERING_SERVO_OUTPUT_SIGN * steering_deg);
     /* FR */
     target.servo_target_deg[0] = front_steering_deg;
     /* FL */
@@ -259,6 +285,25 @@ LOCAL void cpu0_think_led_update(UW state_elapsed_ms, UW heartbeat_elapsed_ms, U
             blue_on = 0U == ((state_elapsed_ms / CPU0_LED_SETTLE_BLINK_MS) & 1U);
             break;
 
+        case CPU0_THINK_STATE_SENSOR_SAFE_STOP:
+        case CPU0_THINK_STATE_SENSOR_BLOCKED_STOP:
+        case CPU0_THINK_STATE_SENSOR_IMU_STOP:
+            blue_on = 0U == ((state_elapsed_ms / CPU0_LED_WAIT_LINK_BLINK_MS) & 1U);
+            break;
+
+        case CPU0_THINK_STATE_SENSOR_FORWARD:
+            blue_on = TRUE;
+            break;
+
+        case CPU0_THINK_STATE_SENSOR_CAUTION_FORWARD:
+            blue_on = state_elapsed_ms % CPU0_LED_LISTEN_BLINK_MS < CPU0_LED_HEARTBEAT_PULSE_MS;
+            break;
+
+        case CPU0_THINK_STATE_SENSOR_TURN_LEFT:
+        case CPU0_THINK_STATE_SENSOR_TURN_RIGHT:
+            blue_on = 0U == ((state_elapsed_ms / CPU0_LED_STEER_BLINK_MS) & 1U);
+            break;
+
         default:
             break;
         }
@@ -277,8 +322,10 @@ LOCAL void cpu0_think_task(INT stacd, void * exinf) {
     UW state_elapsed_ms = 0U;
     UW heartbeat_elapsed_ms = 0U;
     UW fault_elapsed_ms = 0U;
+#if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SOUND_FOLLOW)
     UW last_observation_sequence = 0U;
     BOOL observation_sequence_valid = FALSE;
+#endif
 
     while (1) {
         UINT fault_pattern = 0U;
@@ -288,6 +335,38 @@ LOCAL void cpu0_think_task(INT stacd, void * exinf) {
             g_cpu0_fault_flags |= fault_pattern;
         }
 
+#if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SENSOR_RULE)
+        cpu0_sensor_snapshot_t sensor_snapshot = {0};
+        ER const sensor_snapshot_err = cpu0_sensor_snapshot_get(&sensor_snapshot);
+        obstacle_avoidance_output_t output;
+        cpu0_think_state_t const previous_state = g_cpu0_think_state;
+        obstacle_avoidance_controller_step((E_OK == sensor_snapshot_err) ? &sensor_snapshot : NULL,
+                                           CPU0_FAULT_NONE != g_cpu0_fault_flags, &output);
+        g_cpu0_think_state = output.state;
+        if (previous_state != g_cpu0_think_state) {
+            state_elapsed_ms = 0U;
+        }
+
+        if (E_OK != cpu0_think_publish_motion(output.steering_deg, output.left_rpm, output.right_rpm,
+                                               output.actuator_enable, output.emergency_stop)) {
+            g_cpu0_fault_flags |= CPU0_FAULT_TARGET_UPDATE;
+            obstacle_avoidance_controller_step(NULL, TRUE, &output);
+            g_cpu0_think_state = output.state;
+            (void) cpu0_think_publish_motion(output.steering_deg, output.left_rpm, output.right_rpm,
+                                              output.actuator_enable, output.emergency_stop);
+        }
+
+        g_cpu0_think_link_ready = (E_OK == sensor_snapshot_err) && sensor_snapshot.initialized &&
+                                  (CPU0_SENSOR_VALID_ALL == sensor_snapshot.valid_flags) &&
+                                  (sensor_snapshot.age_ms <= CPU0_SENSOR_STALE_TIMEOUT_MS);
+        g_cpu0_think_new_observation = FALSE;
+        g_cpu0_think_steering_deg = output.steering_deg;
+        g_cpu0_think_left_rpm = output.left_rpm;
+        g_cpu0_think_right_rpm = output.right_rpm;
+        g_cpu0_think_actuator_enable = output.actuator_enable;
+        g_cpu0_think_emergency_stop = output.emergency_stop;
+        g_cpu0_sensor_rule = output.rule;
+#else
         cpu0_audio_snapshot_t snapshot = {0};
         ER const snapshot_err = cpu0_audio_snapshot_get(&snapshot);
         BOOL const observation_usable =
@@ -346,6 +425,7 @@ LOCAL void cpu0_think_task(INT stacd, void * exinf) {
         g_cpu0_think_right_rpm = output.right_rpm;
         g_cpu0_think_actuator_enable = output.actuator_enable;
         g_cpu0_think_emergency_stop = output.emergency_stop;
+#endif
 
         cpu0_think_led_update(state_elapsed_ms, heartbeat_elapsed_ms, fault_elapsed_ms);
         g_cpu0_think_cycle_count++;

@@ -5,6 +5,7 @@
 #include "tk_audio.h"                                       /* CPU0音響タスクAPI */
 #include "../../cpu0_config.h"                              /* USB受信周期、優先度、バッファ長 */
 #include "tk_command.h"                                     /* 最新指令状態取得API */
+#include "tk_sensor.h"                                      /* 最新I2Cセンサー状態取得API */
 #include "tk_think.h"                                       /* 思考タスクへの異常通知 */
 #include <string.h>                                         /* memset */
 
@@ -373,6 +374,17 @@ LOCAL fsp_err_t cpu0_audio_telemetry_start(void) {
         return FSP_ERR_USB_BUSY;
     }
 
+    cpu0_sensor_snapshot_t sensor_snapshot = {
+        .age_ms = UINT32_MAX,
+        .last_error = (W) FSP_ERR_NOT_OPEN,
+        .error_flags = CPU0_SENSOR_ERROR_I2C_INIT,
+    };
+#if (CPU0_SENSOR_I2C_ENABLED != 0U)
+    if (E_OK != cpu0_sensor_snapshot_get(&sensor_snapshot)) {
+        sensor_snapshot.valid_flags = 0U;
+    }
+#endif
+
     UB flags = 0U;
     if (g_cpu0_audio_usb_configured) {
         flags |= ACOUSTIC_TELEMETRY_FLAG_USB_CONFIGURED;
@@ -400,7 +412,7 @@ LOCAL fsp_err_t cpu0_audio_telemetry_start(void) {
     }
 
     acoustic_rover_telemetry_t telemetry = {
-        .schema_version = 1U,
+        .schema_version = 2U,
         .think_state = (UB) g_cpu0_think_state,
         .usb_state = (UB) g_cpu0_audio_usb_state,
         .flags = flags,
@@ -425,6 +437,27 @@ LOCAL fsp_err_t cpu0_audio_telemetry_start(void) {
         .command_last_error = (W) g_cpu0_command_last_error,
         .command_target_age_ms = command_snapshot.target_age_ms,
         .command_send_count = g_cpu0_command_send_count,
+        .autonomy_mode = (UB) CPU0_AUTONOMY_MODE,
+        .sensor_rule = (UB) g_cpu0_sensor_rule,
+        .sensor_valid_flags = sensor_snapshot.valid_flags,
+        .tof_distance_mm = {
+            sensor_snapshot.tof_distance_mm[0],
+            sensor_snapshot.tof_distance_mm[1],
+            sensor_snapshot.tof_distance_mm[2],
+        },
+        .accel_mg = {
+            sensor_snapshot.accel_mg[0],
+            sensor_snapshot.accel_mg[1],
+            sensor_snapshot.accel_mg[2],
+        },
+        .gyro_dps_x10 = {
+            sensor_snapshot.gyro_dps_x10[0],
+            sensor_snapshot.gyro_dps_x10[1],
+            sensor_snapshot.gyro_dps_x10[2],
+        },
+        .sensor_error_flags = (UH) sensor_snapshot.error_flags,
+        .sensor_last_error = (W) sensor_snapshot.last_error,
+        .sensor_age_ms = sensor_snapshot.age_ms,
     };
     for (UW index = 0U; index < ACTUATOR_SERVO_COUNT; index++) {
         telemetry.servo_target_deg[index] = command_snapshot.last_sent_target.servo_target_deg[index];

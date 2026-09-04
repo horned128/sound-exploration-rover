@@ -6,22 +6,34 @@
         #endif
 /* Number of interrupts allocated */
 #ifndef VECTOR_DATA_IRQ_COUNT
-#define VECTOR_DATA_IRQ_COUNT    (3)
+#define VECTOR_DATA_IRQ_COUNT    (7)
 #endif
 /* ISR prototypes */
+void iic_master_rxi_isr(void);
+void iic_master_txi_isr(void);
+void iic_master_tei_isr(void);
+void iic_master_eri_isr(void);
 void usbhs_interrupt_handler(void);
 void usbhs_d0fifo_handler(void);
 void usbhs_d1fifo_handler(void);
 
 /* Vector table allocations */
-#define VECTOR_NUMBER_USBHS_USB_INT_RESUME ((IRQn_Type) 0) /* USBHS USB INT RESUME (USBHS interrupt) */
-#define USBHS_USB_INT_RESUME_IRQn          ((IRQn_Type) 0) /* USBHS USB INT RESUME (USBHS interrupt) */
-#define VECTOR_NUMBER_USBHS_FIFO_0 ((IRQn_Type) 1) /* USBHS FIFO 0 (DMA transfer request 0) */
-#define USBHS_FIFO_0_IRQn          ((IRQn_Type) 1) /* USBHS FIFO 0 (DMA transfer request 0) */
-#define VECTOR_NUMBER_USBHS_FIFO_1 ((IRQn_Type) 2) /* USBHS FIFO 1 (DMA transfer request 1) */
-#define USBHS_FIFO_1_IRQn          ((IRQn_Type) 2) /* USBHS FIFO 1 (DMA transfer request 1) */
+#define VECTOR_NUMBER_IIC1_RXI ((IRQn_Type) 0) /* IIC1 RXI (Receive data full) */
+#define IIC1_RXI_IRQn          ((IRQn_Type) 0) /* IIC1 RXI (Receive data full) */
+#define VECTOR_NUMBER_IIC1_TXI ((IRQn_Type) 1) /* IIC1 TXI (Transmit data empty) */
+#define IIC1_TXI_IRQn          ((IRQn_Type) 1) /* IIC1 TXI (Transmit data empty) */
+#define VECTOR_NUMBER_IIC1_TEI ((IRQn_Type) 2) /* IIC1 TEI (Transmit end) */
+#define IIC1_TEI_IRQn          ((IRQn_Type) 2) /* IIC1 TEI (Transmit end) */
+#define VECTOR_NUMBER_IIC1_ERI ((IRQn_Type) 3) /* IIC1 ERI (Transfer error) */
+#define IIC1_ERI_IRQn          ((IRQn_Type) 3) /* IIC1 ERI (Transfer error) */
+#define VECTOR_NUMBER_USBHS_USB_INT_RESUME ((IRQn_Type) 4) /* USBHS USB INT RESUME (USBHS interrupt) */
+#define USBHS_USB_INT_RESUME_IRQn          ((IRQn_Type) 4) /* USBHS USB INT RESUME (USBHS interrupt) */
+#define VECTOR_NUMBER_USBHS_FIFO_0 ((IRQn_Type) 5) /* USBHS FIFO 0 (DMA transfer request 0) */
+#define USBHS_FIFO_0_IRQn          ((IRQn_Type) 5) /* USBHS FIFO 0 (DMA transfer request 0) */
+#define VECTOR_NUMBER_USBHS_FIFO_1 ((IRQn_Type) 6) /* USBHS FIFO 1 (DMA transfer request 1) */
+#define USBHS_FIFO_1_IRQn          ((IRQn_Type) 6) /* USBHS FIFO 1 (DMA transfer request 1) */
 /* The number of entries required for the ICU vector table. */
-#define BSP_ICU_VECTOR_NUM_ENTRIES (3)
+#define BSP_ICU_VECTOR_NUM_ENTRIES (7)
 
 #ifdef __cplusplus
         }

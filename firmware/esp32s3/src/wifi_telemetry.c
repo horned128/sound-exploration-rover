@@ -23,7 +23,7 @@
 #include <string.h>                                         /* 文字列・メモリー操作API */
 
 #define WIFI_TELEMETRY_CONNECTED_BIT       (1U << 0)
-#define WIFI_TELEMETRY_JSON_CAPACITY       (1024U)
+#define WIFI_TELEMETRY_JSON_CAPACITY       (1400U)
 
 static EventGroupHandle_t s_wifi_event_group;               /**< Wi-Fi接続状態イベント */
 static struct sockaddr_in s_destination;                    /**< UDP送信先IPv4アドレス */
@@ -34,6 +34,8 @@ static uint32_t s_udp_error_count;                          /**< UDP送信失敗
 static uint32_t wifi_telemetry_uptime_ms(void);             /* 起動からの経過時刻取得 */
 static int wifi_telemetry_flag(uint8_t flags, uint8_t mask);/* フラグをJSON真偽値へ変換 */
 static char const * wifi_telemetry_think_state(uint8_t state); /* 思考状態名取得 */
+static char const * wifi_telemetry_autonomy_mode(uint8_t mode); /* 自律モード名取得 */
+static char const * wifi_telemetry_sensor_rule(uint8_t rule); /* センサー走行ルール名取得 */
 /* ESP-IDF Wi-Fi/IPイベント処理 */
 static void wifi_telemetry_event_handler(void * argument, esp_event_base_t event_base, int32_t event_id,
                                          void * event_data);
@@ -69,9 +71,32 @@ static int wifi_telemetry_flag(uint8_t flags, uint8_t mask) {
  * ================================================================= */
 static char const * wifi_telemetry_think_state(uint8_t state) {
     static char const * const names[] = {
-        "WAIT_LINK", "LISTEN", "STEER_PREP", "MOVE_STEP", "SETTLE", "COOLDOWN", "FAULT",
+        "WAIT_LINK", "LISTEN", "STEER_PREP", "MOVE_STEP", "SETTLE", "COOLDOWN", "SENSOR_SAFE_STOP",
+        "SENSOR_FORWARD", "SENSOR_CAUTION_FORWARD", "SENSOR_TURN_LEFT", "SENSOR_TURN_RIGHT",
+        "SENSOR_BLOCKED_STOP", "SENSOR_IMU_STOP", "FAULT",
     };
     return (state < (sizeof(names) / sizeof(names[0]))) ? names[state] : "UNKNOWN";
+}
+
+/** =================================================================*
+ * @brief  自律モード名を取得
+ * @param[in] mode CPU0の自律モード値
+ * @return JSONに記録する自律モード名
+ * ================================================================= */
+static char const * wifi_telemetry_autonomy_mode(uint8_t mode) {
+    return (0U == mode) ? "SOUND_FOLLOW" : (1U == mode) ? "SENSOR_RULE" : "UNKNOWN";
+}
+
+/** =================================================================*
+ * @brief  センサー走行ルール名を取得
+ * @param[in] rule CPU0が選択したセンサー走行ルール値
+ * @return JSONに記録するルール名
+ * ================================================================= */
+static char const * wifi_telemetry_sensor_rule(uint8_t rule) {
+    static char const * const names[] = {
+        "SAFE_STOP", "FORWARD", "CAUTION_FORWARD", "TURN_LEFT", "TURN_RIGHT", "BLOCKED_STOP", "IMU_STOP",
+    };
+    return (rule < (sizeof(names) / sizeof(names[0]))) ? names[rule] : "UNKNOWN";
 }
 
 /** =================================================================*
@@ -191,7 +216,10 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         "\"servo_deg\":[%d,%d,%d,%d],\"enable\":%d,"
         "\"emergency_stop\":%d,\"stale\":%d,"
         "\"target_age_ms\":%lu,\"sequence\":%lu,"
-        "\"sent\":%lu,\"last_error\":%ld}}\n",
+        "\"sent\":%lu,\"last_error\":%ld},"
+        "\"sensors\":{\"mode\":%u,\"mode_name\":\"%s\",\"rule\":%u,\"rule_name\":\"%s\","
+        "\"valid_flags\":%u,\"tof_mm\":[%u,%u,%u],\"accel_mg\":[%d,%d,%d],"
+        "\"gyro_dps_x10\":[%d,%d,%d],\"error_flags\":%u,\"last_error\":%ld,\"age_ms\":%lu}}\n",
         (unsigned long) now_ms, (unsigned long) (now_ms - received_at_ms), rssi_dbm,
         (unsigned long) s_wifi_reconnect_count, (unsigned long) s_udp_send_count, (unsigned long) s_udp_error_count,
         usb_link_is_mounted() ? 1 : 0, (unsigned long) usb_link_rx_drop_count(), (unsigned long) frame->uptime_ms,
@@ -214,7 +242,14 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         wifi_telemetry_flag(flags, ACOUSTIC_TELEMETRY_FLAG_EMERGENCY_STOP),
         wifi_telemetry_flag(flags, ACOUSTIC_TELEMETRY_FLAG_COMMAND_STALE),
         (unsigned long) telemetry->command_target_age_ms, (unsigned long) telemetry->command_sequence,
-        (unsigned long) telemetry->command_send_count, (long) telemetry->command_last_error);
+        (unsigned long) telemetry->command_send_count, (long) telemetry->command_last_error,
+        (unsigned int) telemetry->autonomy_mode, wifi_telemetry_autonomy_mode(telemetry->autonomy_mode),
+        (unsigned int) telemetry->sensor_rule, wifi_telemetry_sensor_rule(telemetry->sensor_rule),
+        (unsigned int) telemetry->sensor_valid_flags, (unsigned int) telemetry->tof_distance_mm[0],
+        (unsigned int) telemetry->tof_distance_mm[1], (unsigned int) telemetry->tof_distance_mm[2],
+        telemetry->accel_mg[0], telemetry->accel_mg[1], telemetry->accel_mg[2], telemetry->gyro_dps_x10[0],
+        telemetry->gyro_dps_x10[1], telemetry->gyro_dps_x10[2], (unsigned int) telemetry->sensor_error_flags,
+        (long) telemetry->sensor_last_error, (unsigned long) telemetry->sensor_age_ms);
 }
 
 /** =================================================================*

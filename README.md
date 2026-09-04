@@ -68,6 +68,8 @@ sound-exploration-rover/
 
 ## ファームウェア
 
+I2Cセンサー（VL53L1X 3台、TCA9548A、BMI270）と障害物回避の導入・FSP生成・確認手順は、[I2Cセンサー・ルールベース走行](docs/firmware/SENSOR_AUTONOMY.md)を参照してください。
+
 通常の編集、ビルド、書き込み、デバッグは、リポジトリ直下の`SoundExplorationRover.code-workspace`をVS Codeで開いて行います。FSP Solution、ピン、クロック、スタックを変更するときは`firmware/ra8p1/`をe² studioのワークスペースとして使用します。
 
 詳細な設計書・開発手順・コーディング規約は[docs](docs/README.md)へ集約しています。VS Codeの初期設定とCPU0/CPU1/XIAOの操作は[VS Code統合開発手順](docs/firmware/VSCODE_WORKFLOW.md)を参照してください。全体の責務、CPU0/CPU1タスク、IPC、アクチュエータは[ローバー ファームウェア設計書](docs/firmware/ARCHITECTURE.md)、ReSpeaker/XIAOのUSB接続、protocol、DoA校正、音源追従の検証順は[ReSpeaker統合設計](docs/firmware/RESPEAKER_INTEGRATION.md)を参照してください。従来の配線とアクチュエータ単体確認は[EK-RA8P1 アクチュエータ制御](firmware/ra8p1/README.md)に残しています。

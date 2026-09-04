@@ -104,6 +104,12 @@
         }
         .chart-box:hover::after { opacity: 1; }
         .chart-container { flex: 1; position: relative; width: 100%; height: 100%; }
+        .map-container { flex: 1; position: relative; min-height: 0; }
+        .map-canvas { display: block; width: 100%; height: 100%; }
+        .map-caption {
+            position: absolute; left: 8px; bottom: 4px; color: var(--text-muted); font-size: 10px;
+            pointer-events: none;
+        }
 
         /* フォーカスモード時のレイアウト変更 */
         .charts-area.focus-mode .chart-box {
@@ -180,6 +186,21 @@
                     <span class="data-label">CRC Errors</span><span class="data-value" id="val_aud_crc">0</span>
                 </div>
             </div>
+
+            <div class="panel">
+                <h3 class="panel-title">Range Sensors & IMU</h3>
+                <div class="data-grid">
+                    <span class="data-label">ToF Left</span><span class="data-value" id="val_tof_left">-</span>
+                    <span class="data-label">ToF Center</span><span class="data-value" id="val_tof_center">-</span>
+                    <span class="data-label">ToF Right</span><span class="data-value" id="val_tof_right">-</span>
+                    <span class="data-label">Valid Flags</span><span class="data-value" id="val_sensor_valid">-</span>
+                    <span class="data-label">Sensor Age</span><span class="data-value" id="val_sensor_age">-</span>
+                    <span class="data-label">Sensor Error</span><span class="data-value" id="val_sensor_error">-</span>
+                    <span class="data-label">Rule</span><span class="data-value" id="val_sensor_rule">-</span>
+                    <span class="data-label">Accel (mg)</span><span class="data-value" id="val_accel" style="font-size:11px;">[-,-,-]</span>
+                    <span class="data-label">Gyro (dps)</span><span class="data-value" id="val_gyro" style="font-size:11px;">[-,-,-]</span>
+                </div>
+            </div>
         </div>
 
         <div class="charts-area">
@@ -195,9 +216,12 @@
                 <button class="btn-close">Close</button>
                 <div class="chart-container"><canvas id="audioChart"></canvas></div>
             </div>
-            <div class="chart-box" id="box-net">
+            <div class="chart-box" id="box-map">
                 <button class="btn-close">Close</button>
-                <div class="chart-container"><canvas id="netChart"></canvas></div>
+                <div class="map-container">
+                    <canvas id="sensorMap" class="map-canvas"></canvas>
+                    <span class="map-caption">車体座標の局所障害物マップ（前方が上）</span>
+                </div>
             </div>
         </div>
     </div>
@@ -259,9 +283,118 @@
             { label: 'Level', borderColor: '#9c27b0', data: Array(MAX_POINTS).fill(-100) },
             { label: 'Peak', borderColor: '#e91e63', data: Array(MAX_POINTS).fill(-100) }
         ]);
-        const netChart = createChart(document.getElementById('netChart').getContext('2d'), 'Network (RSSI)', -100, -30, [
-            { label: 'RSSI', borderColor: '#00bcd4', data: Array(MAX_POINTS).fill(-100) }
-        ]);
+        const SENSOR_BEARINGS_DEG = [-45, 0, 45]; // LEFT, CENTER, RIGHT。前方を0度、右を正とする。
+        const MAP_DEFAULT_RANGE_MM = 2000;
+        let latestSensors = null;
+
+        function sensorValue(values, index) {
+            const value = values?.[index];
+            return Number.isFinite(value) ? value : null;
+        }
+
+        function isSensorValid(sensors, index) {
+            return ((Number(sensors?.valid_flags) || 0) & (1 << index)) !== 0;
+        }
+
+        function formatVector(values, divisor = 1) {
+            if (!Array.isArray(values) || values.length !== 3) return '[-,-,-]';
+            return `[${values.map(value => Number.isFinite(value) ? (value / divisor).toFixed(divisor === 1 ? 0 : 1) : '-').join(', ')}]`;
+        }
+
+        function drawLocalObstacleMap(sensors) {
+            const canvas = document.getElementById('sensorMap');
+            const container = canvas.parentElement;
+            const bounds = container.getBoundingClientRect();
+            const width = Math.max(1, Math.floor(bounds.width));
+            const height = Math.max(1, Math.floor(bounds.height));
+            const scale = window.devicePixelRatio || 1;
+
+            if (canvas.width !== width * scale || canvas.height !== height * scale) {
+                canvas.width = width * scale;
+                canvas.height = height * scale;
+            }
+
+            const context = canvas.getContext('2d');
+            context.setTransform(scale, 0, 0, scale, 0, 0);
+            context.clearRect(0, 0, width, height);
+            context.fillStyle = '#1e1e1e';
+            context.fillRect(0, 0, width, height);
+
+            const ranges = [0, 1, 2]
+                .filter(index => isSensorValid(sensors, index))
+                .map(index => sensorValue(sensors?.tof_mm, index))
+                .filter(value => value !== null);
+            const largestRange = ranges.length ? Math.max(...ranges) : 0;
+            const mapRange = Math.max(MAP_DEFAULT_RANGE_MM, Math.min(4000, largestRange));
+            const originX = width / 2;
+            const originY = height * 0.82;
+            const radius = Math.min(width * 0.42, height * 0.70);
+
+            context.strokeStyle = '#3a3a3a';
+            context.fillStyle = '#888';
+            context.font = '10px Segoe UI';
+            context.textAlign = 'left';
+            for (let ring = 1; ring <= 4; ring += 1) {
+                const ringRadius = radius * ring / 4;
+                context.beginPath();
+                context.arc(originX, originY, ringRadius, Math.PI, 2 * Math.PI);
+                context.stroke();
+                context.fillText(`${Math.round(mapRange * ring / 4 / 100) / 10} m`, originX + 4, originY - ringRadius - 3);
+            }
+
+            context.strokeStyle = '#555';
+            context.setLineDash([4, 4]);
+            SENSOR_BEARINGS_DEG.forEach((bearingDeg, index) => {
+                const angle = bearingDeg * Math.PI / 180;
+                const beamX = originX + Math.sin(angle) * radius;
+                const beamY = originY - Math.cos(angle) * radius;
+                context.beginPath();
+                context.moveTo(originX, originY);
+                context.lineTo(beamX, beamY);
+                context.stroke();
+                context.fillStyle = '#888';
+                context.textAlign = 'center';
+                context.fillText(['L', 'C', 'R'][index], beamX, beamY - 5);
+            });
+            context.setLineDash([]);
+
+            SENSOR_BEARINGS_DEG.forEach((bearingDeg, index) => {
+                if (!isSensorValid(sensors, index)) return;
+                const distance = sensorValue(sensors?.tof_mm, index);
+                if (distance === null || distance <= 0) return;
+
+                const angle = bearingDeg * Math.PI / 180;
+                const plotDistance = Math.min(distance, mapRange);
+                const pointX = originX + Math.sin(angle) * radius * plotDistance / mapRange;
+                const pointY = originY - Math.cos(angle) * radius * plotDistance / mapRange;
+                context.fillStyle = distance > mapRange ? '#ff9800' : '#4caf50';
+                context.beginPath();
+                context.arc(pointX, pointY, 6, 0, 2 * Math.PI);
+                context.fill();
+                context.fillStyle = '#e0e0e0';
+                context.font = '11px monospace';
+                context.textAlign = 'center';
+                context.fillText(`${['L', 'C', 'R'][index]} ${distance} mm`, pointX, pointY - 10);
+            });
+
+            context.fillStyle = '#2196f3';
+            context.beginPath();
+            context.moveTo(originX, originY - 18);
+            context.lineTo(originX - 12, originY + 12);
+            context.lineTo(originX + 12, originY + 12);
+            context.closePath();
+            context.fill();
+            context.fillStyle = '#e0e0e0';
+            context.font = '11px Segoe UI';
+            context.textAlign = 'center';
+            context.fillText('ROVER', originX, originY + 28);
+
+            if (!ranges.length) {
+                context.fillStyle = '#ff9800';
+                context.font = '13px Segoe UI';
+                context.fillText('ToF data unavailable', originX, height * 0.42);
+            }
+        }
 
         // =====================================
         // フォーカス機能 (CSS display 切り替え方式に改善)
@@ -277,6 +410,7 @@
                     // DOMの描画完了直後にリサイズをかける
                     requestAnimationFrame(() => {
                         Object.values(Chart.instances).forEach(c => c.resize());
+                        drawLocalObstacleMap(latestSensors);
                     });
                 }
             });
@@ -290,6 +424,7 @@
                 chartsArea.classList.remove('focus-mode');
                 requestAnimationFrame(() => {
                     Object.values(Chart.instances).forEach(c => c.resize());
+                    drawLocalObstacleMap(latestSensors);
                 });
             });
         });
@@ -326,8 +461,6 @@
             updateChartData(rpmChart, [d.command?.left_rpm || 0, d.command?.right_rpm || 0]);
             updateChartData(steerChart, [d.think?.steering_deg || 0, d.audio?.doa_deg || 0]);
             updateChartData(audioChart, [(d.audio?.level_dbfs_x100||0)/100, (d.audio?.peak_dbfs_x100||0)/100]);
-            updateChartData(netChart, [d.wifi?.rssi_dbm || -100]);
-
             setVal('val_esp_ms', `${d.esp_ms} ms`);
             setVal('val_cpu_valid', d.cpu_valid ? 'TRUE' : 'FALSE', d.cpu_valid ? 'val-ok' : 'val-error');
             setVal('val_cpu_age', `${d.cpu_age_ms} ms`);
@@ -359,7 +492,31 @@
             setVal('val_aud_peak', `${(d.audio?.peak_dbfs_x100/100).toFixed(1)} dB`);
             setVal('val_xvf', d.audio?.xvf_status);
             setVal('val_aud_crc', d.audio?.crc_errors, d.audio?.crc_errors > 0 ? 'val-error' : '');
+
+            latestSensors = d.sensors || null;
+            const validFlags = Number(d.sensors?.valid_flags) || 0;
+            const sensorError = Number(d.sensors?.error_flags) || 0;
+            const tofValues = d.sensors?.tof_mm;
+            const setTof = (id, index) => {
+                const valid = isSensorValid(d.sensors, index);
+                const value = sensorValue(tofValues, index);
+                setVal(id, valid && value !== null ? `${value} mm` : '-', valid ? 'val-ok' : 'val-error');
+            };
+            setTof('val_tof_left', 0);
+            setTof('val_tof_center', 1);
+            setTof('val_tof_right', 2);
+            setVal('val_sensor_valid', `0x${validFlags.toString(16).padStart(2, '0').toUpperCase()}`, validFlags === 0x0f ? 'val-ok' : 'val-warn');
+            setVal('val_sensor_age', d.sensors?.age_ms !== undefined ? `${d.sensors.age_ms} ms` : '-');
+            setVal('val_sensor_error', `0x${sensorError.toString(16).padStart(2, '0').toUpperCase()}`, sensorError === 0 ? 'val-ok' : 'val-error');
+            setVal('val_sensor_rule', d.sensors?.rule_name || '-');
+            setVal('val_accel', formatVector(d.sensors?.accel_mg), validFlags & 0x08 ? 'val-ok' : 'val-warn');
+            setVal('val_gyro', formatVector(d.sensors?.gyro_dps_x10, 10), validFlags & 0x08 ? 'val-ok' : 'val-warn');
+            drawLocalObstacleMap(latestSensors);
         };
+
+        new ResizeObserver(() => drawLocalObstacleMap(latestSensors))
+            .observe(document.querySelector('.map-container'));
+        drawLocalObstacleMap(null);
     </script>
 </body>
 </html>

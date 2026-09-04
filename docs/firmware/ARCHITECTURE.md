@@ -1,6 +1,6 @@
 # ローバー ファームウェア設計書
 
-最終更新: 2026-09-01 / 対象: RA8P1 CPU0/CPU1、ReSpeaker/XIAO統合の現行ファームウェア実装
+最終更新: 2026-09-02 / 対象: RA8P1 CPU0/CPU1、ReSpeaker/XIAO、I2Cセンサー統合の現行ファームウェア実装
 
 現行ソースに対応するインタラクティブな全体図は、[現行コード構造図](archify/SEROV_ARCHITECTURE.html)を参照する。
 
@@ -24,7 +24,7 @@
 |---|---|---|
 | XVF3800 | 専用audio firmware | 4マイクDSP、DoA、VAD、処理済みI2S音声 |
 | XIAO ESP32S3 | ESP-IDF / FreeRTOS | I2S/I2C取得、dBFS算出、USB CDC device、frontend health、Wi-Fi UDP診断gateway |
-| CPU0 / Cortex-M85 | μT-Kernel 3.0 | USB HCDC host、観測検証、思考、走行目標、IPC送信、青/緑LED |
+| CPU0 / Cortex-M85 | μT-Kernel 3.0 | USB HCDC host、I2C1センサー取得、観測検証、思考、走行目標、IPC送信、青/緑LED |
 | CPU1 / Cortex-M33 | μT-Kernel 3.0 | IPC受信、1 msアクチュエータタスク、制限、安全監視、PWM/GPIO、encoder、赤LED状態タスク |
 
 CPU0の主周期はcommand 50 ms、think 100 msで、CPU1はnominal 1 msである。IPC channel 0はCPU0が送信ポーリング、CPU1が受信IRQ/callbackとして使う。USB eventはCPU0の`tk_audio`がtask contextからpollし、USB callbackからμT-Kernel APIを直接呼ばない。
@@ -41,15 +41,18 @@ flowchart LR
         subgraph CPU0["CPU0 / Cortex-M85 / μT-Kernel"]
             INIT["usermain / task registry<br/>全タスク生成・開始"]
             AUDIO["tk_audio<br/>USB HCDC・frame検証"]
+            SENSOR["tk_sensor / 50 ms<br/>I2C1・ToF/IMU snapshot"]
             OBS["最新音響snapshot<br/>mutex保護"]
-            THINK["tk_think / 100 ms<br/>音源追従状態機械・青/緑LED"]
+            THINK["tk_think / 100 ms<br/>音源追従または障害物回避・青/緑LED"]
             COMMAND["tk_command / 50 ms<br/>期限監視・6出力一括送信"]
             CLIENT["IPC client<br/>32 bitワード列へ変換"]
             INIT --> AUDIO
+            INIT --> SENSOR
             INIT --> THINK
             INIT --> COMMAND
             AUDIO --> OBS
             OBS --> THINK
+            SENSOR --> THINK
             THINK -->|"mutexで保護した最新目標"| COMMAND
             COMMAND --> CLIENT
             COMMAND -->|"fault event flag"| THINK
@@ -82,6 +85,8 @@ flowchart LR
     end
 
     ESP -->|"J7 USB HS<br/>音響frame"| AUDIO
+    TOF["VL53L1X x3<br/>TCA9548A CH0/1/2"] --> SENSOR
+    IMU["BMI270<br/>direct I2C"] --> SENSOR
     AUDIO -.->|"診断snapshot / Bulk OUT"| ESP
     SERVO --> WHEELS["4輪操舵サーボ"]
     MOTOR --> BTS["論理左右 BTS7960"]
@@ -121,10 +126,14 @@ firmware/
    │     ├─ app/tasks/task_common.h   CPU0共通fault定義
    │     ├─ app/tasks/tk_init.c       タスク登録配列、生成・開始・失敗時解放
    │     ├─ app/tasks/tk_audio.c      USB event、frame parser、音響snapshot
+   │     ├─ app/tasks/tk_sensor.c     I2C定周期取得、センサーsnapshot
    │     ├─ app/tasks/tk_think.c      音源追従、青/緑LED、faultラッチ
    │     ├─ app/tasks/tk_command.c    目標共有、期限監視、IPC送信
    │     ├─ app/control/sound_follow_controller.c
    │     │                              停止聴取型の状態機械
+   │     ├─ app/control/obstacle_avoidance_controller.c
+   │     │                              ToF/IMUの安全・回避ルール
+   │     ├─ app/sensors/               I2C bus、TCA9548A、VL53L1X、BMI270、hub
    │     ├─ ipc/actuator_ipc_client.c IPC送信処理
    │     └─ cpu0_config.h             周期、閾値、優先度、LED設定
    └─ SoundExplorationRover_CPU1/
@@ -150,7 +159,7 @@ firmware/
 
 - 共通契約: [`acoustic_protocol.h`](../../firmware/common/acoustic_protocol.h)、[`ipc_message.h`](../../firmware/ra8p1/common/ipc_message.h)
 - 音響frontend: [`acoustic_frontend.c`](../../firmware/esp32s3/src/acoustic_frontend.c)、[`xvf3800_control.c`](../../firmware/esp32s3/src/xvf3800_control.c)、[`audio_capture.c`](../../firmware/esp32s3/src/audio_capture.c)、[`usb_link.c`](../../firmware/esp32s3/src/usb_link.c)
-- CPU0: [`main.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/main.c)、[`tk_init.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_init.c)、[`tk_audio.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_audio.c)、[`tk_think.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_think.c)、[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/control/sound_follow_controller.c)、[`tk_command.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_command.c)
+- CPU0: [`main.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/main.c)、[`tk_init.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_init.c)、[`tk_audio.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_audio.c)、[`tk_sensor.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_sensor.c)、[`tk_think.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_think.c)、[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/control/sound_follow_controller.c)、[`obstacle_avoidance_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/control/obstacle_avoidance_controller.c)、[`sensor_hub.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/sensors/sensor_hub.c)、[`tk_command.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_command.c)
 - CPU1: [`main.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/main.c)、[`tk_init.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/tasks/tk_init.c)、[`tk_actuator.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/tasks/tk_actuator.c)、[`tk_status.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/tasks/tk_status.c)、[`actuator_app.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/actuator_app.c)、[`actuator_ipc_server.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/ipc/actuator_ipc_server.c)、[`servo.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/servo.c)、[`dc_motor.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/dc_motor.c)
 
 `ra/`、`ra_cfg/`、`ra_gen/`、`configuration.xml`はFSP設定と生成処理に属する。特に`ra_gen/`は直接編集せず、設定変更後にGenerate Project Contentで再生成する。
@@ -253,6 +262,14 @@ CPU0の`tk_think`が青LED（LED1/P600）と緑LED（LED2/P303）を一括して
 | 赤を約50 msごとに反転 | CPU1 driver/FSP error |
 
 CPU0 fault番号は、1がtask create/start、2がIPC初期化、3がIPC送信、4が目標タイムアウト、5がUSB初期化、6が目標共有失敗である。複数faultがある場合は小さい番号を優先表示し、`g_cpu0_fault_flags`には全bitを保持する。
+
+### 5.3 I2Cセンサー走行モード
+
+I2Cセンサーを使うとき、CPU0のタスク登録はsensor taskを追加します。sensor taskはI2C1、TCA9548A、VL53L1X 3台、BMI270を50 ms周期で取得し、mutexで保護した最新sensor snapshotを公開します。通信異常はCPU0全体のfaultへ昇格させず、snapshotをinvalidとして走行判断を安全停止に戻し、1秒ごとに再初期化します。
+
+自律モードはSOUND_FOLLOWとSENSOR_RULEをビルド時に選びます。SENSOR_RULEではthink taskがToFのLEFT/CENTER/RIGHTとBMI270の傾き・衝撃・角速度から前進、減速、左右緩旋回、停止を決定します。CPU1のPWM・エンコーダ処理は変更せず、既存IPC経路だけを使います。後方距離は未計測のため、近接時の自律後退は行わず停止します。
+
+実装、FSP生成、配線、閾値、Live Watch、UDP診断の詳細は[I2Cセンサー・ルールベース走行](SENSOR_AUTONOMY.md)を参照してください。
 
 ## 6. CPU間IPC設計
 
@@ -426,9 +443,9 @@ XIAO ESP32S3はJ7へ接続し、CPU0のFSPにHCDC ACM host、High Speed、USB IP
 
 J11/USB Full Speed、P500、`USB_FS_VBUSEN`はReSpeaker経路に使用しない。host hubとDMAは初期構成で無効とし、1台のCDC ACM deviceをpolling event APIで扱う。接続・給電・FSP設定の詳細は[ReSpeaker統合設計](RESPEAKER_INTEGRATION.md#4-ek-ra8p1-usb接続)を参照する。
 
-### 9.2 アクチュエータ割当
+### 9.2 アクチュエータ・センサ割当
 
-以下の表の「論理左／論理右」「論理FR／FL／RR／RL」は、CPU0のIPC指令で使用する名称である。実機を前方から見た左右が初期ソフトの認識と反対だったため、物理ピンの割り当てを論理名へ付け替え、FSP生成インスタンス名も論理名に統一している。ピン番号とSolutionの共有ピン設定は変更していない。
+以下の表の「論理左／論理右」「論理FR／FL／RR／RL」は、CPU0のIPC指令で使用する名称である。実機を前方から見た左右が初期ソフトの認識と反対だったため、物理ピンの割り当てを論理名へ付け替え、FSP生成インスタンス名も論理名に統一している。アクチュエータとエンコーダIRQはCPU1、I2CセンサーはCPU0が所有する。ピン番号とSolutionの共有ピン設定は変更していない。
 
 | 用途 | FSPインスタンス | FSP出力 / GPIO | MCUピン | 外部コネクタ |
 |---|---|---|---|---|
@@ -436,20 +453,26 @@ J11/USB Full Speed、P500、`USB_FS_VBUSEN`はReSpeaker経路に使用しない�
 | 論理サーボFL | `g_servo_pwm_fl` | GPT9B | P110 | Arduino J24-2 / D9 |
 | 論理サーボRR | `g_servo_pwm_rr` | GPT11B | P801 | Pmod1 J26-2 / MOSI |
 | 論理サーボRL | `g_servo_pwm_rl` | GPT13B | P808 | Arduino J23-1 / D0 |
-| 論理左モーターPWM | GPT10B | P811 | Arduino J23-4 / D3 |
-| 論理右モーターPWM | GPT10A | P810 | Arduino J23-5 / D4 |
-| 論理左モーターLPWM | GPT7B | P602 | Pmod2 J25-3 / MISO |
-| 論理右モーターLPWM | GPT7A | P603 | Pmod2 J25-2 / MOSI |
-| 左右BTS7960共通EN | GPIO | PD01 | Arduino J24-1 / D8、左右ENへ分岐 |
-| 予備GPIO | 未使用 | P312 | Arduino J23-8 / D7（解放） |
-| 論理左代表エンコーダA | IRQ16 | P011 | Arduino J23-3 / D2 |
-| 論理左代表エンコーダB | IRQ20 | P809 | Arduino J23-2 / D1 |
-| 論理右代表エンコーダA | IRQ11 | P006 | Pmod1 J26-7 / IRQ |
-| 論理右代表エンコーダB | IRQ18 | P413 | Pmod1 J26-10 / GPIO2 / IRQ |
+| 論理左モーターRPWM | `g_motor_pwm` | GPT10B | P811 | Arduino J23-4 / D3 |
+| 論理右モーターRPWM | `g_motor_pwm` | GPT10A | P810 | Arduino J23-5 / D4 |
+| 論理左モーターLPWM | `g_motor_pwm_lpwm` | GPT7B | P602 | Pmod2 J25-3 / MISO |
+| 論理右モーターLPWM | `g_motor_pwm_lpwm` | GPT7A | P603 | Pmod2 J25-2 / MOSI |
+| 左右BTS7960共通EN | `g_ioport` | GPIO出力 | PD01 | Arduino J24-1 / D8、左右ENへ分岐 |
+| 予備GPIO | なし | 未使用 | P312 | Arduino J23-8 / D7（解放） |
+| 論理左代表エンコーダA | `g_encoder_left_a_irq` | IRQ16入力 | P011 | Arduino J23-3 / D2 |
+| 論理左代表エンコーダB | `g_encoder_left_b_irq` | IRQ20入力 | P809 | Arduino J23-2 / D1 |
+| 論理右代表エンコーダA | `g_encoder_right_a_irq` | IRQ11入力 | P006 | Pmod1 J26-7 / IRQ |
+| 論理右代表エンコーダB | `g_encoder_right_b_irq` | IRQ18入力 | P413 | Pmod1 J26-10 / GPIO2 / IRQ |
+| センサー共通電源 | なし | +3.3 V / GND | - | Pmod2 J25-6 / J25-5 |
+| TCA9548A I2Cマルチプレクサ | `g_i2c_sensor` | IIC1、7-bit address `0x70` | P511 / SDA1、P512 / SCL1 | Arduino J24-9 / SDA、J24-10 / SCL |
+| VL53L1X LEFT | `g_i2c_sensor` | IIC1、TCA9548A CH0、7-bit address `0x29` | P511 / SDA1、P512 / SCL1 | TCA9548A CH0 |
+| VL53L1X CENTER | `g_i2c_sensor` | IIC1、TCA9548A CH1、7-bit address `0x29` | P511 / SDA1、P512 / SCL1 | TCA9548A CH1 |
+| VL53L1X RIGHT | `g_i2c_sensor` | IIC1、TCA9548A CH2、7-bit address `0x29` | P511 / SDA1、P512 / SCL1 | TCA9548A CH2 |
+| BMI270 IMU | `g_i2c_sensor` | IIC1直結、7-bit address `0x68` / `0x69` | P511 / SDA1、P512 / SCL1 | Arduino J24-9 / SDA、J24-10 / SCL |
 
-エンコーダのFSPインスタンス名も論理名に揃え、論理左A/Bは`g_encoder_left_a_irq`／`g_encoder_left_b_irq`、論理右A/Bは`g_encoder_right_a_irq`／`g_encoder_right_b_irq`とする。
+I2CバスはTCA9548AとBMI270で共有し、同一address `0x29`のVL53L1XはTCA9548AのCH0/CH1/CH2で分離する。P511/P512を上記の外部I2Cコネクタへ接続するには、EK-RA8P1のSW4-5をOFFにしてIIC1を選ぶ。[EK-RA8P1 User's Manual](https://www.renesas.com/en/document/mat/ek-ra8p1-v1-users-manual)のI2C/I3C切替も確認する。
 
-P801、P803、P808をサーボへ転用しているため、現行構成ではOcto-SPIフラッシュを使用できない。SW4-3をONにしてOcto-SPIを無効、SW4-4をONにしてArduino端子を有効にする。LPWMはPmod2 J25-2/J25-3へ割り当て、OSPI0とは競合させない。BTS7960は左右のVCCを共通化し、R_EN/L_ENをPD01へまとめる。VCCとENは直結せず、P312は未使用のまま解放する。電源はJ18-5の+5 VをBTS7960 VCC、J18-4の+3.3 Vを左右代表エンコーダVCC、J18-6/J18-7のGNDを全機器共通GNDとして分岐する。ただしBTS7960モジュールの仕様が3.3 V対応でない場合は5 Vを使用し、電流容量が不足する場合は外部安定化電源を使用する。
+P801、P803、P808をサーボへ転用しているため、現行構成ではOcto-SPIフラッシュを使用できない。SW4-3をONにしてOcto-SPIを無効、SW4-4をONにしてArduino端子を有効にする。LPWMはPmod2 J25-2/J25-3へ割り当て、OSPI0とは競合させない。BTS7960は左右のVCCを共通化し、R_EN/L_ENをPD01へまとめる。VCCとENは直結せず、P312は未使用のまま解放する。電源はJ18-5の+5 VをBTS7960 VCC、J18-4の+3.3 Vを左右代表エンコーダVCC、J18-6/J18-7のGNDを全機器共通GNDとして分岐する。I2CセンサーはPmod2 J25-6の+3.3 VとJ25-5のGNDから別枝で給電する。これらは同じ+3.3 V/GNDネットであり、別電源ではないが、BTS7960のGNDからセンサーを数珠つなぎにしない。BTS7960のモーター電流の帰路はバッテリーとモータードライバの間で直接配線する。ただしBTS7960モジュールの仕様が3.3 V対応でない場合は5 Vを使用し、電流容量が不足する場合は外部安定化電源を使用する。
 
 ## 10. 安全設計
 

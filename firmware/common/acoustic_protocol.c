@@ -249,6 +249,18 @@ size_t acoustic_protocol_encode_rover_telemetry(uint32_t sequence, uint32_t upti
     acoustic_write_u32_le(&payload[52], (uint32_t) p_telemetry->command_last_error);
     acoustic_write_u32_le(&payload[56], p_telemetry->command_target_age_ms);
     acoustic_write_u32_le(&payload[60], p_telemetry->command_send_count);
+    payload[64] = p_telemetry->autonomy_mode;
+    payload[65] = p_telemetry->sensor_rule;
+    payload[66] = p_telemetry->sensor_valid_flags;
+    payload[67] = p_telemetry->sensor_reserved;
+    for (uint32_t index = 0U; index < 3U; index++) {
+        acoustic_write_u16_le(&payload[68U + (index * 2U)], p_telemetry->tof_distance_mm[index]);
+        acoustic_write_u16_le(&payload[74U + (index * 2U)], (uint16_t) p_telemetry->accel_mg[index]);
+        acoustic_write_u16_le(&payload[80U + (index * 2U)], (uint16_t) p_telemetry->gyro_dps_x10[index]);
+    }
+    acoustic_write_u16_le(&payload[86], p_telemetry->sensor_error_flags);
+    acoustic_write_u32_le(&payload[88], (uint32_t) p_telemetry->sensor_last_error);
+    acoustic_write_u32_le(&payload[92], p_telemetry->sensor_age_ms);
 
     return acoustic_protocol_encode(ACOUSTIC_MESSAGE_ROVER_TELEMETRY, sequence, uptime_ms, payload,
                                     (uint16_t) sizeof(payload), p_output, output_capacity);
@@ -460,5 +472,17 @@ bool acoustic_protocol_decode_rover_telemetry(const acoustic_frame_t * p_frame,
     p_telemetry->command_last_error = (int32_t) acoustic_read_u32_le(&p_frame->payload[52]);
     p_telemetry->command_target_age_ms = acoustic_read_u32_le(&p_frame->payload[56]);
     p_telemetry->command_send_count = acoustic_read_u32_le(&p_frame->payload[60]);
+    p_telemetry->autonomy_mode = p_frame->payload[64];
+    p_telemetry->sensor_rule = p_frame->payload[65];
+    p_telemetry->sensor_valid_flags = p_frame->payload[66];
+    p_telemetry->sensor_reserved = p_frame->payload[67];
+    for (uint32_t index = 0U; index < 3U; index++) {
+        p_telemetry->tof_distance_mm[index] = acoustic_read_u16_le(&p_frame->payload[68U + (index * 2U)]);
+        p_telemetry->accel_mg[index] = (int16_t) acoustic_read_u16_le(&p_frame->payload[74U + (index * 2U)]);
+        p_telemetry->gyro_dps_x10[index] = (int16_t) acoustic_read_u16_le(&p_frame->payload[80U + (index * 2U)]);
+    }
+    p_telemetry->sensor_error_flags = acoustic_read_u16_le(&p_frame->payload[86]);
+    p_telemetry->sensor_last_error = (int32_t) acoustic_read_u32_le(&p_frame->payload[88]);
+    p_telemetry->sensor_age_ms = acoustic_read_u32_le(&p_frame->payload[92]);
     return true;
 }

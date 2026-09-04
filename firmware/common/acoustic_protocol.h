@@ -14,14 +14,14 @@
 #define ACOUSTIC_PROTOCOL_VERSION          (1U)
 #define ACOUSTIC_PROTOCOL_HEADER_SIZE      (14U)
 #define ACOUSTIC_PROTOCOL_CRC_SIZE         (2U)
-#define ACOUSTIC_PROTOCOL_MAX_PAYLOAD_SIZE (64U)
+#define ACOUSTIC_PROTOCOL_MAX_PAYLOAD_SIZE (96U)
 #define ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE   \
     (ACOUSTIC_PROTOCOL_HEADER_SIZE + ACOUSTIC_PROTOCOL_MAX_PAYLOAD_SIZE + ACOUSTIC_PROTOCOL_CRC_SIZE)
 #define ACOUSTIC_PROTOCOL_DOA_INVALID         (0xFFFFU)
 #define ACOUSTIC_OBSERVATION_PAYLOAD_SIZE     (14U)
 #define ACOUSTIC_HELLO_PAYLOAD_SIZE           (12U)
 #define ACOUSTIC_HEALTH_PAYLOAD_SIZE          (12U)
-#define ACOUSTIC_ROVER_TELEMETRY_PAYLOAD_SIZE (64U)
+#define ACOUSTIC_ROVER_TELEMETRY_PAYLOAD_SIZE (96U)
 
 #define ACOUSTIC_CAPABILITY_DOA            (1UL << 0)
 #define ACOUSTIC_CAPABILITY_VAD            (1UL << 1)
@@ -113,6 +113,16 @@ typedef struct st_acoustic_rover_telemetry {
     int32_t command_last_error;
     uint32_t command_target_age_ms;
     uint32_t command_send_count;
+    uint8_t autonomy_mode;
+    uint8_t sensor_rule;
+    uint8_t sensor_valid_flags;
+    uint8_t sensor_reserved;
+    uint16_t tof_distance_mm[3];
+    int16_t accel_mg[3];
+    int16_t gyro_dps_x10[3];
+    uint16_t sensor_error_flags;
+    int32_t sensor_last_error;
+    uint32_t sensor_age_ms;
 } acoustic_rover_telemetry_t;
 
 typedef struct st_acoustic_frame {

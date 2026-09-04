@@ -317,6 +317,10 @@
       <description>IPC</description>
       <originalPack>Renesas.RA.6.4.0.pack</originalPack>
     </component>
+    <component apiversion="" class="HAL Drivers" condition="" group="all" subgroup="r_iic_master" variant="" vendor="Renesas" version="6.4.0">
+      <description>I2C Master Interface</description>
+      <originalPack>Renesas.RA.6.4.0.pack</originalPack>
+    </component>
     <component apiversion="" class="HAL Drivers" condition="" group="all" subgroup="r_usb_basic" variant="" vendor="Renesas" version="6.4.0">
       <description>USB Basic</description>
       <originalPack>Renesas.RA.6.4.0.pack</originalPack>
@@ -376,6 +380,21 @@
       <property id="module.driver.ipc.callback" value="NULL"/>
       <property id="module.driver.ipc.ipl" value="_disabled"/>
     </module>
+    <module id="module.driver.i2c_on_iic_master.0">
+      <property id="module.driver.i2c_master.name" value="g_i2c_sensor"/>
+      <property id="module.driver.i2c_master.channel" value="1"/>
+      <property id="module.driver.i2c_master.rate" value="module.driver.i2c_master.rate.rate_fast"/>
+      <property id="module.driver.i2c_master.rate_value" value="0"/>
+      <property id="module.driver.i2c_master.rise_time_ns" value="120"/>
+      <property id="module.driver.i2c_master.fall_time_ns" value="120"/>
+      <property id="module.driver.i2c_master.duty" value="50"/>
+      <property id="module.driver.i2c_master.slave" value="0x70"/>
+      <property id="module.driver.i2c_master.addr_mode" value="module.driver.i2c_master.addr_mode.addr_mode_7bit"/>
+      <property id="module.driver.i2c_master.timeout_mode" value="module.driver.i2c_master.timeout_mode.short_mode"/>
+      <property id="module.driver.i2c_master.timeout_scl_low" value="module.driver.i2c_master.timeout_scl_low.enabled"/>
+      <property id="module.driver.i2c_master.p_callback" value="NULL"/>
+      <property id="module.driver.i2c_master.ipl" value="board.icu.common.irq.priority12"/>
+    </module>
     <module id="module.driver.hcdc_on_usb.0">
       <property id="module.driver.hcdc.name" value="g_hcdc0"/>
     </module>
@@ -399,16 +418,11 @@
     <context id="_hal.0">
       <stack module="module.driver.ioport_on_ioport.0"/>
       <stack module="module.driver.ipc_on_ipc.0"/>
+      <stack module="module.driver.i2c_on_iic_master.0"/>
       <stack module="module.driver.hcdc_on_usb.0">
         <stack module="module.driver.basic_on_usb.0" requires="module.driver.basic_on_usb.requires.basic"/>
       </stack>
     </context>
-    <config id="config.driver.usb_hcdc">
-      <property id="config.driver.usb_hcdc.multiple_connection_setting" value="config.driver.usb_hcdc.multiple_connection_setting.not_supported"/>
-      <property id="config.driver.usb_hcdc.cdc_device_class_setting" value="config.driver.usb_hcdc.cdc_device_class_setting.cdc_device"/>
-      <property id="config.driver.usb_hcdc.multi_cdc" value="config.driver.usb_hcdc.multi_cdc.disable"/>
-    </config>
-    <config id="config.driver.usb_hcdc_class"/>
     <config id="config.driver.usb_basic">
       <property id="config.driver.usb_basic.param_checking_enable" value="config.driver.usb_basic.param_checking_enable.bsp"/>
       <property id="config.driver.usb_basic.pll_clock_frequency" value="config.driver.usb_basic.pll_clock_frequency.24mhz"/>
@@ -428,10 +442,20 @@
     <config id="config.driver.ipc">
       <property id="config.driver.ipc.param_checking_enable" value="config.driver.ipc.param_checking_enable.bsp"/>
     </config>
+    <config id="config.driver.iic_master">
+      <property id="config.driver.iic_master.param_checking_enable" value="config.driver.iic_master.param_checking_enable.bsp"/>
+      <property id="config.driver.iic_master.dtc_enable" value="config.driver.iic_master.dtc_enable.disabled"/>
+      <property id="config.driver.iic_master.addr_mode_10_bit_enable" value="config.driver.iic_master.addr_mode_10_bit_enable.disabled"/>
+    </config>
     <config id="config.driver.ioport">
       <property id="config.driver.ioport.checking" value="config.driver.ioport.checking.system"/>
       <property id="config.driver.ioport.ccd_support_enable" value="config.driver.ioport.ccd_support_enable.disabled"/>
     </config>
+    <config id="config.driver.usb_hcdc">
+      <property id="config.driver.usb_hcdc.cdc_device_class_setting" value="config.driver.usb_hcdc.cdc_device_class_setting.cdc_device"/>
+      <property id="config.driver.usb_hcdc.multi_cdc" value="config.driver.usb_hcdc.multi_cdc.disable"/>
+    </config>
+    <config id="config.driver.usb_hcdc_class"/>
   </raModuleConfiguration>
   <raPinConfiguration>
     <symbolicName propertyId="p000.symbolic_name" value="USER_SW_CFG_INT"/>
@@ -725,11 +749,11 @@
       <configSetting altId="gpt7.gtioc7a.p603" configurationId="gpt7.gtioc7a"/>
       <configSetting altId="gpt7.gtioc7b.p602" configurationId="gpt7.gtioc7b"/>
       <configSetting altId="gpt7.mode.gtiocaandgtiocb.free" configurationId="gpt7.mode"/>
-      <configSetting altId="irq.irq11.p006" configurationId="irq.irq11"/>
-      <configSetting altId="irq.irq18.p413" configurationId="irq.irq18"/>
       <configSetting altId="i3c0.mode.enabled.free" configurationId="i3c0.mode"/>
       <configSetting altId="iic1.mode.custom.free" configurationId="iic1.mode"/>
       <configSetting altId="irq.irq16.p011" configurationId="irq.irq16"/>
+      <configSetting altId="irq.irq18.p413" configurationId="irq.irq18"/>
+      <configSetting altId="irq.irq20.p809" configurationId="irq.irq20"/>
       <configSetting altId="irq.mode.custom.free" configurationId="irq.mode"/>
       <configSetting altId="jtag_fslash_swd.mode.jtag.free" configurationId="jtag_fslash_swd.mode"/>
       <configSetting altId="mipi.mode.enabled.free" configurationId="mipi.mode"/>
@@ -738,16 +762,6 @@
       <configSetting altId="p011.irq.irq16" configurationId="p011"/>
       <configSetting altId="p011.gpio_irq.gpio_irq_enabled" configurationId="p011.gpio_irq"/>
       <configSetting altId="p011.gpio_mode.gpio_mode_irq" configurationId="p011.gpio_mode"/>
-      <configSetting altId="p006.irq.irq11" configurationId="p006"/>
-      <configSetting altId="p006.gpio_irq.gpio_irq_enabled" configurationId="p006.gpio_irq"/>
-      <configSetting altId="p006.gpio_mode.gpio_mode_irq" configurationId="p006.gpio_mode"/>
-      <configSetting altId="p012.input" configurationId="p012"/>
-      <configSetting altId="p012.gpio_irq.gpio_irq_enabled" configurationId="p012.gpio_irq"/>
-      <configSetting altId="p012.gpio_mode.gpio_mode_in" configurationId="p012.gpio_mode"/>
-      <configSetting altId="irq.irq20.p809" configurationId="irq.irq20"/>
-      <configSetting altId="p809.irq.irq20" configurationId="p809"/>
-      <configSetting altId="p809.gpio_irq.gpio_irq_enabled" configurationId="p809.gpio_irq"/>
-      <configSetting altId="p809.gpio_mode.gpio_mode_irq" configurationId="p809.gpio_mode"/>
       <configSetting altId="p413.irq.irq18" configurationId="p413"/>
       <configSetting altId="p413.gpio_irq.gpio_irq_enabled" configurationId="p413.gpio_irq"/>
       <configSetting altId="p413.gpio_mode.gpio_mode_irq" configurationId="p413.gpio_mode"/>
@@ -757,6 +771,9 @@
       <configSetting altId="p603.gpt7.gtioc7a" configurationId="p603"/>
       <configSetting altId="p603.gpio_speed.gpio_speed_h" configurationId="p603.gpio_drivecapacity"/>
       <configSetting altId="p603.gpio_mode.gpio_mode_peripheral" configurationId="p603.gpio_mode"/>
+      <configSetting altId="p809.irq.irq20" configurationId="p809"/>
+      <configSetting altId="p809.gpio_irq.gpio_irq_enabled" configurationId="p809.gpio_irq"/>
+      <configSetting altId="p809.gpio_mode.gpio_mode_irq" configurationId="p809.gpio_mode"/>
       <configSetting altId="p810.gpt10.gtioc10a" configurationId="p810"/>
       <configSetting altId="p810.gpio_speed.gpio_speed_h" configurationId="p810.gpio_drivecapacity"/>
       <configSetting altId="p810.gpio_mode.gpio_mode_peripheral" configurationId="p810.gpio_mode"/>
