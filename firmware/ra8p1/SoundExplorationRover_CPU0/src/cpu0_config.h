@@ -22,11 +22,15 @@
 #define CPU0_SENSOR_I2C_TIMEOUT_MS           (20U)
 #define CPU0_TOF_DATA_READY_TIMEOUT_MS        (100U)
 
-/* TCA9548A配下のVL53L1Xは全台0x29のまま使用する。 */
+/*
+ * TCA9548A配下のセンサチャネル割当。
+ * 排他ルール: センサ通信の直前に対象チャネルだけをselectし、複数チャネルを同時に有効化しない。
+ */
 #define CPU0_TCA9548A_ADDRESS                (0x70U)
 #define CPU0_TCA9548A_CHANNEL_LEFT           (0U)
 #define CPU0_TCA9548A_CHANNEL_CENTER         (1U)
 #define CPU0_TCA9548A_CHANNEL_RIGHT          (2U)
+#define CPU0_TCA9548A_CHANNEL_BMI270         (3U)
 #define CPU0_VL53L1X_ADDRESS                 (0x29U)
 #define CPU0_TOF_MIN_VALID_MM                (40U)
 #define CPU0_TOF_MAX_VALID_MM                (4000U)

@@ -7,7 +7,7 @@
 #include "../../cpu0_config.h"                              /* TCA9548Aアドレス */
 
 /** =================================================================*
- * @brief  指定チャネルだけをI2Cバスへ接続
+ * @brief  指定チャネルだけをI2Cバスへ排他的に接続
  * @param[in] channel TCA9548Aチャネル番号（0～7）
  * @return FSPエラーコード
  * ================================================================= */
@@ -16,6 +16,7 @@ EXPORT fsp_err_t tca9548a_select_channel(UB channel) {
         return FSP_ERR_INVALID_ARGUMENT;
     }
 
+    /* 常にone-hotを書き込み、以前の選択や他チャネルを同時に残さない。 */
     UB const selection = (UB) (1U << channel);
     return sensor_i2c_bus_write(CPU0_TCA9548A_ADDRESS, &selection, 1U);
 }

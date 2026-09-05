@@ -32,9 +32,15 @@ LOCAL UB const vl53l1x_default_configuration[] = {
     0xFFU, 0x9BU, 0x00U, 0x00U, 0x00U, 0x01U, 0x00U, 0x00U,
 };
 
+typedef struct st_vl53l1x_measurement {
+    UH distance_mm;
+    UB range_status;
+} vl53l1x_measurement_t;
+
 LOCAL fsp_err_t vl53l1x_write_register(UH register_address, UB value); /* 8bitレジスタ書込み */
 LOCAL fsp_err_t vl53l1x_read_registers(UH register_address, UB * p_data, UW length); /* レジスタ連続読出し */
 LOCAL fsp_err_t vl53l1x_wait_data_ready(void);              /* 新しい測距結果待ち */
+LOCAL fsp_err_t vl53l1x_read_measurement(vl53l1x_measurement_t * p_measurement); /* 生測距結果取得 */
 
 /** =================================================================*
  * @brief  VL53L1Xの8bitレジスタへ書込み
@@ -145,12 +151,13 @@ EXPORT fsp_err_t vl53l1x_init(void) {
 }
 
 /** =================================================================*
- * @brief  VL53L1Xの最新距離を取得
- * @param[out] p_distance_mm 距離[mm]
- * @return FSPエラーコード
+ * @brief  VL53L1Xの生測距結果を取得
+ * @details Range Statusが無効でもI2C転送自体が成功していれば値を返す。
+ * @param[out] p_measurement 生の距離とRange Status
+ * @return I2C/待機/割込みクリアが成功すればFSP_SUCCESS
  * ================================================================= */
-EXPORT fsp_err_t vl53l1x_read_distance(UH * p_distance_mm) {
-    if (NULL == p_distance_mm) {
+LOCAL fsp_err_t vl53l1x_read_measurement(vl53l1x_measurement_t * p_measurement) {
+    if (NULL == p_measurement) {
         return FSP_ERR_INVALID_ARGUMENT;
     }
 
@@ -173,15 +180,35 @@ EXPORT fsp_err_t vl53l1x_read_distance(UH * p_distance_mm) {
     if (FSP_SUCCESS != clear_err) {
         return clear_err;
     }
-    if (VL53L1X_RANGE_STATUS_VALID != (range_status & 0x1FU)) {
+
+    p_measurement->range_status = (UB) (range_status & 0x1FU);
+    p_measurement->distance_mm = (UH) (((UH) distance_data[0] << 8U) | distance_data[1]);
+    return FSP_SUCCESS;
+}
+
+/** =================================================================*
+ * @brief  VL53L1Xの有効距離を取得
+ * @param[out] p_distance_mm 距離[mm]
+ * @return 有効測距ならFSP_SUCCESS、Range Status/距離範囲不正ならFSP_ERR_INVALID_DATA
+ * ================================================================= */
+EXPORT fsp_err_t vl53l1x_read_distance(UH * p_distance_mm) {
+    if (NULL == p_distance_mm) {
+        return FSP_ERR_INVALID_ARGUMENT;
+    }
+
+    vl53l1x_measurement_t measurement = {0U};
+    fsp_err_t const err = vl53l1x_read_measurement(&measurement);
+    if (FSP_SUCCESS != err) {
+        return err;
+    }
+    if (VL53L1X_RANGE_STATUS_VALID != measurement.range_status) {
+        return FSP_ERR_INVALID_DATA;
+    }
+    if ((measurement.distance_mm < CPU0_TOF_MIN_VALID_MM) ||
+        (measurement.distance_mm > CPU0_TOF_MAX_VALID_MM)) {
         return FSP_ERR_INVALID_DATA;
     }
 
-    UH const distance_mm = (UH) (((UH) distance_data[0] << 8) | distance_data[1]);
-    if ((distance_mm < CPU0_TOF_MIN_VALID_MM) || (distance_mm > CPU0_TOF_MAX_VALID_MM)) {
-        return FSP_ERR_INVALID_DATA;
-    }
-
-    *p_distance_mm = distance_mm;
+    *p_distance_mm = measurement.distance_mm;
     return FSP_SUCCESS;
 }

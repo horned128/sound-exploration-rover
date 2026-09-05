@@ -17,6 +17,7 @@ LOCAL UB sensor_hub_tof_channel(cpu0_tof_position_t position); /* ToF位置か�
 LOCAL UB sensor_hub_tof_valid_flag(cpu0_tof_position_t position); /* ToF位置のvalid bit取得 */
 LOCAL UW sensor_hub_tof_error_flag(cpu0_tof_position_t position); /* ToF位置のerror bit取得 */
 LOCAL fsp_err_t sensor_hub_read_tof(cpu0_tof_position_t position, UH * p_distance_mm); /* 1台読出し */
+LOCAL fsp_err_t sensor_hub_read_bmi270(bmi270_raw_data_t * p_raw); /* CH3選択後にIMU読出し */
 LOCAL H sensor_hub_scale_accel_mg(H raw);                   /* raw accelをmgへ変換 */
 LOCAL H sensor_hub_scale_gyro_dps_x10(H raw);               /* raw gyroを0.1dpsへ変換 */
 
@@ -93,6 +94,21 @@ LOCAL fsp_err_t sensor_hub_read_tof(cpu0_tof_position_t position, UH * p_distanc
 }
 
 /** =================================================================*
+ * @brief  BMI270からraw accel/gyroを取得
+ * @details 通信直前にTCA9548A CH3だけを排他的に接続する。
+ * @param[out] p_raw BMI270 rawデータ
+ * @return FSPエラーコード
+ * ================================================================= */
+LOCAL fsp_err_t sensor_hub_read_bmi270(bmi270_raw_data_t * p_raw) {
+    fsp_err_t const select_err = tca9548a_select_channel(CPU0_TCA9548A_CHANNEL_BMI270);
+    if (FSP_SUCCESS != select_err) {
+        return select_err;
+    }
+
+    return bmi270_read_raw(p_raw);
+}
+
+/** =================================================================*
  * @brief  BMI270の4g raw accelerationをmgへ変換
  * @param[in] raw BMI270 raw値
  * @return acceleration[mg]
@@ -143,7 +159,8 @@ EXPORT fsp_err_t sensor_hub_init(void) {
         }
     }
 
-    err = tca9548a_disable_all();
+    /* BMI270の初期化直前にCH3だけを排他的に接続する。 */
+    err = tca9548a_select_channel(CPU0_TCA9548A_CHANNEL_BMI270);
     if (FSP_SUCCESS == err) {
         err = bmi270_init();
     }
@@ -209,17 +226,8 @@ EXPORT fsp_err_t sensor_hub_poll(cpu0_sensor_snapshot_t * p_snapshot) {
         p_snapshot->valid_flags |= sensor_hub_tof_valid_flag(position);
     }
 
-    fsp_err_t const mux_disable_err = tca9548a_disable_all();
-    if (FSP_SUCCESS != mux_disable_err) {
-        p_snapshot->error_flags |= CPU0_SENSOR_ERROR_TCA9548A;
-        p_snapshot->last_error = (W) mux_disable_err;
-        if (FSP_SUCCESS == first_error) {
-            first_error = mux_disable_err;
-        }
-    }
-
     bmi270_raw_data_t raw_imu = {0};
-    fsp_err_t const imu_err = bmi270_read_raw(&raw_imu);
+    fsp_err_t const imu_err = sensor_hub_read_bmi270(&raw_imu);
     if (FSP_SUCCESS != imu_err) {
         p_snapshot->error_flags |= CPU0_SENSOR_ERROR_BMI270;
         p_snapshot->last_error = (W) imu_err;

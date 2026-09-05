@@ -1,6 +1,6 @@
 /** =================================================================*
  * @file   bmi270.h
- * @brief  BMI270加速度・ジャイロセンサーAPI
+ * @brief  BMI270加速度・角速度センサーAPI
  * ================================================================= */
 #ifndef SEROV_CPU0_BMI270_H
 #define SEROV_CPU0_BMI270_H
@@ -13,7 +13,7 @@ typedef struct st_bmi270_raw_data {
     H gyro[3];
 } bmi270_raw_data_t;
 
-EXPORT fsp_err_t bmi270_init(void);                         /* I2Cアドレス検出、raw accel/gyro起動 */
+EXPORT fsp_err_t bmi270_init(void);                         /* 初期化、raw accel/gyro出力開始 */
 EXPORT fsp_err_t bmi270_read_raw(bmi270_raw_data_t * p_data); /* raw accel/gyro取得 */
 
 #endif /* SEROV_CPU0_BMI270_H */
