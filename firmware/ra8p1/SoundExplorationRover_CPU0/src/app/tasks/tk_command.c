@@ -32,7 +32,8 @@ LOCAL BOOL command_task_started;                           /**< 指令タスク�
 LOCAL BOOL command_ipc_open;                               /**< IPC open状態 */
 LOCAL BOOL command_emergency_reset_pending;                /**< CPU1 estopラッチ解除待ち */
 LOCAL BOOL command_timeout_reported;                       /**< 目標期限切れ通知済み状態 */
-LOCAL UW command_target_age_ms;                      /**< 最新目標の経過時間 */
+LOCAL BOOL command_target_valid;                           /**< 思考タスクの目標受信済み状態 */
+LOCAL UW command_target_age_ms;                            /**< 最新目標の経過時間 */
 
 /**< 思考タスクが更新する最新アクチュエータ目標 */
 LOCAL rover_motion_target_t command_target = {
@@ -51,7 +52,9 @@ LOCAL rover_motion_target_t command_last_sent_target = {
 
 EXPORT volatile UW g_cpu0_command_sequence;                  /**< 最終送信シーケンス */
 EXPORT volatile UW g_cpu0_command_send_count;                /**< 正常送信回数 */
-EXPORT volatile fsp_err_t g_cpu0_command_last_error;               /**< 最終IPCエラー */
+EXPORT volatile fsp_err_t g_cpu0_command_last_error;         /**< 最終IPCエラー */
+EXPORT volatile BOOL g_cpu0_command_peer_ready;               /**< CPU1状態受信済み */
+EXPORT volatile BOOL g_cpu0_command_target_valid;             /**< 思考タスクの目標受信済み */
 
 /** =================================================================*
  * @brief  指令タスクと共有資源生成
@@ -64,6 +67,7 @@ EXPORT cpu0_fault_t cpu0_command_task_create(void) {
     command_ipc_open = FALSE;
     command_emergency_reset_pending = TRUE;
     command_timeout_reported = FALSE;
+    command_target_valid = FALSE;
     command_target_age_ms = CPU0_COMMAND_TARGET_TIMEOUT_MS;
     command_target = (rover_motion_target_t){
         .left_target_rpm = 0,
@@ -75,6 +79,8 @@ EXPORT cpu0_fault_t cpu0_command_task_create(void) {
     g_cpu0_command_sequence = 0U;
     g_cpu0_command_send_count = 0U;
     g_cpu0_command_last_error = FSP_SUCCESS;
+    g_cpu0_command_peer_ready = FALSE;
+    g_cpu0_command_target_valid = FALSE;
 
     command_mutex_id = tk_cre_mtx(&command_mutex_config);
     if (command_mutex_id <= 0) {
@@ -156,8 +162,10 @@ EXPORT ER cpu0_command_set_target(const rover_motion_target_t * p_target) {
     ER err = tk_loc_mtx(command_mutex_id, TMO_FEVR);
     if (E_OK == err) {
         command_target = *p_target;
+        command_target_valid = TRUE;
         command_target_age_ms = 0U;
         command_timeout_reported = FALSE;
+        g_cpu0_command_target_valid = TRUE;
         err = tk_unl_mtx(command_mutex_id);
     }
 
@@ -185,7 +193,9 @@ EXPORT ER cpu0_command_snapshot_get(cpu0_command_snapshot_t * p_snapshot) {
     p_snapshot->target = command_target;
     p_snapshot->last_sent_target = command_last_sent_target;
     p_snapshot->target_age_ms = command_target_age_ms;
-    p_snapshot->target_stale = command_target_age_ms >= CPU0_COMMAND_TARGET_TIMEOUT_MS;
+    p_snapshot->target_valid = command_target_valid;
+    p_snapshot->target_stale = command_target_valid &&
+                              (command_target_age_ms >= CPU0_COMMAND_TARGET_TIMEOUT_MS);
     err = tk_unl_mtx(command_mutex_id);
     return err;
 }
@@ -196,6 +206,7 @@ EXPORT ER cpu0_command_snapshot_get(cpu0_command_snapshot_t * p_snapshot) {
  * ================================================================= */
 LOCAL void cpu0_command_send_latest(void) {
     rover_motion_target_t target;
+    actuator_status_t peer_status;
     BOOL target_stale;
     BOOL report_timeout;
 
@@ -213,7 +224,8 @@ LOCAL void cpu0_command_send_latest(void) {
         }
     }
 
-    target_stale = command_target_age_ms >= CPU0_COMMAND_TARGET_TIMEOUT_MS;
+    target_stale = command_target_valid &&
+                   (command_target_age_ms >= CPU0_COMMAND_TARGET_TIMEOUT_MS);
     report_timeout = target_stale && !command_timeout_reported;
     if (report_timeout) {
         command_timeout_reported = TRUE;
@@ -228,6 +240,12 @@ LOCAL void cpu0_command_send_latest(void) {
         target.actuator_enable = FALSE;
         target.emergency_stop = TRUE;
     }
+
+    /* CPU1がIPCをopenして状態フレームを返すまで、FIFOへ指令を積まない。 */
+    if (!actuator_ipc_client_status_get(&peer_status)) {
+        return;
+    }
+    g_cpu0_command_peer_ready = TRUE;
 
     BOOL const clear_emergency_latch = command_emergency_reset_pending && !target_stale && !target.emergency_stop;
 

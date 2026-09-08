@@ -1,6 +1,6 @@
 # ReSpeaker XVF3800・XIAO ESP32S3統合設計
 
-最終更新: 2026-08-24 / 対象: 音源追従機能とEK-RA8P1間USB接続
+最終更新: 2026-09-08 / 対象: 音源追従機能とEK-RA8P1間USB接続
 
 ## 1. 結論
 
@@ -242,7 +242,7 @@ stateDiagram-v2
     WAIT_LINK --> LISTEN: HELLOと有効観測が安定
     LISTEN --> STEER_PREP: trigger成立・方向安定
     STEER_PREP --> MOVE_STEP: サーボ整定完了
-    MOVE_STEP --> SETTLE: 500 msの前進または後進完了
+    MOVE_STEP --> SETTLE: 1000 msの前進完了
     SETTLE --> COOLDOWN: 500 ms停止して自己雑音を減衰
     COOLDOWN --> LISTEN: releaseを一定時間維持
     WAIT_LINK --> FAULT: CPU0初期化・指令系fault
@@ -263,9 +263,9 @@ stateDiagram-v2
 | `WAIT_LINK` | emergency stop、PWM停止 | USB列挙、`HELLO`、観測の連続受信を待つ |
 | `LISTEN` | motor停止、servo直進 | VADとlevelで音イベントを開始し、DoA更新待ち後の方向安定性を評価 |
 | `STEER_PREP` | motor停止、4輪を目標操舵角へ | サーボ整定時間を確保し、急な同時始動を避ける |
-| `MOVE_STEP` | DoA前半球は前進、後半球は後進 | 側方は内輪を減速して500 msだけ回頭・移動する |
+| `MOVE_STEP` | 全方位で前進、側方・後方は操舵角を付ける | 側方は内輪を減速して1000 msだけ回頭・移動する |
 | `SETTLE` | motor停止、servo直進 | 500 ms待ってモーター音と車体振動を減らす |
-| `COOLDOWN` | motor停止、servo直進 | release以下を500 ms確認してから次の独立した音源イベントを受け付ける |
+| `COOLDOWN` | motor停止、servo直進 | release以下を200 ms確認してから次の独立した音源イベントを受け付ける |
 | `FAULT` | emergency stop | CPU0のtask/IPC/USB初期化/目標共有errorをラッチ表示 |
 
 初期値は次のとおりである。実環境の無音時と目的音を記録してから調整する。
@@ -280,18 +280,17 @@ stateDiagram-v2
 | DoA acquisition timeout | 2000 ms | 安定した5 sampleが得られなければイベントを破棄 |
 | link stable | 500 ms | 列挙直後の走行開始を禁止 |
 | observation timeout | 600 ms | 超過時は即座に走行目標を停止へ更新 |
-| motor command | ±120 RPM | 前半球は正RPM、後半球は負RPM。現在は左右別の固定デューティ比で駆動 |
-| inner-wheel command | ±90 RPM相当 | 操舵時の内輪を減速し、回頭量を増やす |
+| motor command | +120 RPM | 全方位で前進。現在は左右別の固定デューティ比で駆動 |
+| inner-wheel command | +90 RPM相当 | 操舵時の内輪を減速し、回頭量を増やす |
 | steering | 20～45度 | 正面範囲外の方向を符号付きで制限 |
-| reverse boundary | ±100度 | この角度より後ろは後進を選ぶ |
-| move step | 500 ms | 1回の短距離前進または後進 |
+| move step | 1000 ms | 1回の短距離前進 |
 | settle | 500 ms | 停止後にモーター音と車体振動を減らす時間 |
 | front tolerance | ±15度 | 直進とみなす車体相対角 |
 | cooldown release | 200 ms | -48 dBFS以下のrelease条件を維持して次の音源イベントを再arm |
 
-1回のloudかつVAD有効な観測で音イベントを開始する。開始直後の500 msはDoAを採用せず、その後の最新5 sampleが相互差20度以内になった時点でDoA、操舵角、走行方向を固定する。短い拍手ではVADが先に0へ戻るため、取得開始後はVADの継続を要求しない。開始から2000 ms以内に安定しなければイベントを破棄する。servo整定と500 msの1 stepを完了した後は必ず`COOLDOWN`へ入り、走行後に混ざるモーター音・反射音のDoAを次の移動指令として使わない。
+1回のloudかつVAD有効な観測で音イベントを開始する。開始直後の500 msはDoAを採用せず、その後の最新5 sampleが相互差20度以内になった時点でDoAと操舵角を固定する。短い拍手ではVADが先に0へ戻るため、取得開始後はVADの継続を要求しない。開始から2000 ms以内に安定しなければイベントを破棄する。servo整定と1000 msの1 stepを完了した後は必ず`COOLDOWN`へ入り、走行後に混ざるモーター音・反射音のDoAを次の移動指令として使わない。
 
-DoAの前半球（±100度未満）は前進、後半球は後進とする。後進では車体後方を進行方向としてDoAを再表現し、操舵符号を反転する。正面・真後ろはサーボ0度で直進・直後進する。側方では4輪を最大45度の逆相操舵とし、旋回内側のモーターを90 RPM相当に減速して回頭量を増やす。ReSpeakerはESP32S3実装面を上にして搭載しているため、DoAの左右は`CPU0_SOUND_DOA_CLOCKWISE_POSITIVE=0`で鏡映補正する。2026-09-04の方向別実測では車体正面のraw DoAが約0度、右が約288度、左が約82度、後方が約189度だったため、`CPU0_SOUND_DOA_ZERO_OFFSET_DEG=0`とする。正のサーボ指令は物理的な左操舵のため、`CPU0_STEERING_SERVO_OUTPUT_SIGN=-1`でサーボ出力だけを反転している。操舵角、リンク干渉、実際の車体回頭方向は必ず車輪を浮かせた試験から確認する。
+DoAは車体正面を0度、右を正、左を負として操舵角へ変換する。全方位で車体前進を指令し、側方・後方では4輪を最大45度の逆相操舵とし、旋回内側のモーターを90 RPM相当に減速して回頭量を増やす。ReSpeakerはESP32S3実装面を上にして搭載しているため、DoAの左右は`CPU0_SOUND_DOA_CLOCKWISE_POSITIVE=0`で鏡映補正する。`CPU0_SOUND_DOA_ZERO_OFFSET_DEG=0`、正のサーボ指令は物理的な左操舵のため`CPU0_STEERING_SERVO_OUTPUT_SIGN=-1`でサーボ出力だけを反転している。
 
 USB detach、観測timeout、CRC/version異常、XVF3800 I2C error、mute、I2S staleでは新しい移動を開始しない。CRC/version/format異常frameは破棄し、正常観測が600 ms途絶えると`WAIT_LINK`へ戻す。bit 0のI2S overrunは当該観測区間の一時的な欠落を示す診断値であり、単発ではlinkを切らない。移動中にtimeoutへ到達した場合もCPU0は停止目標をIPC送信する。さらにCPU0自体が停止してIPCが途絶えた場合は、CPU1の既存ローカルtimeoutがsafe stopを行う。
 
@@ -342,7 +341,7 @@ VADは音声活動検出であり、任意の衝撃音、機械音、警報音�
 5. SolutionのJ7関連ピンを確認し、CPU0/CPU1 projectをRefreshしてから、CPU0、CPU1の順にGenerate Project Contentを実行する。
 6. CPU0/CPU1をClean/Buildし、同じbuild世代の2個のELFをmulticore launch groupで書き込む。
 
-CPU1のμT-Kernel移行前にはRA8P1のcompile/linkとバイナリ生成を確認している。移行後はCPU0/CPU1のユーザーsourceとCPU1用μT-Kernel sourceのコンパイル検証まで完了しており、最終的なcompile/linkと実機書込みは保留中である。新規sourceやFSP stackを追加した場合は、上記のRefresh、Generate、Clean Buildを省略しない。詳細な検証結果は[RA8P1ソフトウェア設計書のビルド節](ARCHITECTURE.md#11-ビルド生成書き込み)、ESP-IDF projectの設定・build・flash手順は[`firmware/esp32s3/README.md`](../../firmware/esp32s3/README.md)を参照する。
+CPU0/CPU1のビルドではprojectをRefreshし、CPU0、CPU1の順にGenerate Project Contentを実行してから両プロジェクトをClean/Buildする。同じビルド世代のELFをmulticore launch groupで書き込む。ESP-IDF projectの設定・build・flash手順は[`firmware/esp32s3/README.md`](../../firmware/esp32s3/README.md)を参照する。
 
 ### 8.2 USBだけの試験
 
@@ -363,7 +362,7 @@ CPU1のμT-Kernel移行前にはRA8P1のcompile/linkとバイナリ生成を確�
 
 1. 車輪を浮かせ、サーボリンクの干渉がない状態でservo電源だけを入れる。
 2. 正面、左、右の音に対する4輪角度と、FR/FL/RR/RLの名称対応を確認する。
-3. current limitを設定したmotor電源を入れ、正面音で`+120/+120 RPM`の前進、真後ろ音で`-120/-120 RPM`の後進、右・左音で内輪90 RPM相当の旋回になることを確認する。
+3. current limitを設定したmotor電源を入れ、各方向の音で`+120/+120 RPM`の前進、右・左音で内輪90 RPM相当の旋回になることを確認する。
 4. `MOVE_STEP`中にUSBを抜き、停止することを確認する。
 5. 車輪を接地する前に、USB/frontend timeout、CPU0 IPC timeout、CPU1 local timeoutの3段を個別に確認する。
 

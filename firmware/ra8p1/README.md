@@ -36,9 +36,9 @@ CPU1は4輪操舵サーボ、左右BTS7960、左右代表エンコーダを起�
 #define MOTOR_PWM_MAX_DUTY_PERMILLE (700)
 ```
 
-購入時の仕様表記は100 rpmですが、今回の実機確認では約300 rpmを測定したため、開ループ換算上限を300 rpmへ変更しています。この値が無負荷測定である場合、車体搭載時の速度・トルクは別途確認してください。
+開ループの速度換算上限は`JGA25_TARGET_RPM_MAX=300` rpmです。
 
-CPU0はCPU1を起動した後、μT-Kernel初期タスクから呼ばれる`usermain()`で`cpu0_tasks_init()`を実行します。`tk_init.c`の登録配列を基に`tk_think`、`tk_command`、`tk_audio`の全リソースを生成してから全タスクを開始し、`usermain()`は永久休止します。CPU1も独立したμT-Kernelを起動し、CPU1側`usermain()`から`tk_actuator`と`tk_status`を生成・開始して永久休止します。`tk_think`は停止中の音響観測が閾値と方向安定条件を満たした場合だけ、短時間の操舵・前進目標を生成します。CPU1は左右代表エンコーダの実測RPMを診断へ返します。速度フィードバックは左右エンコーダーの方向と1回転カウント数を再確認するまで無効です。
+CPU0はCPU1を起動した後、μT-Kernel初期タスクから呼ばれる`usermain()`で`cpu0_tasks_init()`を実行します。`tk_init.c`の登録配列を基に`tk_think`、`tk_command`、`tk_audio`の全リソースを生成してから全タスクを開始し、`usermain()`は永久休止します。CPU1も独立したμT-Kernelを起動し、CPU1側`usermain()`から`tk_actuator`と`tk_status`を生成・開始して永久休止します。`tk_think`は停止中の音響観測が閾値と方向安定条件を満たした場合だけ、短時間の操舵・前進目標を生成します。CPU1は左右代表エンコーダの実測RPMを診断へ返します。速度フィードバックは無効で、実測RPMは診断にのみ使用します。
 
 `tk_command`は高優先度の50 ms周期で最新目標を読み、FR、FL、RR、RLと左右モーターの6指示値を1つのIPCスナップショットとして送信します。思考目標が500 ms途絶した場合は緊急停止へ切り替えます。
 
@@ -76,7 +76,7 @@ EK-RA8P1は既定でSW4-4がOFFで、Arduinoヘッダが切り離されていま
 
 ピン設定を変更した後はCPU0/CPU1 projectをRefreshし、CPU0、CPU1の順にGenerate Project Contentを実行し、両プロジェクトをCleanしてから両方をBuildします。書き込みには`SoundExplorationRover Debug_Multicore Launch Group`を使います。この構成はCPU0の`Debug/SoundExplorationRover_CPU0.elf`とCPU1の`Debug/SoundExplorationRover_CPU1.elf`を組で読み込むため、別フォルダーに残った古いSRECを個別選択しないでください。
 
-CPU1 μT-Kernel移行後のユーザーsourceとカーネルsourceはコンパイル検証済みですが、完全linkと実機起動は未確認です。古い`Debug` make metadataには追加sourceが未列挙のため、実機へ書き込む前に上記のRefresh、Generate、Clean Buildを必ず実行してください。検証状況は[ローバー ファームウェア設計書のビルド節](../../docs/firmware/ARCHITECTURE.md#11-ビルド生成書き込み)を参照してください。
+CPU1のμT-Kernel sourceを含めた現在のビルド手順は、Refresh、Generate Project Content、Clean、Buildの順です。CPU0/CPU1のELFは`SoundExplorationRover Debug_Multicore Launch Group`で組にして書き込みます。詳細は[ローバー ファームウェア設計書のビルド節](../../docs/firmware/ARCHITECTURE.md#11-ビルド生成書き込み)を参照してください。
 
 サーボの赤線は外部安定化電源+4.8～6.8 V、黒線は外部電源GNDへ接続し、外部電源GNDとEK-RA8P1のGNDを共通化します。
 
@@ -117,9 +117,9 @@ EK-RA8P1 J18-6/7 GND ----+
 
 A相だけでも指令方向を前提に速度の大きさは測れますが、逆転判定と4逓倍カウントにはA/B両方が必要です。本ソフトは左右ともA/Bの両相を両エッジ割り込みで読み取ります。未配線の入力を浮かせると誤カウントするため、エンコーダを接続しない状態で走行させないでください。
 
-購入品は300 RPM品であり、旧100 RPM品を仮定した2024 count/revは使用できません。出力軸2回転で約1800カウントを実測したため、`JGA25_ENCODER_COUNTS_PER_REV=900`として100 msごとに左右のRPMを算出します。より正確な値が必要な場合は、出力軸10回転の平均で再校正します。測定方法は[JGA25-370 12 V・300 RPM仕様書](../../hardware/actuator/spec/jga25-370-12v-300rpm.md)を参照してください。
+`JGA25_ENCODER_COUNTS_PER_REV=900`として、100 msごとに左右のRPMを算出します。モーター仕様は[JGA25-370 12 V・300 RPM仕様書](../../hardware/actuator/spec/jga25-370-12v-300rpm.md)を参照してください。
 
-`g_jga25_left_encoder_count`と`g_jga25_right_encoder_count`は、左右とも前進で増加し、後進で減少する4逓倍累積カウントです。`g_jga25_left_rpm_x10`と`g_jga25_right_rpm_x10`も同じ符号規則の推定RPMの10倍であり、`-1234`は後進方向の`-123.4 RPM`を表します。2026-09-04の走行ログでは右側が物理的な前進・後進の両方で負値を返したため、現在は`MOTOR_SPEED_FEEDBACK_ENABLE=0`として実測RPMを診断だけに使用します。
+`g_jga25_left_encoder_count`と`g_jga25_right_encoder_count`は、左右とも前進で増加し、後進で減少する4逓倍累積カウントです。`g_jga25_left_rpm_x10`と`g_jga25_right_rpm_x10`も同じ符号規則の推定RPMの10倍であり、`-1234`は後進方向の`-123.4 RPM`を表します。現在は`MOTOR_SPEED_FEEDBACK_ENABLE=0`として実測RPMを診断だけに使用します。
 
 最終的に6台すべての速度を個別に閉ループ制御する場合は、6組（A/B計12入力）と6チャンネルのモーター駆動、または各側のエンコーダ値を集約する外部回路が必要です。現行の左右2台のBTS7960構成では、まず左右代表2組で十分です。
 
@@ -129,10 +129,10 @@ DCモーターをEK-RA8P1へ直接接続してはいけません。左右それ�
 
 | EK-RA8P1 | 論理左BTS7960 | 論理右BTS7960 | 用途 |
 |---|---|---|---|
-| J23-5、D4、P810/GTIOC10A | — | RPWM | 論理右20 kHz後退PWM |
+| J23-5、D4、P810/GTIOC10A | — | RPWM | 論理右20 kHz前進PWM |
 | J23-4、D3、P811/GTIOC10B | RPWM | — | 論理左20 kHz後退PWM |
 | Pmod2 J25-3、P602/GTIOC7B | LPWM | — | 論理左20 kHz前進PWM |
-| Pmod2 J25-2、P603/GTIOC7A | — | LPWM | 論理右20 kHz前進PWM |
+| Pmod2 J25-2、P603/GTIOC7A | — | LPWM | 論理右20 kHz後退PWM |
 | J24-1、D8、PD01 | R_ENとL_EN | R_ENとL_EN | 左右共通EN |
 | J23-8、D7、P312 | 未接続 | 未接続 | 解放（予備GPIO） |
 | J18-5、+5 V | VCC | VCC | BTS7960モジュール論理電源を共通化 |
@@ -144,13 +144,13 @@ DCモーターをEK-RA8P1へ直接接続してはいけません。左右それ�
 
 電源はArduino電源コネクタJ18から分岐できますが、電圧を混在させないでください。BTS7960のVCCはモジュール仕様で5 Vが要求される場合が多いため、仕様が3.3 V対応と明記されていない限りJ18-5（+5 V）へ接続します。左右2台のBTS7960のVCCをそこから分岐し、左右代表エンコーダのVCCはJ18-4（+3.3 V）から分岐します。4機器のGNDはJ18-6またはJ18-7から分岐して共通化します。J18-4とJ18-5は接続せず、エンコーダ出力が3.3 Vを超えないことを確認してください。BTS7960のVCC電流がEK-RA8P1の電源容量を超える場合は、外部の安定化5 V電源を使い、GNDだけを共通化します。
 
-RPWMとLPWMは同じ側で同時にHighにせず、同じ側では1方向のPWMだけを出します。2026-09-04の実走確認でRPWMが後進、LPWMが前進と確定したため、論理正RPM（前進）を左右ともLPWMへ、負RPM（後退）をRPWMへ変換します。前後基準の設定は`MOTOR_CHASSIS_FORWARD_SIGN=-1`、左右個別の補正は`MOTOR_LEFT_MOUNT_SIGN`、`MOTOR_RIGHT_MOUNT_SIGN`です。P602/P603はPmod2へ接続し、Octo-SPI（OSPI0）のP100～P106、P800～P804とは別のOSPI1系ピンを使用しています。BTS7960のVCC、EK-RA8P1、外部モーター電源は必ずGNDを共通化します。
+RPWMとLPWMは同じ側で同時にHighにせず、同じ側では1方向のPWMだけを出します。論理正RPM（前進）は左LPWM（P602/GPT7B）と右RPWM（P810/GPT10A）、負RPM（後進）は左RPWM（P811/GPT10B）と右LPWM（P603/GPT7A）へ出します。前進時の物理回転は左が正回転（右回り）、右が逆回転（左回り）で、左右Encoderは前進正・後進負です。設定は`MOTOR_CHASSIS_FORWARD_SIGN=-1`、`MOTOR_LEFT_MOUNT_SIGN=+1`、`MOTOR_RIGHT_MOUNT_SIGN=-1`です。P602/P603はPmod2へ接続し、Octo-SPI（OSPI0）のP100～P106、P800～P804とは別のOSPI1系ピンを使用しています。BTS7960のVCC、EK-RA8P1、外部モーター電源は必ずGNDを共通化します。
 
-左右RPM指令は基本PWMデューティへ換算し、右側だけ`MOTOR_RIGHT_DUTY_SCALE_PERMILLE=750`で初期デューティを下げます。代表エンコーダ実測RPMによる比例補正機構は残していますが、右エンコーダーの方向異常を解決するまで無効です。左右各3台を1台のBTS7960へ並列接続しているため、補正対象は各側の代表モーターであり、3台個別の速度一致は保証しません。左右RPMがともに0の停止指令では、ランプダウンを待たずPWMと共通ENを即時に停止します。
+左右RPM指令は基本PWMデューティへ換算し、`MOTOR_LEFT_DUTY_SCALE_PERMILLE=700`、`MOTOR_RIGHT_DUTY_SCALE_PERMILLE=250`を適用します。代表エンコーダ実測RPMによる比例補正機構は`MOTOR_SPEED_FEEDBACK_ENABLE=0`で無効化しています。左右各3台を1台のBTS7960へ並列接続しているため、補正対象は各側の代表モーターであり、3台個別の速度一致は保証しません。左右RPMがともに0の停止指令では、ランプダウンを待たずPWMと共通ENを即時に停止します。
 
 ## 音源追従の動作確認
 
-初回は車輪を浮かせ、モーター電源を電流制限付きにします。USB linkと音響観測が成立するまでCPU0はemergency stopを維持します。成立後は停止して音を聴き、DoA更新待ちと5点の安定確認を行ってからservoを500 ms整定し、最大左右120 RPM相当で500 msだけ移動して500 ms停止します。
+初回は車輪を浮かせ、モーター電源を電流制限付きにします。USB linkと音響観測が成立するまでCPU0はemergency stopを維持します。成立後は停止して音を聴き、DoA更新待ちと5点の安定確認を行ってからservoを500 ms整定し、最大左右120 RPM相当で1000 msだけ移動して500 ms停止します。
 
 USB接続だけの試験、静止音響試験、DoA座標校正、車輪を浮かせたアクチュエータ試験、接地試験の順序は[ReSpeaker統合設計の「安全な導入・検証順」](../../docs/firmware/RESPEAKER_INTEGRATION.md#8-安全な導入検証順)に従ってください。目標RPMは20 kHz PWMの基本値へ変換し、現在の代表エンコーダ値は診断にだけ使用します。
 
@@ -163,7 +163,7 @@ USB接続だけの試験、静止音響試験、DoA座標校正、車輪を浮�
 | 青: 500 msごとに反転、緑: 消灯 | USB link待ち・safe stop |
 | 青: 1秒ごとに100 ms点灯 | 停止して音を聴取中 |
 | 青: 125 msごとに反転 | 目標方向へservo整定中 |
-| 青: 点灯 | 300 msの短距離移動中 |
+| 青: 点灯 | 1000 msの短距離移動中 |
 | 青: 250 msごとに反転 | settleまたはcooldown中 |
 | 緑: 1秒ごとに100 ms点灯 | link待ち以外で`tk_think`が周期実行中 |
 | 緑: 点灯＋青: 回数点滅 | CPU0 fault。青の点滅回数がfault番号 |
@@ -177,8 +177,8 @@ CPU1をデバッグして、次の変数をLive Watchへ追加すると確認し
 | 変数 | 内容 |
 |---|---|
 | `g_servo_pulse_us[0..3]` | 各サーボの現在の指令幅 |
-| `g_drive_left_duty_permille` | 左モーターの符号付きPWM指令（負値はLPWM） |
-| `g_drive_right_duty_permille` | 右モーターの符号付きPWM指令（負値はLPWM） |
+| `g_drive_left_duty_permille` | 左モーターの符号付きPWM指令（正値はRPWM、負値はLPWM） |
+| `g_drive_right_duty_permille` | 右モーターの符号付きPWM指令（正値はRPWM、負値はLPWM） |
 | `g_jga25_left_encoder_count` / `g_jga25_right_encoder_count` | 左右代表モーターの4逓倍累積カウント（前進正、後進負） |
 | `g_jga25_left_rpm_x10` / `g_jga25_right_rpm_x10` | 左右代表モーター推定RPMの10倍（前進正、100 ms更新） |
 | `g_actuator_last_error` | 最後のFSPエラー |

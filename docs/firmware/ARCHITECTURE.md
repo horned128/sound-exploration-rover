@@ -1,6 +1,6 @@
 # ローバー ファームウェア設計書
 
-最終更新: 2026-09-02 / 対象: RA8P1 CPU0/CPU1、ReSpeaker/XIAO、I2Cセンサー統合の現行ファームウェア実装
+最終更新: 2026-09-08 / 対象: RA8P1 CPU0/CPU1、ReSpeaker/XIAO、I2Cセンサー統合の現行ファームウェア実装
 
 現行ソースに対応するインタラクティブな全体図は、[現行コード構造図](archify/SEROV_ARCHITECTURE.html)を参照する。
 
@@ -256,7 +256,7 @@ CPU0の`tk_think`が青LED（LED1/P600）と緑LED（LED2/P303）を一括して
 | 青を500 msごとに反転、緑消灯 | USB link待ち・safe stop |
 | 青を1秒ごとに100 ms点灯 | 停止して音を聴取中 |
 | 青を125 msごとに反転 | 目標方向へservo整定中 |
-| 青点灯 | 500 msの短距離移動中 |
+| 青点灯 | 1000 msの短距離移動中 |
 | 青を250 msごとに反転 | settleまたはcooldown中 |
 | 緑を1秒ごとに100 ms点灯 | link待ち以外の`tk_think` heartbeat |
 | 緑点灯＋青をN回点滅 | CPU0 fault。Nがfault番号 |
@@ -378,7 +378,7 @@ stateDiagram-v2
 
 ### 7.3 DCモーター制御
 
-論理左右各1台のBTS7960へ、RPWM用GPT10A/BとLPWM用GPT7A/Bの20 kHz PWMを出す。実機の前後認識に合わせ、`cpu1_config.h`で論理左右を初期の物理左右から交換している。RPM指令を基本PWMへ換算し、左右別の固定比を適用する。代表エンコーダ実測RPMによる比例補正は、入力方向を再確認するまで無効である。
+論理左右各1台のBTS7960へ、RPWM用GPT10A/BとLPWM用GPT7A/Bの20 kHz PWMを出す。ピン配置は論理左RPWM=P811/GPT10B、右RPWM=P810/GPT10A、左LPWM=P602/GPT7B、右LPWM=P603/GPT7Aである。論理正RPM（車体前進）は左LPWM（P602/GPT7B）・右RPWM（P810/GPT10A）、負RPM（車体後進）は左RPWM（P811/GPT10B）・右LPWM（P603/GPT7A）へ出力する。RPM指令を基本PWMへ換算し、左右別の固定比を適用する。
 
 ```text
 target RPM -> duty permille = target * 1000 / 300 RPM
@@ -387,13 +387,13 @@ target RPM -> duty permille = target * 1000 / 300 RPM
 5 msごとにGPT10A/BおよびGPT7A/Bへ反映
 ```
 
-論理正RPMは車体前進として扱う。2026-09-04の実走確認に基づき、現在の実機配線では論理正RPMを左右ともLPWMへ、負RPMを左右ともRPWMへ出す。符号は`MOTOR_CHASSIS_FORWARD_SIGN=-1`、`MOTOR_LEFT_MOUNT_SIGN=+1`、`MOTOR_RIGHT_MOUNT_SIGN=+1`から合成する。同じ側のRPWM/LPWMは相互排他的に更新し、同時Highを避ける。停止時は4出力を0にしてから共通ENをLowにする。
+論理正RPMは車体前進として扱い、エンコーダ値は前進正・後進負とする。論理正RPMは左LPWM（P602/GPT7B）・右RPWM（P810/GPT10A）、負RPMは左RPWM（P811/GPT10B）・右LPWM（P603/GPT7A）へ出す。符号は`MOTOR_CHASSIS_FORWARD_SIGN=-1`、`MOTOR_LEFT_MOUNT_SIGN=+1`、`MOTOR_RIGHT_MOUNT_SIGN=-1`から合成する。同じ側のRPWM/LPWMは相互排他的に更新し、同時Highを避ける。停止時は4出力を0にしてから共通ENをLowにする。
 
-基本PWMは左右別の固定比で算出し、右側は実機の無負荷速度差を`MOTOR_RIGHT_DUTY_SCALE_PERMILLE=750`で抑える。代表エンコーダを使う比例補正機構は残しているが、右エンコーダーの方向異常を解決するまで`MOTOR_SPEED_FEEDBACK_ENABLE=0`として無効化している。再び有効にした場合は、指令開始から150 ms待った後、100 ms周期の実測RPMとの差へ2 permille/RPM、最大±250 permilleの補正を加える。最終PWMは0～700 permilleに制限する。左右RPMがともに0ならランプダウンを行わず、PWMと共通ENを即時停止する。各側3台のモーターを個別に制御するものではない。
+基本PWMは左右別の固定比で算出し、`MOTOR_LEFT_DUTY_SCALE_PERMILLE=700`、`MOTOR_RIGHT_DUTY_SCALE_PERMILLE=250`を適用する。代表エンコーダを使う速度フィードバックは`MOTOR_SPEED_FEEDBACK_ENABLE=0`で無効化している。最終PWMは0～700 permilleに制限する。左右RPMがともに0ならランプダウンを行わず、PWMと共通ENを即時停止する。各側3台のモーターを個別に制御するものではない。
 
 ## 8. 停止聴取型の音源追従
 
-`tk_think`は[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/control/sound_follow_controller.c)を100 msごとに更新する。USB linkと観測が500 ms安定した後だけ待受へ入り、-45 dBFS以上かつVAD検出中の1観測を音源イベントの開始条件とする。開始直後の保持DoAを使わないよう500 ms待ち、その後の最新5 sampleが相互差20度以内になった場合だけ操舵する。取得開始から2000 ms以内に安定しなければイベントを破棄する。DoAの前半球では前進、後半球では後進を選ぶ。側方は最大45度の4輪逆相操舵に加え、内輪を90 RPM相当へ減速する。検出時にDoAと走行目標を固定し、500 msのservo整定後に500 msだけ移動する。servoを直進へ戻して500 ms停止した後は、静音を確認するまで次の検出を受け付けない。
+`tk_think`は[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/control/sound_follow_controller.c)を100 msごとに更新する。USB linkと観測が500 ms安定した後だけ待受へ入り、-45 dBFS以上かつVAD検出中の1観測を音源イベントの開始条件とする。開始直後の保持DoAを使わないよう500 ms待ち、その後の最新5 sampleが相互差20度以内になった場合だけ操舵する。取得開始から2000 ms以内に安定しなければイベントを破棄する。DoAの全方位で前進を選び、側方・後方は最大45度の4輪逆相操舵に加え、内輪を90 RPM相当へ減速する。検出時にDoAと走行目標を固定し、500 msのservo整定後に1000 msだけ移動する。servoを直進へ戻して500 ms停止した後、200 msの静音を確認して次の検出を受け付ける。
 
 ```mermaid
 stateDiagram-v2
@@ -401,9 +401,9 @@ stateDiagram-v2
     WAIT_LINK --> LISTEN: linkを500 ms確認
     LISTEN --> STEER_PREP: loud + stable DoA
     STEER_PREP --> MOVE_STEP: 500 ms
-    MOVE_STEP --> SETTLE: 500 ms
+    MOVE_STEP --> SETTLE: 1000 ms
     SETTLE --> COOLDOWN: 500 ms
-    COOLDOWN --> LISTEN: quiet 500 ms
+    COOLDOWN --> LISTEN: quiet 200 ms
     LISTEN --> WAIT_LINK: observation 600 ms timeout
     STEER_PREP --> WAIT_LINK: detach / timeout
     MOVE_STEP --> WAIT_LINK: detach / timeout
@@ -456,7 +456,7 @@ J11/USB Full Speed、P500、`USB_FS_VBUSEN`はReSpeaker経路に使用しない�
 
 ### 9.2 アクチュエータ・センサ割当
 
-以下の表の「論理左／論理右」「論理FR／FL／RR／RL」は、CPU0のIPC指令で使用する名称である。実機を前方から見た左右が初期ソフトの認識と反対だったため、物理ピンの割り当てを論理名へ付け替え、FSP生成インスタンス名も論理名に統一している。アクチュエータとエンコーダIRQはCPU1、I2CセンサーはCPU0が所有する。ピン番号とSolutionの共有ピン設定は変更していない。
+以下の表の「論理左／論理右」「論理FR／FL／RR／RL」は、CPU0のIPC指令で使用する名称である。物理ピンの割り当ては論理名へ対応付け、FSP生成インスタンス名も論理名に統一している。アクチュエータとエンコーダIRQはCPU1、I2CセンサーはCPU0が所有する。ピン番号とSolutionの共有ピン設定は変更していない。
 
 | 用途 | FSPインスタンス | FSP出力 / GPIO | MCUピン | 外部コネクタ |
 |---|---|---|---|---|
@@ -499,19 +499,13 @@ P801、P803、P808をサーボへ転用しているため、現行構成ではOc
 | CPU1 `actuator_app` | IPC指令が1500 ms届かない | ローカルsafe stop |
 | CPU1 driver統合 | driver API error | DRIVER fault、safe stop |
 
-現状の制約は、ハードウェア非常停止入力なし、CPU間watchdogなし、各側3台の個別速度フィードバックなしである。論理左右代表モーターのA/Bを4逓倍で数え、実測値`JGA25_ENCODER_COUNTS_PER_REV=900`と100 msの差分からRPMを算出する。カウントとRPMは前進正、後進負を契約とするが、2026-09-04のログでは右側が両方向で負を返したため、現在は`MOTOR_SPEED_FEEDBACK_ENABLE=0`として比例補正を無効化している。また論理左右各3台を1台のBTS7960へ並列接続しているため、6台の個別制御には対応しない。
+現状の制約は、ハードウェア非常停止入力なし、CPU間watchdogなし、各側3台の個別速度フィードバックなしである。論理左右代表モーターのA/Bを4逓倍で数え、`JGA25_ENCODER_COUNTS_PER_REV=900`と100 msの差分からRPMを算出する。カウントとRPMは前進正、後進負を契約とする。`MOTOR_SPEED_FEEDBACK_ENABLE=0`のため、実測RPMは診断にのみ使用する。また論理左右各3台を1台のBTS7960へ並列接続しているため、6台の個別制御には対応しない。
 
 ## 11. ビルド・生成・書き込み
 
-基準環境はFSP 6.4.0、GNU Arm Embedded 13.2.1、e² studio 2025-12である。2026-08-24にはCPU1をμT-Kernel化する前のRA8P1 source一式で完全compile/linkとSREC生成を確認した。2026-09-02のCPU1 μT-Kernel移行後は、CPU0/CPU1の全ユーザーC sourceと、CPU1 Cortex-M33設定でμT-Kernel C source 223ファイルおよびRA8P1 ARMv8-M dispatch assemblyのコンパイル検証を完了している。
+基準環境はFSP 6.4.0、GNU Arm Embedded 13.2.1、e² studio 2025-12である。CPU0/CPU1のユーザーsourceとμT-Kernel sourceは各プロジェクトのDebug構成へ含め、同じビルド世代のELFを組にして書き込む。XIAO ESP32S3はESP-IDFのproject設定に従ってbuild/flashする。
 
-| project | 検証結果 | text | data | bss | total |
-|---|---|---:|---:|---:|---:|
-| CPU0 | 移行前full link成功、移行後ユーザーsource構文検証成功 | 52,816（移行前） | 200（移行前） | 24,060（移行前） | 77,076（移行前） |
-| CPU1 | 移行前full link成功、移行後ユーザーsource・μT-Kernel C/assemblyコンパイル検証成功 | 11,996（移行前） | 8（移行前） | 1,668（移行前） | 13,672（移行前） |
-| XIAO ESP32S3 | ESP-IDF未導入のため実build未実施 | - | - | - | - |
-
-CPU1 μT-Kernel移行後の完全linkと実機起動は未確認である。既存`Debug` make metadataは追加したCPU1タスクとlinked μT-Kernel sourceをまだ列挙していないため、古いincremental build結果をそのまま書き込まない。e² studioでCPU0/CPU1 projectをRefreshし、Generate Project Content、Clean、Buildを順に行い、CPU0/CPU1のELFを同じビルド世代として書き込む。XIAO ESP32S3は別途ESP-IDF環境でbuild/flashを完了するまでend-to-end検証済みとは扱わない。
+e² studioではCPU0/CPU1 projectをRefreshし、Generate Project Content、Clean、Buildを順に行う。CPU0/CPU1のELFは`SoundExplorationRover Debug_Multicore Launch Group`で組にして書き込む。
 
 ピンまたはFSPモジュール変更後は次の順で更新する。
 

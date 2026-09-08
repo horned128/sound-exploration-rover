@@ -32,15 +32,10 @@ LOCAL UB const vl53l1x_default_configuration[] = {
     0xFFU, 0x9BU, 0x00U, 0x00U, 0x00U, 0x01U, 0x00U, 0x00U,
 };
 
-typedef struct st_vl53l1x_measurement {
-    UH distance_mm;
-    UB range_status;
-} vl53l1x_measurement_t;
-
 LOCAL fsp_err_t vl53l1x_write_register(UH register_address, UB value); /* 8bitレジスタ書込み */
 LOCAL fsp_err_t vl53l1x_read_registers(UH register_address, UB * p_data, UW length); /* レジスタ連続読出し */
-LOCAL fsp_err_t vl53l1x_wait_data_ready(void);              /* 新しい測距結果待ち */
-LOCAL fsp_err_t vl53l1x_read_measurement(vl53l1x_measurement_t * p_measurement); /* 生測距結果取得 */
+LOCAL fsp_err_t vl53l1x_wait_data_ready(BOOL * p_timed_out); /* 新しい測距結果待ち */
+LOCAL fsp_err_t vl53l1x_read_measurement(vl53l1x_reading_t * p_reading, BOOL * p_timed_out); /* 生測距結果取得 */
 
 /** =================================================================*
  * @brief  VL53L1Xの8bitレジスタへ書込み
@@ -77,7 +72,12 @@ LOCAL fsp_err_t vl53l1x_read_registers(UH register_address, UB * p_data, UW leng
  * @details GPIO_HV_MUX_CTRLの割込み極性とGPIO_TIO_HV_STATUSを用いる。
  * @return 結果が準備できればFSP_SUCCESS、期限超過ならFSP_ERR_TIMEOUT
  * ================================================================= */
-LOCAL fsp_err_t vl53l1x_wait_data_ready(void) {
+LOCAL fsp_err_t vl53l1x_wait_data_ready(BOOL * p_timed_out) {
+    if (NULL == p_timed_out) {
+        return FSP_ERR_INVALID_ARGUMENT;
+    }
+    *p_timed_out = FALSE;
+
     for (UW elapsed_ms = 0U; elapsed_ms < CPU0_TOF_DATA_READY_TIMEOUT_MS; elapsed_ms++) {
         UB gpio_status[2] = {0U};
         fsp_err_t const err = vl53l1x_read_registers(VL53L1X_REG_GPIO_HV_MUX_CTRL, gpio_status,
@@ -93,6 +93,7 @@ LOCAL fsp_err_t vl53l1x_wait_data_ready(void) {
         R_BSP_SoftwareDelay(1U, BSP_DELAY_UNITS_MILLISECONDS);
     }
 
+    *p_timed_out = TRUE;
     return FSP_ERR_TIMEOUT;
 }
 
@@ -101,7 +102,12 @@ LOCAL fsp_err_t vl53l1x_wait_data_ready(void) {
  * @details 同一I2Cアドレスのため、呼出し前にTCA9548Aで対象チャネルを選択する。
  * @return FSPエラーコード
  * ================================================================= */
-EXPORT fsp_err_t vl53l1x_init(void) {
+EXPORT fsp_err_t vl53l1x_init(vl53l1x_result_t * p_result) {
+    if (NULL == p_result) {
+        return FSP_ERR_INVALID_ARGUMENT;
+    }
+    *p_result = VL53L1X_RESULT_TRANSPORT_ERROR;
+
     UB model_id[2] = {0U};
     fsp_err_t err = vl53l1x_read_registers(VL53L1X_REG_MODEL_ID, model_id, sizeof(model_id));
     if (FSP_SUCCESS != err) {
@@ -127,8 +133,12 @@ EXPORT fsp_err_t vl53l1x_init(void) {
     if (FSP_SUCCESS != err) {
         return err;
     }
-    err = vl53l1x_wait_data_ready();
+    BOOL data_ready_timed_out = FALSE;
+    err = vl53l1x_wait_data_ready(&data_ready_timed_out);
     if (FSP_SUCCESS != err) {
+        if (data_ready_timed_out) {
+            *p_result = VL53L1X_RESULT_DATA_READY_TIMEOUT;
+        }
         return err;
     }
     err = vl53l1x_write_register(VL53L1X_REG_INTERRUPT_CLEAR, 0x01U);
@@ -147,7 +157,11 @@ EXPORT fsp_err_t vl53l1x_init(void) {
     if (FSP_SUCCESS != err) {
         return err;
     }
-    return vl53l1x_write_register(VL53L1X_REG_MODE_START, 0x40U);
+    err = vl53l1x_write_register(VL53L1X_REG_MODE_START, 0x40U);
+    if (FSP_SUCCESS == err) {
+        *p_result = VL53L1X_RESULT_VALID;
+    }
+    return err;
 }
 
 /** =================================================================*
@@ -156,12 +170,12 @@ EXPORT fsp_err_t vl53l1x_init(void) {
  * @param[out] p_measurement 生の距離とRange Status
  * @return I2C/待機/割込みクリアが成功すればFSP_SUCCESS
  * ================================================================= */
-LOCAL fsp_err_t vl53l1x_read_measurement(vl53l1x_measurement_t * p_measurement) {
-    if (NULL == p_measurement) {
+LOCAL fsp_err_t vl53l1x_read_measurement(vl53l1x_reading_t * p_reading, BOOL * p_timed_out) {
+    if ((NULL == p_reading) || (NULL == p_timed_out)) {
         return FSP_ERR_INVALID_ARGUMENT;
     }
 
-    fsp_err_t err = vl53l1x_wait_data_ready();
+    fsp_err_t err = vl53l1x_wait_data_ready(p_timed_out);
     if (FSP_SUCCESS != err) {
         return err;
     }
@@ -170,6 +184,7 @@ LOCAL fsp_err_t vl53l1x_read_measurement(vl53l1x_measurement_t * p_measurement) 
     UB distance_data[2] = {0U};
     err = vl53l1x_read_registers(VL53L1X_REG_RANGE_STATUS, &range_status, 1U);
     if (FSP_SUCCESS == err) {
+        p_reading->range_status = (UB) (range_status & 0x1FU);
         err = vl53l1x_read_registers(VL53L1X_REG_DISTANCE_MM, distance_data, sizeof(distance_data));
     }
 
@@ -181,8 +196,7 @@ LOCAL fsp_err_t vl53l1x_read_measurement(vl53l1x_measurement_t * p_measurement) 
         return clear_err;
     }
 
-    p_measurement->range_status = (UB) (range_status & 0x1FU);
-    p_measurement->distance_mm = (UH) (((UH) distance_data[0] << 8U) | distance_data[1]);
+    p_reading->distance_mm = (UH) (((UH) distance_data[0] << 8U) | distance_data[1]);
     return FSP_SUCCESS;
 }
 
@@ -191,24 +205,33 @@ LOCAL fsp_err_t vl53l1x_read_measurement(vl53l1x_measurement_t * p_measurement) 
  * @param[out] p_distance_mm 距離[mm]
  * @return 有効測距ならFSP_SUCCESS、Range Status/距離範囲不正ならFSP_ERR_INVALID_DATA
  * ================================================================= */
-EXPORT fsp_err_t vl53l1x_read_distance(UH * p_distance_mm) {
-    if (NULL == p_distance_mm) {
+EXPORT fsp_err_t vl53l1x_read_distance(vl53l1x_reading_t * p_reading) {
+    if (NULL == p_reading) {
         return FSP_ERR_INVALID_ARGUMENT;
     }
 
-    vl53l1x_measurement_t measurement = {0U};
-    fsp_err_t const err = vl53l1x_read_measurement(&measurement);
+    *p_reading = (vl53l1x_reading_t){
+        .range_status = VL53L1X_RANGE_STATUS_UNAVAILABLE,
+        .result = VL53L1X_RESULT_TRANSPORT_ERROR,
+    };
+
+    BOOL data_ready_timed_out = FALSE;
+    fsp_err_t const err = vl53l1x_read_measurement(p_reading, &data_ready_timed_out);
     if (FSP_SUCCESS != err) {
+        if (data_ready_timed_out) {
+            p_reading->result = VL53L1X_RESULT_DATA_READY_TIMEOUT;
+        }
         return err;
     }
-    if (VL53L1X_RANGE_STATUS_VALID != measurement.range_status) {
+    if (VL53L1X_RANGE_STATUS_VALID != p_reading->range_status) {
+        p_reading->result = VL53L1X_RESULT_RANGE_STATUS_INVALID;
         return FSP_ERR_INVALID_DATA;
     }
-    if ((measurement.distance_mm < CPU0_TOF_MIN_VALID_MM) ||
-        (measurement.distance_mm > CPU0_TOF_MAX_VALID_MM)) {
+    if ((p_reading->distance_mm < CPU0_TOF_MIN_VALID_MM) || (p_reading->distance_mm > CPU0_TOF_MAX_VALID_MM)) {
+        p_reading->result = VL53L1X_RESULT_DISTANCE_INVALID;
         return FSP_ERR_INVALID_DATA;
     }
 
-    *p_distance_mm = measurement.distance_mm;
+    p_reading->result = VL53L1X_RESULT_VALID;
     return FSP_SUCCESS;
 }

@@ -1,3 +1,6 @@
+# Auto Character Code Set
+* text=auto
+
 # CAD assets use Git LFS.
 *.step filter=lfs diff=lfs merge=lfs -text
 *.stl filter=lfs diff=lfs merge=lfs -text

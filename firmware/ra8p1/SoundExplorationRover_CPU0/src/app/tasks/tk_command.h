@@ -22,6 +22,7 @@ typedef struct st_cpu0_command_snapshot {
     rover_motion_target_t target;
     rover_motion_target_t last_sent_target;
     UW target_age_ms;
+    BOOL target_valid;
     BOOL target_stale;
 } cpu0_command_snapshot_t;
 
@@ -33,6 +34,8 @@ EXPORT ER cpu0_command_snapshot_get(cpu0_command_snapshot_t * p_snapshot); /* �
 
 IMPORT volatile UW g_cpu0_command_sequence;           /**< 最終送信シーケンス（Live Watch用） */
 IMPORT volatile UW g_cpu0_command_send_count;         /**< 正常送信回数（Live Watch用） */
-IMPORT volatile fsp_err_t g_cpu0_command_last_error;        /**< 最終IPCエラー（Live Watch用） */
+IMPORT volatile fsp_err_t g_cpu0_command_last_error;   /**< 最終IPCエラー（Live Watch用） */
+IMPORT volatile BOOL g_cpu0_command_peer_ready;        /**< CPU1状態受信済み（Live Watch用） */
+IMPORT volatile BOOL g_cpu0_command_target_valid;      /**< 思考タスクの目標受信済み（Live Watch用） */
 
 #endif /* SEROV_CPU0_TK_COMMAND_H */

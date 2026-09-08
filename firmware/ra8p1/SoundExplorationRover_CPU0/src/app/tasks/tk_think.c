@@ -17,6 +17,7 @@ LOCAL void cpu0_think_task(INT stacd, void * exinf);       /* 思考タスク本
 LOCAL ER cpu0_think_publish_target(const sound_follow_output_t * p_output); /* 追従指令の4輪展開 */
 LOCAL ER cpu0_think_publish_motion(H steering_deg, H left_rpm, H right_rpm, BOOL actuator_enable,
                                    BOOL emergency_stop); /* 共通走行指令の4輪展開 */
+LOCAL BOOL cpu0_think_sound_motion_allowed(const cpu0_sensor_snapshot_t * p_snapshot); /* 音源追従の近接安全判定 */
 LOCAL void cpu0_think_led_write(BOOL blue_on, BOOL green_on); /* 2LED一括更新 */
 LOCAL UW cpu0_think_fault_code(UW fault_flags);/* LED表示用異常番号 */
 /* 状態LED更新 */
@@ -55,6 +56,30 @@ EXPORT volatile BOOL g_cpu0_think_actuator_enable;                 /**< 出力�
 EXPORT volatile BOOL g_cpu0_think_emergency_stop;                  /**< 非常停止判断 */
 EXPORT volatile cpu0_sensor_rule_t g_cpu0_sensor_rule;             /**< 選択センサー走行ルール */
 EXPORT volatile UW g_cpu0_fault_flags;                       /**< CPU0異常ラッチ */
+
+/** =================================================================*
+ * @brief  音源追従で前進してよいToF状態か判定
+ * @details センサー取得失敗、更新期限超過、ToF無効、またはいずれかの測距が
+ *          ハード停止距離未満なら走行を許可しない。
+ * @param[in] p_snapshot 最新センサースナップショット
+ * @return 3台のToFが有効かつ近接障害物なしならtrue
+ * ================================================================= */
+LOCAL BOOL cpu0_think_sound_motion_allowed(const cpu0_sensor_snapshot_t * p_snapshot) {
+    UB const required_tof_flags = CPU0_SENSOR_VALID_TOF_LEFT | CPU0_SENSOR_VALID_TOF_CENTER |
+                                  CPU0_SENSOR_VALID_TOF_RIGHT;
+    if ((NULL == p_snapshot) || !p_snapshot->initialized ||
+        (required_tof_flags != (p_snapshot->valid_flags & required_tof_flags)) ||
+        (p_snapshot->age_ms > CPU0_SENSOR_STALE_TIMEOUT_MS)) {
+        return FALSE;
+    }
+
+    for (UW index = 0U; index < CPU0_SENSOR_TOF_COUNT; index++) {
+        if (p_snapshot->tof_distance_mm[index] < CPU0_SENSOR_HARD_STOP_DISTANCE_MM) {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
 
 /** =================================================================*
  * @brief  思考タスクと異常イベント生成
@@ -368,7 +393,9 @@ LOCAL void cpu0_think_task(INT stacd, void * exinf) {
         g_cpu0_sensor_rule = output.rule;
 #else
         cpu0_audio_snapshot_t snapshot = {0};
+        cpu0_sensor_snapshot_t sensor_snapshot = {0};
         ER const snapshot_err = cpu0_audio_snapshot_get(&snapshot);
+        ER const sensor_snapshot_err = cpu0_sensor_snapshot_get(&sensor_snapshot);
         BOOL const observation_usable =
             (E_OK == snapshot_err) && snapshot.usb_configured && snapshot.hello_received &&
             snapshot.observation_received && (ACOUSTIC_XVF_STATUS_READY == snapshot.observation.xvf_status) &&
@@ -400,6 +427,7 @@ LOCAL void cpu0_think_task(INT stacd, void * exinf) {
             .link_ready = link_ready,
             .new_observation = new_observation,
             .fault_active = CPU0_FAULT_NONE != g_cpu0_fault_flags,
+            .motion_allowed = (E_OK == sensor_snapshot_err) && cpu0_think_sound_motion_allowed(&sensor_snapshot),
             .observation = snapshot.observation,
         };
         sound_follow_output_t output;

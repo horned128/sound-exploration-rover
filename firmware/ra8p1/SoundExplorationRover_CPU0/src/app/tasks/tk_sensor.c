@@ -3,11 +3,13 @@
  * @brief  CPU0センサー取得タスク実装
  * ================================================================= */
 #include "tk_sensor.h"                                     /* センサー取得タスクAPI */
+#include "../sensors/vl53l1x.h"                            /* ToF読出し結果分類 */
 #include "../../cpu0_config.h"                              /* センサー周期、優先度 */
 
 LOCAL void cpu0_sensor_task(INT stacd, void * exinf);      /* センサー取得タスク本体 */
 LOCAL void cpu0_sensor_snapshot_publish(const cpu0_sensor_snapshot_t * p_snapshot); /* 状態反映 */
 LOCAL void cpu0_sensor_snapshot_mark_unavailable(fsp_err_t error); /* 初期化失敗反映 */
+LOCAL void cpu0_sensor_snapshot_mark_stale(const cpu0_sensor_snapshot_t * p_failure); /* 通信障害反映 */
 
 /**< センサースナップショットを保護するμT-Kernel mutex設定 */
 LOCAL T_CMTX const sensor_mutex_config = {
@@ -39,6 +41,16 @@ EXPORT volatile UW g_cpu0_sensor_error_flags;                /**< 最終セン�
 EXPORT volatile W g_cpu0_sensor_last_error;                  /**< 最終FSPエラー */
 EXPORT volatile UB g_cpu0_sensor_valid_flags;                /**< ToF/IMU valid bit */
 EXPORT volatile BOOL g_cpu0_sensor_initialized;              /**< 全センサー初期化状態 */
+EXPORT volatile UB g_cpu0_sensor_tof_range_status[CPU0_SENSOR_TOF_COUNT]; /**< ToF raw Range Status */
+EXPORT volatile UB g_cpu0_sensor_tof_result[CPU0_SENSOR_TOF_COUNT]; /**< ToF読出し結果分類 */
+EXPORT volatile UB g_cpu0_sensor_failure_kind;               /**< 最終失敗分類 */
+EXPORT volatile UB g_cpu0_sensor_failure_device;             /**< 最終失敗device */
+EXPORT volatile UB g_cpu0_sensor_failure_stage;              /**< 最終失敗stage */
+EXPORT volatile B g_cpu0_sensor_failure_channel;             /**< 最終失敗TCAチャネル */
+EXPORT volatile UW g_cpu0_sensor_i2c_transfer_timeout_count; /**< I2C転送timeout累積回数 */
+EXPORT volatile UW g_cpu0_sensor_tof_data_ready_timeout_count[CPU0_SENSOR_TOF_COUNT]; /**< ToF ready timeout回数 */
+EXPORT volatile UW g_cpu0_sensor_invalid_data_count[CPU0_SENSOR_TOF_COUNT]; /**< ToF測距無効回数 */
+EXPORT volatile UW g_cpu0_sensor_hub_recovery_count;         /**< I2C障害後hub再初期化回数 */
 
 /** =================================================================*
  * @brief  最新スナップショットをmutex下で公開しLive Watch値も更新
@@ -69,6 +81,26 @@ LOCAL void cpu0_sensor_snapshot_publish(const cpu0_sensor_snapshot_t * p_snapsho
     g_cpu0_sensor_last_error = p_snapshot->last_error;
     g_cpu0_sensor_valid_flags = p_snapshot->valid_flags;
     g_cpu0_sensor_initialized = p_snapshot->initialized;
+    for (UW index = 0U; index < CPU0_SENSOR_TOF_COUNT; index++) {
+        g_cpu0_sensor_tof_range_status[index] = p_snapshot->diagnostics.tof_range_status[index];
+        g_cpu0_sensor_tof_result[index] = p_snapshot->diagnostics.tof_result[index];
+        if ((VL53L1X_RESULT_RANGE_STATUS_INVALID == p_snapshot->diagnostics.tof_result[index]) ||
+            (VL53L1X_RESULT_DISTANCE_INVALID == p_snapshot->diagnostics.tof_result[index])) {
+            g_cpu0_sensor_invalid_data_count[index]++;
+        }
+        if (VL53L1X_RESULT_DATA_READY_TIMEOUT == p_snapshot->diagnostics.tof_result[index]) {
+            g_cpu0_sensor_tof_data_ready_timeout_count[index]++;
+        }
+    }
+    if (CPU0_SENSOR_FAILURE_I2C_TRANSFER_TIMEOUT == p_snapshot->diagnostics.failure_kind) {
+        g_cpu0_sensor_i2c_transfer_timeout_count++;
+    }
+    if (CPU0_SENSOR_FAILURE_NONE != p_snapshot->diagnostics.failure_kind) {
+        g_cpu0_sensor_failure_kind = (UB) p_snapshot->diagnostics.failure_kind;
+        g_cpu0_sensor_failure_device = (UB) p_snapshot->diagnostics.failure_device;
+        g_cpu0_sensor_failure_stage = (UB) p_snapshot->diagnostics.failure_stage;
+        g_cpu0_sensor_failure_channel = p_snapshot->diagnostics.failure_channel;
+    }
 }
 
 /** =================================================================*
@@ -85,6 +117,31 @@ LOCAL void cpu0_sensor_snapshot_mark_unavailable(fsp_err_t error) {
     sensor_snapshot.valid_flags = 0U;
     sensor_snapshot.error_flags = CPU0_SENSOR_ERROR_I2C_INIT;
     sensor_snapshot.last_error = (W) error;
+    sensor_hub_diagnostics_get(&sensor_snapshot.diagnostics);
+    cpu0_sensor_snapshot_publish(&sensor_snapshot);
+}
+
+/** =================================================================*
+ * @brief  通信障害を期限切れスナップショットへ反映
+ * @details 最新値をvalidとして使い回さず、更新失敗と経過時間を安全側へ公開する。
+ * @param[in] p_failure I2C転送障害を含む取得結果
+ * ================================================================= */
+LOCAL void cpu0_sensor_snapshot_mark_stale(const cpu0_sensor_snapshot_t * p_failure) {
+    if (NULL == p_failure) {
+        return;
+    }
+
+    if (sensor_snapshot.age_ms <= UINT32_MAX - CPU0_SENSOR_PERIOD_MS) {
+        sensor_snapshot.age_ms += CPU0_SENSOR_PERIOD_MS;
+    } else {
+        sensor_snapshot.age_ms = UINT32_MAX;
+    }
+    sensor_snapshot.update_count = p_failure->update_count;
+    sensor_snapshot.initialized = FALSE;
+    sensor_snapshot.valid_flags = 0U;
+    sensor_snapshot.error_flags = p_failure->error_flags | CPU0_SENSOR_ERROR_STALE;
+    sensor_snapshot.last_error = p_failure->last_error;
+    sensor_snapshot.diagnostics = p_failure->diagnostics;
     cpu0_sensor_snapshot_publish(&sensor_snapshot);
 }
 
@@ -101,7 +158,23 @@ EXPORT cpu0_fault_t cpu0_sensor_task_create(void) {
         .last_error = (W) FSP_ERR_NOT_OPEN,
         .error_flags = CPU0_SENSOR_ERROR_I2C_INIT,
         .initialized = FALSE,
+        .diagnostics = {
+            .failure_kind = CPU0_SENSOR_FAILURE_TRANSPORT,
+            .failure_device = CPU0_SENSOR_FAILURE_DEVICE_I2C_BUS,
+            .failure_stage = CPU0_SENSOR_FAILURE_STAGE_I2C_OPEN,
+            .failure_channel = CPU0_SENSOR_FAILURE_CHANNEL_NONE,
+        },
     };
+    for (UW index = 0U; index < CPU0_SENSOR_TOF_COUNT; index++) {
+        sensor_snapshot.diagnostics.tof_range_status[index] = VL53L1X_RANGE_STATUS_UNAVAILABLE;
+        sensor_snapshot.diagnostics.tof_result[index] = (UB) VL53L1X_RESULT_TRANSPORT_ERROR;
+    }
+    g_cpu0_sensor_i2c_transfer_timeout_count = 0U;
+    g_cpu0_sensor_hub_recovery_count = 0U;
+    for (UW index = 0U; index < CPU0_SENSOR_TOF_COUNT; index++) {
+        g_cpu0_sensor_tof_data_ready_timeout_count[index] = 0U;
+        g_cpu0_sensor_invalid_data_count[index] = 0U;
+    }
     cpu0_sensor_snapshot_publish(&sensor_snapshot);
 
     sensor_mutex_id = tk_cre_mtx(&sensor_mutex_config);
@@ -207,14 +280,13 @@ LOCAL void cpu0_sensor_task(INT stacd, void * exinf) {
         if (FSP_SUCCESS == poll_err) {
             update_count++;
             next.update_count = update_count;
+            cpu0_sensor_snapshot_publish(&next);
         } else {
-            next.valid_flags = 0U;
-            next.error_flags |= CPU0_SENSOR_ERROR_STALE;
-            next.last_error = (W) poll_err;
-            sensor_hub_deinit();
+            g_cpu0_sensor_hub_recovery_count++;
+            sensor_hub_transport_fault_deinit();
             hub_ready = FALSE;
+            cpu0_sensor_snapshot_mark_stale(&next);
         }
-        cpu0_sensor_snapshot_publish(&next);
         (void) tk_dly_tsk(CPU0_SENSOR_PERIOD_MS);
     }
 }

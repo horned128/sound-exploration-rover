@@ -191,30 +191,18 @@ LOCAL H sound_follow_steering_from_doa(H doa_deg) {
 
 /** =================================================================*
  * @brief  DoAから操舵と左右モーター指令を決定
- * @details 前半球は前進、後半球は後進を選ぶ。側方では内輪を減速して
- *          最大45度の4輪逆相操舵でも回頭量を確保する。
+ * @details 全方位で前進を選び、側方・後方では内輪を減速した最大45度の
+ *          4輪逆相操舵で回頭する。
  * @param[in] doa_deg 車体正面基準の相対DoA
  * ================================================================= */
 LOCAL void sound_follow_motion_from_doa(H doa_deg) {
-    BOOL const reverse = sound_follow_abs_i16(doa_deg) >= CPU0_SOUND_REVERSE_ANGLE_DEG;
-    H travel_angle_deg = doa_deg;
-    if (reverse) {
-        travel_angle_deg = sound_follow_angle_normalize((W) doa_deg - 180);
-    }
-
-    H steering_deg = sound_follow_steering_from_doa(travel_angle_deg);
-    if (reverse) {
-        /* 後進時は同じ車体回頭方向に対する操舵符号が前進時と反転する。 */
-        steering_deg = (H) -steering_deg;
-    }
-
-    H const direction = reverse ? -1 : 1;
-    H left_rpm = (H) (direction * CPU0_SOUND_MOVE_LEFT_RPM);
-    H right_rpm = (H) (direction * CPU0_SOUND_MOVE_RIGHT_RPM);
+    H const steering_deg = sound_follow_steering_from_doa(doa_deg);
+    H left_rpm = CPU0_SOUND_MOVE_LEFT_RPM;
+    H right_rpm = CPU0_SOUND_MOVE_RIGHT_RPM;
     if (steering_deg > 0) {
-        right_rpm = (H) (direction * CPU0_SOUND_TURN_INNER_RPM);
+        right_rpm = CPU0_SOUND_TURN_INNER_RPM;
     } else if (steering_deg < 0) {
-        left_rpm = (H) (direction * CPU0_SOUND_TURN_INNER_RPM);
+        left_rpm = CPU0_SOUND_TURN_INNER_RPM;
     }
 
     controller.desired_steering_deg = steering_deg;
@@ -302,7 +290,11 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
     } else if (CPU0_THINK_STATE_FAULT != controller.state) {
         controller.state_elapsed_ms += elapsed_ms;
 
-        if ((CPU0_THINK_STATE_LISTEN == controller.state) && p_input->new_observation) {
+        if (!p_input->motion_allowed && (CPU0_THINK_STATE_STEER_PREP == controller.state)) {
+            sound_follow_state_enter(CPU0_THINK_STATE_COOLDOWN);
+        } else if (!p_input->motion_allowed && (CPU0_THINK_STATE_MOVE_STEP == controller.state)) {
+            sound_follow_state_enter(CPU0_THINK_STATE_SETTLE);
+        } else if ((CPU0_THINK_STATE_LISTEN == controller.state) && p_input->new_observation) {
             BOOL const usable = sound_follow_observation_usable(&p_input->observation);
             BOOL const loud = p_input->observation.level_dbfs_x100 >= CPU0_SOUND_TRIGGER_DBFS_X100;
 
@@ -324,7 +316,11 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
             H mean_doa_deg = 0;
             if (controller.trigger_active && sound_follow_doa_stable(&mean_doa_deg)) {
                 sound_follow_motion_from_doa(mean_doa_deg);
-                sound_follow_state_enter(CPU0_THINK_STATE_STEER_PREP);
+                if (p_input->motion_allowed) {
+                    sound_follow_state_enter(CPU0_THINK_STATE_STEER_PREP);
+                } else {
+                    sound_follow_state_enter(CPU0_THINK_STATE_COOLDOWN);
+                }
             } else if (controller.trigger_active &&
                        (controller.trigger_elapsed_ms >= CPU0_SOUND_DOA_ACQUIRE_TIMEOUT_MS)) {
                 sound_follow_detection_reset();

@@ -29,10 +29,22 @@
         "-Regenerate",
         "-Clean"
       ],
+      "osx": {
+        "command": "/bin/bash",
+        "args": [
+          "${workspaceFolder}/.vscode/scripts/Invoke-RaBuild.sh",
+          "--target",
+          "All",
+          "--regenerate",
+          "--clean"
+        ]
+      },
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": ["$gcc"],
+      "problemMatcher": [
+        "$gcc"
+      ],
       "presentation": {
         "reveal": "always",
         "panel": "dedicated",
@@ -54,10 +66,22 @@
         "-Regenerate",
         "-Clean"
       ],
+      "osx": {
+        "command": "/bin/bash",
+        "args": [
+          "${workspaceFolder}/.vscode/scripts/Invoke-RaBuild.sh",
+          "--target",
+          "CPU0",
+          "--regenerate",
+          "--clean"
+        ]
+      },
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": ["$gcc"]
+      "problemMatcher": [
+        "$gcc"
+      ]
     },
     {
       "label": "RA8P1: Generate + Clean Build CPU1",
@@ -74,10 +98,22 @@
         "-Regenerate",
         "-Clean"
       ],
+      "osx": {
+        "command": "/bin/bash",
+        "args": [
+          "${workspaceFolder}/.vscode/scripts/Invoke-RaBuild.sh",
+          "--target",
+          "CPU1",
+          "--regenerate",
+          "--clean"
+        ]
+      },
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": ["$gcc"]
+      "problemMatcher": [
+        "$gcc"
+      ]
     },
     {
       "label": "RA8P1: Fast Build All",
@@ -92,10 +128,20 @@
         "-Target",
         "All"
       ],
+      "osx": {
+        "command": "/bin/bash",
+        "args": [
+          "${workspaceFolder}/.vscode/scripts/Invoke-RaBuild.sh",
+          "--target",
+          "All"
+        ]
+      },
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": ["$gcc"]
+      "problemMatcher": [
+        "$gcc"
+      ]
     },
     {
       "label": "RA8P1: Fast Build CPU0",
@@ -110,10 +156,20 @@
         "-Target",
         "CPU0"
       ],
+      "osx": {
+        "command": "/bin/bash",
+        "args": [
+          "${workspaceFolder}/.vscode/scripts/Invoke-RaBuild.sh",
+          "--target",
+          "CPU0"
+        ]
+      },
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": ["$gcc"]
+      "problemMatcher": [
+        "$gcc"
+      ]
     },
     {
       "label": "RA8P1: Fast Build CPU1",
@@ -128,10 +184,20 @@
         "-Target",
         "CPU1"
       ],
+      "osx": {
+        "command": "/bin/bash",
+        "args": [
+          "${workspaceFolder}/.vscode/scripts/Invoke-RaBuild.sh",
+          "--target",
+          "CPU1"
+        ]
+      },
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": ["$gcc"]
+      "problemMatcher": [
+        "$gcc"
+      ]
     },
     {
       "label": "ESP32: Build",
@@ -146,10 +212,20 @@
         "-Action",
         "Build"
       ],
+      "osx": {
+        "command": "/bin/bash",
+        "args": [
+          "${workspaceFolder}/.vscode/scripts/Invoke-PlatformIo.sh",
+          "--action",
+          "Build"
+        ]
+      },
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": ["$gcc"]
+      "problemMatcher": [
+        "$gcc"
+      ]
     },
     {
       "label": "ESP32: Upload",
@@ -164,10 +240,20 @@
         "-Action",
         "Upload"
       ],
+      "osx": {
+        "command": "/bin/bash",
+        "args": [
+          "${workspaceFolder}/.vscode/scripts/Invoke-PlatformIo.sh",
+          "--action",
+          "Upload"
+        ]
+      },
       "options": {
         "cwd": "${workspaceFolder}"
       },
-      "problemMatcher": ["$gcc"]
+      "problemMatcher": [
+        "$gcc"
+      ]
     },
     {
       "label": "ESP32: Monitor",
@@ -182,6 +268,14 @@
         "-Action",
         "Monitor"
       ],
+      "osx": {
+        "command": "/bin/bash",
+        "args": [
+          "${workspaceFolder}/.vscode/scripts/Invoke-PlatformIo.sh",
+          "--action",
+          "Monitor"
+        ]
+      },
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -200,6 +294,14 @@
         "-Action",
         "Clean"
       ],
+      "osx": {
+        "command": "/bin/bash",
+        "args": [
+          "${workspaceFolder}/.vscode/scripts/Invoke-PlatformIo.sh",
+          "--action",
+          "Clean"
+        ]
+      },
       "options": {
         "cwd": "${workspaceFolder}"
       },

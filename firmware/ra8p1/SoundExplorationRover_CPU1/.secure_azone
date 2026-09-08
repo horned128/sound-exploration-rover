@@ -306,6 +306,7 @@
             <slot name="IRQ4.CPU0" secure="true"/>
             <slot name="IRQ5.CPU0" secure="true"/>
             <slot name="IRQ6.CPU0" secure="true"/>
+            <slot name="IRQ7.CPU0" secure="true"/>
         </peripheral>
         <peripheral name="GPT9.CPU1" group="GPT" security="s"/>
         <peripheral name="GPT10.CPU1" group="GPT" security="s"/>
@@ -538,6 +539,7 @@
             <assign peripheral="ICU.IRQ4"/>
             <assign peripheral="ICU.IRQ5"/>
             <assign peripheral="ICU.IRQ6"/>
+            <assign peripheral="ICU.IRQ7"/>
         </zone>
     </zones>
 </azone>

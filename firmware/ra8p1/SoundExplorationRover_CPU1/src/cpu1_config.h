@@ -77,13 +77,10 @@
 #define MOTOR_LEFT_LPWM_OUTPUT (GPT_IO_PIN_GTIOCB)
 /* P603 / GPT7A */
 #define MOTOR_RIGHT_LPWM_OUTPUT (GPT_IO_PIN_GTIOCA)
-/*
- * 正のRPMはローバー前進を表す。現在の実機配線では左右ともLPWMが前進である。
- * モーター配線や取付けを変更した場合は、左右個別の符号で吸収する。
- */
+/* 論理正RPMは車体前進、エンコーダ値は前進正・後進負とする。前進は左LPWM/右RPWMへ出力する。 */
 #define MOTOR_CHASSIS_FORWARD_SIGN         (-1)
 #define MOTOR_LEFT_MOUNT_SIGN              (+1)
-#define MOTOR_RIGHT_MOUNT_SIGN             (+1)
+#define MOTOR_RIGHT_MOUNT_SIGN             (-1)
 #define MOTOR_LEFT_FORWARD_SIGN            (MOTOR_CHASSIS_FORWARD_SIGN * MOTOR_LEFT_MOUNT_SIGN)
 #define MOTOR_RIGHT_FORWARD_SIGN           (MOTOR_CHASSIS_FORWARD_SIGN * MOTOR_RIGHT_MOUNT_SIGN)
 /* 左右BTS7960のR_EN/L_ENを外部で共通接続し、PD01で一括制御する。 */
@@ -92,9 +89,9 @@
 #define MOTOR_PWM_MAX_DUTY_PERMILLE        (700)
 #define MOTOR_PWM_RAMP_PER_MS              (2)
 #define MOTOR_PWM_UPDATE_PERIOD_MS         (5U)
-/* 右側の無負荷速度差を補正する初期デューティ比。実測RPMは現在診断専用とする。 */
-#define MOTOR_LEFT_DUTY_SCALE_PERMILLE               (1000U)
-#define MOTOR_RIGHT_DUTY_SCALE_PERMILLE              (750U)
+/* 左右モーターの基本Duty補正係数（単位: 1/1000）。 */
+#define MOTOR_LEFT_DUTY_SCALE_PERMILLE               (700U)
+#define MOTOR_RIGHT_DUTY_SCALE_PERMILLE              (250U)
 #define MOTOR_SPEED_FEEDBACK_ENABLE                  (0U)
 #define MOTOR_SPEED_FEEDBACK_START_DELAY_MS          (150U)
 #define MOTOR_SPEED_FEEDBACK_KP_PERMILLE_PER_RPM     (2)

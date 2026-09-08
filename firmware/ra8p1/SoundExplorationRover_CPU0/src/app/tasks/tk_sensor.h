@@ -23,5 +23,15 @@ IMPORT volatile UW g_cpu0_sensor_error_flags;                /* 最終センサ�
 IMPORT volatile W g_cpu0_sensor_last_error;                  /* 最終FSPエラー */
 IMPORT volatile UB g_cpu0_sensor_valid_flags;                /* ToF/IMU valid bit */
 IMPORT volatile BOOL g_cpu0_sensor_initialized;              /* 全センサー初期化状態 */
+IMPORT volatile UB g_cpu0_sensor_tof_range_status[CPU0_SENSOR_TOF_COUNT]; /* ToF raw Range Status */
+IMPORT volatile UB g_cpu0_sensor_tof_result[CPU0_SENSOR_TOF_COUNT]; /* ToF読出し結果分類 */
+IMPORT volatile UB g_cpu0_sensor_failure_kind;               /* 最終失敗分類 */
+IMPORT volatile UB g_cpu0_sensor_failure_device;             /* 最終失敗device */
+IMPORT volatile UB g_cpu0_sensor_failure_stage;              /* 最終失敗stage */
+IMPORT volatile B g_cpu0_sensor_failure_channel;             /* 最終失敗TCAチャネル */
+IMPORT volatile UW g_cpu0_sensor_i2c_transfer_timeout_count; /* I2C転送timeout累積回数 */
+IMPORT volatile UW g_cpu0_sensor_tof_data_ready_timeout_count[CPU0_SENSOR_TOF_COUNT]; /* ToF ready timeout回数 */
+IMPORT volatile UW g_cpu0_sensor_invalid_data_count[CPU0_SENSOR_TOF_COUNT]; /* ToF測距無効回数 */
+IMPORT volatile UW g_cpu0_sensor_hub_recovery_count;         /* I2C障害後hub再初期化回数 */
 
 #endif /* SEROV_CPU0_TK_SENSOR_H */

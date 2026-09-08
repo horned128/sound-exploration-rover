@@ -13,6 +13,7 @@
 #define CPU0_AUDIO_USB_RX_SIZE             (512U)
 #define CPU0_AUDIO_TELEMETRY_PERIOD_MS     (250U)
 #define CPU0_IPC_RETRY_DELAY_MS            (1U)
+#define CPU0_IPC_SEND_RETRY_COUNT           (20U)
 
 /* I2C1センサータスクを登録する。センサー未接続時は安全停止用の無効状態を公開する。 */
 #define CPU0_SENSOR_I2C_ENABLED             (1U)
@@ -41,7 +42,7 @@
 #define CPU0_BMI270_ACCEL_LSB_PER_G          (8192)
 #define CPU0_BMI270_GYRO_RANGE_DPS_X10       (5000)
 
-/* 自律モード。センサー構成の実機確認後にSENSOR_RULEへ切り替える。 */
+/* 自律モード。音源追従または距離・姿勢ルールを選択する。 */
 #define CPU0_AUTONOMY_MODE_SOUND_FOLLOW      (0U)
 #define CPU0_AUTONOMY_MODE_SENSOR_RULE       (1U)
 #define CPU0_AUTONOMY_MODE                   (CPU0_AUTONOMY_MODE_SOUND_FOLLOW)
@@ -85,11 +86,10 @@
 #define CPU0_SOUND_FRONT_TOLERANCE_DEG     (15)
 #define CPU0_SOUND_STEERING_MIN_DEG        (20)
 #define CPU0_SOUND_STEERING_MAX_DEG        (45)
-#define CPU0_SOUND_REVERSE_ANGLE_DEG       (100)
 #define CPU0_SOUND_LINK_STABLE_MS          (500U)
 #define CPU0_SOUND_OBSERVATION_TIMEOUT_MS  (600U)
 #define CPU0_SOUND_STEER_SETTLE_MS         (500U)
-#define CPU0_SOUND_MOVE_STEP_MS            (500U)
+#define CPU0_SOUND_MOVE_STEP_MS            (1000U)
 #define CPU0_SOUND_LISTEN_SETTLE_MS        (500U)
 #define CPU0_SOUND_COOLDOWN_RELEASE_MS     (200U)
 #define CPU0_SOUND_MOVE_LEFT_RPM           (120)
