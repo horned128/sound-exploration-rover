@@ -1,11 +1,11 @@
-/* CPU1-specific μT-Kernel memory and interrupt definition for RA8P1. */
+/* RA8P1用のCPU1固有μT-Kernelメモリ・割込み定義。 */
 #ifndef _MTKBSP_SYS_SYSDEF_DEPEND_CPU_H_
 #define _MTKBSP_SYS_SYSDEF_DEPEND_CPU_H_
 
 #include <sys/machine.h>
 #include <sys/sysdepend/ra_fsp/cpu/core/armv8m/sysdef.h>
 
-/* FSP multicore layout assigns the upper 936 KiB of SRAM to CPU1. */
+/* FSPのマルチコア配置では、SRAM上位936 KiBをCPU1へ割り当てる。 */
 #define INTERNAL_RAM_START           (0x220EA000)
 #define INTERNAL_RAM_SIZE            (0x000EA000)
 #define INTERNAL_RAM_END             (INTERNAL_RAM_START + INTERNAL_RAM_SIZE)

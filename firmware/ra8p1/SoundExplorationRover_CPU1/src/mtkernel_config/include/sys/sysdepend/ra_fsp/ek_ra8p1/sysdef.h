@@ -1,10 +1,10 @@
-/* CPU1-specific μT-Kernel clock definition for EK-RA8P1. */
+/* EK-RA8P1用のCPU1固有μT-Kernelクロック定義。 */
 #ifndef _MTKBSP_SYS_SYSDEF_DEPEND_H_
 #define _MTKBSP_SYS_SYSDEF_DEPEND_H_
 
 #include <sys/sysdepend/ra_fsp/cpu/ra8p1/sysdef.h>
 
-/* CPU1 Cortex-M33 runs from CPUCLK1 at PLL1P / 4 = 250 MHz. */
+/* CPU1 Cortex-M33はPLL1P / 4のCPUCLK1、250 MHzで動作する。 */
 #define CPUCLK_MHz                   (250)
 #define ICLK_MHz                     (250)
 #define PCLKA_MHz                    (125)

@@ -3,7 +3,7 @@
  * @brief  CPU0-CPU1間IPCクライアント実装
  * ================================================================= */
 #include "actuator_ipc_client.h"                            /* CPU0側IPCクライアントAPIとメッセージ型 */
-#include "../cpu0_config.h"                                 /* CPU0のIPC再送待ち時間 */
+#include "config/ipc_config.h"                             /* CPU0のIPC再送待ち時間 */
 #include <tk/tkernel.h>                                     /* μT-Kernelのタスク遅延API */
 
 /**< CPU1へ送るサーボ目標角メッセージID */
@@ -18,9 +18,9 @@ LOCAL actuator_status_t g_staging_status;                  /**< 受信中のCPU1
 LOCAL actuator_status_t g_committed_status;                /**< 確定したCPU1状態 */
 LOCAL volatile BOOL g_status_valid;                        /**< CPU1状態受信済み */
 
-EXPORT volatile UW g_cpu0_ipc_send_overflow_retry_count; /**< IPC送信overflow再試行回数 */
-EXPORT volatile UW g_cpu0_ipc_last_tx_message_id;        /**< 最終IPC送信メッセージID */
-EXPORT volatile fsp_err_t g_cpu0_ipc_last_tx_error;      /**< 最終IPC送信ワードのエラー */
+EXPORT volatile UW g_actuator_ipc_client_send_overflow_retry_count; /**< IPC送信overflow再試行回数 */
+EXPORT volatile UW g_actuator_ipc_client_last_tx_message_id;        /**< 最終IPC送信メッセージID */
+EXPORT volatile fsp_err_t g_actuator_ipc_client_last_tx_error;      /**< 最終IPC送信ワードのエラー */
 
 /** =================================================================*
  * @brief  IPCワード送信
@@ -30,19 +30,19 @@ EXPORT volatile fsp_err_t g_cpu0_ipc_last_tx_error;      /**< 最終IPC送信ワ
 LOCAL fsp_err_t actuator_ipc_send_word(UW word) {
     fsp_err_t err = FSP_SUCCESS;
 
-    g_cpu0_ipc_last_tx_message_id = (UW) actuator_ipc_get_message_id(word);
+    g_actuator_ipc_client_last_tx_message_id = (UW) actuator_ipc_get_message_id(word);
     for (UW retry_count = 0U; retry_count <= CPU0_IPC_SEND_RETRY_COUNT; retry_count++) {
         err = g_actuator_ipc.p_api->messageSend(g_actuator_ipc.p_ctrl, word);
         if (FSP_ERR_OVERFLOW != err) {
             break;
         }
         if (retry_count < CPU0_IPC_SEND_RETRY_COUNT) {
-            g_cpu0_ipc_send_overflow_retry_count++;
+            g_actuator_ipc_client_send_overflow_retry_count++;
             (void) tk_dly_tsk(CPU0_IPC_RETRY_DELAY_MS);
         }
     }
 
-    g_cpu0_ipc_last_tx_error = err;
+    g_actuator_ipc_client_last_tx_error = err;
     return err;
 }
 
@@ -54,9 +54,9 @@ EXPORT fsp_err_t actuator_ipc_client_init(void) {
     g_staging_status = (actuator_status_t){0};
     g_committed_status = g_staging_status;
     g_status_valid = FALSE;
-    g_cpu0_ipc_send_overflow_retry_count = 0U;
-    g_cpu0_ipc_last_tx_message_id = 0U;
-    g_cpu0_ipc_last_tx_error = FSP_SUCCESS;
+    g_actuator_ipc_client_send_overflow_retry_count = 0U;
+    g_actuator_ipc_client_last_tx_message_id = 0U;
+    g_actuator_ipc_client_last_tx_error = FSP_SUCCESS;
     return g_actuator_ipc.p_api->open(g_actuator_ipc.p_ctrl, g_actuator_ipc.p_cfg);
 }
 

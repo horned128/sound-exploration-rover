@@ -779,7 +779,7 @@
       <property id="module.driver.external_irq.filter_enable" value="module.driver.external_irq.filter_enable.false"/>
       <property id="module.driver.external_irq.filter_source" value="module.driver.external_irq.filter_source.pclk"/>
       <property id="module.driver.external_irq.clock_source_div" value="module.driver.external_irq.clock_source_div.clock_source_div_by_64"/>
-      <property id="module.driver.external_irq.p_callback" value="jga25_encoder_right_a_callback"/>
+      <property id="module.driver.external_irq.p_callback" value="encoder_right_a_irq_callback"/>
       <property id="module.driver.external_irq.ipl" value="board.icu.common.irq.priority4"/>
     </module>
     <module id="module.driver.external_irq_on_icu.1">
@@ -789,7 +789,7 @@
       <property id="module.driver.external_irq.filter_enable" value="module.driver.external_irq.filter_enable.false"/>
       <property id="module.driver.external_irq.filter_source" value="module.driver.external_irq.filter_source.pclk"/>
       <property id="module.driver.external_irq.clock_source_div" value="module.driver.external_irq.clock_source_div.clock_source_div_by_64"/>
-      <property id="module.driver.external_irq.p_callback" value="jga25_encoder_right_b_callback"/>
+      <property id="module.driver.external_irq.p_callback" value="encoder_right_b_irq_callback"/>
       <property id="module.driver.external_irq.ipl" value="board.icu.common.irq.priority4"/>
     </module>
     <module id="module.driver.external_irq_on_icu.2">
@@ -799,7 +799,7 @@
       <property id="module.driver.external_irq.filter_enable" value="module.driver.external_irq.filter_enable.false"/>
       <property id="module.driver.external_irq.filter_source" value="module.driver.external_irq.filter_source.pclk"/>
       <property id="module.driver.external_irq.clock_source_div" value="module.driver.external_irq.clock_source_div.clock_source_div_by_64"/>
-      <property id="module.driver.external_irq.p_callback" value="jga25_encoder_left_a_callback"/>
+      <property id="module.driver.external_irq.p_callback" value="encoder_left_a_irq_callback"/>
       <property id="module.driver.external_irq.ipl" value="board.icu.common.irq.priority4"/>
     </module>
     <module id="module.driver.external_irq_on_icu.3">
@@ -809,7 +809,7 @@
       <property id="module.driver.external_irq.filter_enable" value="module.driver.external_irq.filter_enable.false"/>
       <property id="module.driver.external_irq.filter_source" value="module.driver.external_irq.filter_source.pclk"/>
       <property id="module.driver.external_irq.clock_source_div" value="module.driver.external_irq.clock_source_div.clock_source_div_by_64"/>
-      <property id="module.driver.external_irq.p_callback" value="jga25_encoder_left_b_callback"/>
+      <property id="module.driver.external_irq.p_callback" value="encoder_left_b_irq_callback"/>
       <property id="module.driver.external_irq.ipl" value="board.icu.common.irq.priority4"/>
     </module>
     <context id="_hal.0">

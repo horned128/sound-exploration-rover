@@ -90,7 +90,7 @@ I2Cセンサー（VL53L1X 3台、TCA9548A、BMI270）と障害物回避の導入
 本プロジェクトでは、以下のサードパーティ製データおよびソフトウェアを利用しています。
 
 ### Bosch Sensortec BMI270 SensorAPI
-`firmware/ra8p1/SoundExplorationRover_CPU0/src/app/sensors/bmi270.c` contains the `bmi270_maximum_fifo_config_file` configuration image from the Bosch Sensortec BMI270 SensorAPI v2.86.1.
+`firmware/ra8p1/SoundExplorationRover_CPU0/src/drivers/bmi270.c` contains the `bmi270_maximum_fifo_config_file` configuration image from the Bosch Sensortec BMI270 SensorAPI v2.86.1.
 
 Source: https://github.com/boschsensortec/BMI270_SensorAPI
 

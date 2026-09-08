@@ -9,7 +9,7 @@ const icu_extended_cfg_t g_encoder_left_b_irq_ext_cfg = { .filter_src =
 const external_irq_cfg_t g_encoder_left_b_irq_cfg = { .channel = 20, .trigger =
 		EXTERNAL_IRQ_TRIG_BOTH_EDGE, .filter_enable = false, .clock_source_div =
 		EXTERNAL_IRQ_CLOCK_SOURCE_DIV_64, .p_callback =
-		jga25_encoder_left_b_callback,
+		encoder_left_b_irq_callback,
 /** If NULL then do not add & */
 #if defined(NULL)
     .p_context           = NULL,
@@ -36,7 +36,7 @@ const icu_extended_cfg_t g_encoder_left_a_irq_ext_cfg = { .filter_src =
 const external_irq_cfg_t g_encoder_left_a_irq_cfg = { .channel = 16, .trigger =
 		EXTERNAL_IRQ_TRIG_BOTH_EDGE, .filter_enable = false, .clock_source_div =
 		EXTERNAL_IRQ_CLOCK_SOURCE_DIV_64, .p_callback =
-		jga25_encoder_left_a_callback,
+		encoder_left_a_irq_callback,
 /** If NULL then do not add & */
 #if defined(NULL)
     .p_context           = NULL,
@@ -63,7 +63,7 @@ const icu_extended_cfg_t g_encoder_right_b_irq_ext_cfg = { .filter_src =
 const external_irq_cfg_t g_encoder_right_b_irq_cfg = { .channel = 18, .trigger =
 		EXTERNAL_IRQ_TRIG_BOTH_EDGE, .filter_enable = false, .clock_source_div =
 		EXTERNAL_IRQ_CLOCK_SOURCE_DIV_64, .p_callback =
-		jga25_encoder_right_b_callback,
+		encoder_right_b_irq_callback,
 /** If NULL then do not add & */
 #if defined(NULL)
     .p_context           = NULL,
@@ -90,7 +90,7 @@ const icu_extended_cfg_t g_encoder_right_a_irq_ext_cfg = { .filter_src =
 const external_irq_cfg_t g_encoder_right_a_irq_cfg = { .channel = 11, .trigger =
 		EXTERNAL_IRQ_TRIG_BOTH_EDGE, .filter_enable = false, .clock_source_div =
 		EXTERNAL_IRQ_CLOCK_SOURCE_DIV_64, .p_callback =
-		jga25_encoder_right_a_callback,
+		encoder_right_a_irq_callback,
 /** If NULL then do not add & */
 #if defined(NULL)
     .p_context           = NULL,

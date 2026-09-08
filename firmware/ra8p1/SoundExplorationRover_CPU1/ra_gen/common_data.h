@@ -15,8 +15,8 @@ extern const external_irq_instance_t g_encoder_left_b_irq;
 extern icu_instance_ctrl_t g_encoder_left_b_irq_ctrl;
 extern const external_irq_cfg_t g_encoder_left_b_irq_cfg;
 
-#ifndef jga25_encoder_left_b_callback
-void jga25_encoder_left_b_callback(external_irq_callback_args_t *p_args);
+#ifndef encoder_left_b_irq_callback
+void encoder_left_b_irq_callback(external_irq_callback_args_t *p_args);
 #endif
 /** External IRQ on ICU Instance. */
 extern const external_irq_instance_t g_encoder_left_a_irq;
@@ -25,8 +25,8 @@ extern const external_irq_instance_t g_encoder_left_a_irq;
 extern icu_instance_ctrl_t g_encoder_left_a_irq_ctrl;
 extern const external_irq_cfg_t g_encoder_left_a_irq_cfg;
 
-#ifndef jga25_encoder_left_a_callback
-void jga25_encoder_left_a_callback(external_irq_callback_args_t *p_args);
+#ifndef encoder_left_a_irq_callback
+void encoder_left_a_irq_callback(external_irq_callback_args_t *p_args);
 #endif
 /** External IRQ on ICU Instance. */
 extern const external_irq_instance_t g_encoder_right_b_irq;
@@ -35,8 +35,8 @@ extern const external_irq_instance_t g_encoder_right_b_irq;
 extern icu_instance_ctrl_t g_encoder_right_b_irq_ctrl;
 extern const external_irq_cfg_t g_encoder_right_b_irq_cfg;
 
-#ifndef jga25_encoder_right_b_callback
-void jga25_encoder_right_b_callback(external_irq_callback_args_t *p_args);
+#ifndef encoder_right_b_irq_callback
+void encoder_right_b_irq_callback(external_irq_callback_args_t *p_args);
 #endif
 /** External IRQ on ICU Instance. */
 extern const external_irq_instance_t g_encoder_right_a_irq;
@@ -45,8 +45,8 @@ extern const external_irq_instance_t g_encoder_right_a_irq;
 extern icu_instance_ctrl_t g_encoder_right_a_irq_ctrl;
 extern const external_irq_cfg_t g_encoder_right_a_irq_cfg;
 
-#ifndef jga25_encoder_right_a_callback
-void jga25_encoder_right_a_callback(external_irq_callback_args_t *p_args);
+#ifndef encoder_right_a_irq_callback
+void encoder_right_a_irq_callback(external_irq_callback_args_t *p_args);
 #endif
 #define IOPORT_CFG_NAME g_bsp_pin_cfg
 #define IOPORT_CFG_OPEN R_IOPORT_Open

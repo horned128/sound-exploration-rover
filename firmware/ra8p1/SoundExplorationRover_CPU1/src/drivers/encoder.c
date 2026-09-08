@@ -4,12 +4,13 @@
  * @details 前進を正、後進を負として累積カウントと推定回転数を更新する。
  * ================================================================= */
 #include "encoder.h"                                        /* エンコーダAPI */
-#include "../cpu1_config.h"                                 /* エンコーダ設定 */
+#include "config/drive_config.h"                           /* エンコーダ設定 */
+#include "config/pin_config.h"                             /* エンコーダGPIO */
 
-EXPORT volatile W g_jga25_left_encoder_count = 0;            /**< 左代表モーター累積カウント（前進正） */
-EXPORT volatile W g_jga25_left_rpm_x10 = 0;                  /**< 左代表モーター推定回転数の10倍（前進正） */
-EXPORT volatile W g_jga25_right_encoder_count = 0;           /**< 右代表モーター累積カウント（前進正） */
-EXPORT volatile W g_jga25_right_rpm_x10 = 0;                 /**< 右代表モーター推定回転数の10倍（前進正） */
+EXPORT volatile W g_encoder_left_count = 0;            /**< 左代表モーター累積カウント（前進正） */
+EXPORT volatile W g_encoder_left_rpm_x10 = 0;                  /**< 左代表モーター推定回転数の10倍（前進正） */
+EXPORT volatile W g_encoder_right_count = 0;           /**< 右代表モーター累積カウント（前進正） */
+EXPORT volatile W g_encoder_right_rpm_x10 = 0;                 /**< 右代表モーター推定回転数の10倍（前進正） */
 
 LOCAL UB g_left_encoder_previous_ab;                  /**< 左エンコーダ前回A/B状態 */
 LOCAL UB g_right_encoder_previous_ab;                 /**< 右エンコーダ前回A/B状態 */
@@ -27,8 +28,8 @@ LOCAL B const encoder_transition_delta[16] = {
  * @param[in] left trueなら左代表モーター、falseなら右代表モーター
  * ================================================================= */
 LOCAL void encoder_update(BOOL left) {
-    bsp_io_port_pin_t const pin_a = left ? JGA25_ENCODER_LEFT_A_PIN : JGA25_ENCODER_RIGHT_A_PIN;
-    bsp_io_port_pin_t const pin_b = left ? JGA25_ENCODER_LEFT_B_PIN : JGA25_ENCODER_RIGHT_B_PIN;
+    bsp_io_port_pin_t const pin_a = left ? ENCODER_LEFT_A_PIN : ENCODER_RIGHT_A_PIN;
+    bsp_io_port_pin_t const pin_b = left ? ENCODER_LEFT_B_PIN : ENCODER_RIGHT_B_PIN;
     bsp_io_level_t level_a = BSP_IO_LEVEL_LOW;
     bsp_io_level_t level_b = BSP_IO_LEVEL_LOW;
 
@@ -40,12 +41,12 @@ LOCAL void encoder_update(BOOL left) {
     UB const current_ab = (UB) (((UB) level_a << 1U) | (UB) level_b);
     UB * p_previous_ab = left ? &g_left_encoder_previous_ab : &g_right_encoder_previous_ab;
     UB const transition = (UB) (((*p_previous_ab) << 2U) | current_ab);
-    B const forward_sign = left ? JGA25_ENCODER_LEFT_FORWARD_SIGN : JGA25_ENCODER_RIGHT_FORWARD_SIGN;
+    B const forward_sign = left ? WHEEL_ENCODER_LEFT_FORWARD_SIGN : WHEEL_ENCODER_RIGHT_FORWARD_SIGN;
     W const delta = (W) encoder_transition_delta[transition] * forward_sign;
     if (left) {
-        g_jga25_left_encoder_count += delta;
+        g_encoder_left_count += delta;
     } else {
-        g_jga25_right_encoder_count += delta;
+        g_encoder_right_count += delta;
     }
     *p_previous_ab = current_ab;
 }
@@ -61,7 +62,7 @@ LOCAL void encoder_speed_update(W count, W * p_previous_count, volatile W * p_rp
                                  UW elapsed_ms) {
     W const delta = count - *p_previous_count;
     D const numerator = (D) delta * 600000LL;
-    D const denominator = (D) JGA25_ENCODER_COUNTS_PER_REV * elapsed_ms;
+    D const denominator = (D) WHEEL_ENCODER_COUNTS_PER_REV * elapsed_ms;
     *p_rpm_x10 = (W) (numerator / denominator);
     *p_previous_count = count;
 }
@@ -71,24 +72,24 @@ LOCAL void encoder_speed_update(W count, W * p_previous_count, volatile W * p_rp
  * @return FSPエラーコード
  * ================================================================= */
 EXPORT fsp_err_t encoder_init(void) {
-    g_jga25_left_encoder_count = 0;
-    g_jga25_left_rpm_x10 = 0;
-    g_jga25_right_encoder_count = 0;
-    g_jga25_right_rpm_x10 = 0;
+    g_encoder_left_count = 0;
+    g_encoder_left_rpm_x10 = 0;
+    g_encoder_right_count = 0;
+    g_encoder_right_rpm_x10 = 0;
 
     bsp_io_level_t left_a = BSP_IO_LEVEL_LOW;
     bsp_io_level_t left_b = BSP_IO_LEVEL_LOW;
     bsp_io_level_t right_a = BSP_IO_LEVEL_LOW;
     bsp_io_level_t right_b = BSP_IO_LEVEL_LOW;
-    fsp_err_t err = g_ioport.p_api->pinRead(g_ioport.p_ctrl, JGA25_ENCODER_LEFT_A_PIN, &left_a);
+    fsp_err_t err = g_ioport.p_api->pinRead(g_ioport.p_ctrl, ENCODER_LEFT_A_PIN, &left_a);
     if (FSP_SUCCESS == err) {
-        err = g_ioport.p_api->pinRead(g_ioport.p_ctrl, JGA25_ENCODER_LEFT_B_PIN, &left_b);
+        err = g_ioport.p_api->pinRead(g_ioport.p_ctrl, ENCODER_LEFT_B_PIN, &left_b);
     }
     if (FSP_SUCCESS == err) {
-        err = g_ioport.p_api->pinRead(g_ioport.p_ctrl, JGA25_ENCODER_RIGHT_A_PIN, &right_a);
+        err = g_ioport.p_api->pinRead(g_ioport.p_ctrl, ENCODER_RIGHT_A_PIN, &right_a);
     }
     if (FSP_SUCCESS == err) {
-        err = g_ioport.p_api->pinRead(g_ioport.p_ctrl, JGA25_ENCODER_RIGHT_B_PIN, &right_b);
+        err = g_ioport.p_api->pinRead(g_ioport.p_ctrl, ENCODER_RIGHT_B_PIN, &right_b);
     }
     if (FSP_SUCCESS != err) {
         return err;
@@ -131,10 +132,10 @@ EXPORT fsp_err_t encoder_init(void) {
  * ================================================================= */
 EXPORT void encoder_housekeeping_1ms(void) {
     g_speed_elapsed_ms++;
-    if (g_speed_elapsed_ms >= JGA25_SPEED_SAMPLE_PERIOD_MS) {
-        encoder_speed_update(g_jga25_left_encoder_count, &g_left_speed_previous_count, &g_jga25_left_rpm_x10,
+    if (g_speed_elapsed_ms >= WHEEL_SPEED_SAMPLE_PERIOD_MS) {
+        encoder_speed_update(g_encoder_left_count, &g_left_speed_previous_count, &g_encoder_left_rpm_x10,
                              g_speed_elapsed_ms);
-        encoder_speed_update(g_jga25_right_encoder_count, &g_right_speed_previous_count, &g_jga25_right_rpm_x10,
+        encoder_speed_update(g_encoder_right_count, &g_right_speed_previous_count, &g_encoder_right_rpm_x10,
                              g_speed_elapsed_ms);
         g_speed_elapsed_ms = 0U;
     }
@@ -160,7 +161,7 @@ LOCAL H encoder_rpm_from_x10(volatile W const * p_rpm_x10) {
  * @return 累積カウント
  * ================================================================= */
 EXPORT W encoder_left_count_get(void) {
-    return g_jga25_left_encoder_count;
+    return g_encoder_left_count;
 }
 
 /** =================================================================*
@@ -168,7 +169,7 @@ EXPORT W encoder_left_count_get(void) {
  * @return 累積カウント
  * ================================================================= */
 EXPORT W encoder_right_count_get(void) {
-    return g_jga25_right_encoder_count;
+    return g_encoder_right_count;
 }
 
 /** =================================================================*
@@ -176,7 +177,7 @@ EXPORT W encoder_right_count_get(void) {
  * @return 回転数（単位: RPM）
  * ================================================================= */
 EXPORT H encoder_left_rpm_get(void) {
-    return encoder_rpm_from_x10(&g_jga25_left_rpm_x10);
+    return encoder_rpm_from_x10(&g_encoder_left_rpm_x10);
 }
 
 /** =================================================================*
@@ -184,14 +185,14 @@ EXPORT H encoder_left_rpm_get(void) {
  * @return 回転数（単位: RPM）
  * ================================================================= */
 EXPORT H encoder_right_rpm_get(void) {
-    return encoder_rpm_from_x10(&g_jga25_right_rpm_x10);
+    return encoder_rpm_from_x10(&g_encoder_right_rpm_x10);
 }
 
 /** =================================================================*
  * @brief  左A相割込み処理
  * @param[in] p_args FSP外部IRQコールバック情報
  * ================================================================= */
-EXPORT void jga25_encoder_left_a_callback(external_irq_callback_args_t * p_args) {
+EXPORT void encoder_left_a_irq_callback(external_irq_callback_args_t * p_args) {
     FSP_PARAMETER_NOT_USED(p_args);
     encoder_update(TRUE);
 }
@@ -200,7 +201,7 @@ EXPORT void jga25_encoder_left_a_callback(external_irq_callback_args_t * p_args)
  * @brief  左B相割込み処理
  * @param[in] p_args FSP外部IRQコールバック情報
  * ================================================================= */
-EXPORT void jga25_encoder_left_b_callback(external_irq_callback_args_t * p_args) {
+EXPORT void encoder_left_b_irq_callback(external_irq_callback_args_t * p_args) {
     FSP_PARAMETER_NOT_USED(p_args);
     encoder_update(TRUE);
 }
@@ -209,7 +210,7 @@ EXPORT void jga25_encoder_left_b_callback(external_irq_callback_args_t * p_args)
  * @brief  右A相割込み処理
  * @param[in] p_args FSP外部IRQコールバック情報
  * ================================================================= */
-EXPORT void jga25_encoder_right_a_callback(external_irq_callback_args_t * p_args) {
+EXPORT void encoder_right_a_irq_callback(external_irq_callback_args_t * p_args) {
     FSP_PARAMETER_NOT_USED(p_args);
     encoder_update(FALSE);
 }
@@ -218,7 +219,7 @@ EXPORT void jga25_encoder_right_a_callback(external_irq_callback_args_t * p_args
  * @brief  右B相割込み処理
  * @param[in] p_args FSP外部IRQコールバック情報
  * ================================================================= */
-EXPORT void jga25_encoder_right_b_callback(external_irq_callback_args_t * p_args) {
+EXPORT void encoder_right_b_irq_callback(external_irq_callback_args_t * p_args) {
     FSP_PARAMETER_NOT_USED(p_args);
     encoder_update(FALSE);
 }

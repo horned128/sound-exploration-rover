@@ -1,6 +1,6 @@
 /*
- * μT-Kernel 3.0 configuration shared by both RA8P1 cores.
- * This project-owned file intentionally takes precedence over the BSP default.
+ * RA8P1両コアで共有するμT-Kernel 3.0設定。
+ * プロジェクト固有の設定として、BSP標準設定より優先して読み込む。
  */
 #ifndef SEROV_MTKERNEL_CONFIG_H
 #define SEROV_MTKERNEL_CONFIG_H
@@ -9,7 +9,7 @@
 #define CNF_SYSTEMAREA_END      (0)
 #define CNF_MAX_TSKPRI          (32)
 
-/* All application delay values are expressed in milliseconds. */
+/* アプリケーションの待ち時間をミリ秒単位で扱う。 */
 #define CNF_TIMER_PERIOD        (1)
 
 #define CNF_MAX_TSKID           (32)
@@ -67,7 +67,7 @@
 #define OBJECT_NAME_LENGTH      (8)
 
 #if (_RA_ORDINAL == 2)
-/* CPU1 must not contend with CPU0 for the BSP's single SCI8 T-Monitor port. */
+/* CPU1はBSPの単一SCI8 T-Monitor端子をCPU0と競合して使用しない。 */
 #define USE_TMONITOR            (0)
 #define USE_SYSTEM_MESSAGE      (0)
 #define USE_EXCEPTION_DBG_MSG   (0)

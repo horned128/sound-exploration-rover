@@ -2,7 +2,8 @@
 
 最終更新: 2026-09-08 / 対象: RA8P1 CPU0/CPU1、ReSpeaker/XIAO、I2Cセンサー統合の現行ファームウェア実装
 
-現行ソースに対応するインタラクティブな全体図は、[現行コード構造図](archify/SEROV_ARCHITECTURE.html)を参照する。
+参考用のインタラクティブな全体図は、[構造図](archify/SEROV_ARCHITECTURE.html)を参照する。現行のディレクトリ構成は本書と下記レイヤー構成を正とする。
+ユーザーコードの層構成と依存方向は、[RA8P1レイヤー構成](LAYERED_ARCHITECTURE.md)を参照する。
 
 ## 1. 目的と設計方針
 
@@ -12,7 +13,7 @@
 
 1. XVF3800はDoA/VADと処理済み音声を生成し、XIAO ESP32S3は音響・無線フロントエンドとして観測値を整形する。
 2. CPU0（Cortex-M85）はUSB hostとして音響観測を検証し、μT-Kernel上で音源追従判断と指令送信を行う。
-3. CPU0の`tk_audio`、`tk_think`、`tk_command`は、それぞれ`tk_cre_tsk()`で生成する独立カーネルタスクである。`tk_init.c`は`usermain()`から呼ばれるタスク登録・初期化モジュールである。
+3. CPU0の`task_acoustic_link`、`task_think`、`task_command`は、それぞれ`tk_cre_tsk()`で生成する独立カーネルタスクである。`task_registry.c`は`usermain()`から呼ばれるタスク登録・初期化モジュールである。
 4. CPU1（Cortex-M33）はμT-Kernel上の1 msアクチュエータタスクで指令を検証し、4サーボと論理左右DCモーターを駆動する。
 5. 6個のアクチュエータ指示値は、IPCの`SEQUENCE`をcommit markerとして1つのスナップショットで確定する。
 6. USBや音響データが異常・timeoutになってもCPU1の実時間制御を巻き込まず、CPU0停止目標とCPU1ローカルtimeoutを重ねる。
@@ -27,7 +28,7 @@
 | CPU0 / Cortex-M85 | μT-Kernel 3.0 | USB HCDC host、I2C1センサー取得、観測検証、思考、走行目標、IPC指令送信・状態受信、青/緑LED |
 | CPU1 / Cortex-M33 | μT-Kernel 3.0 | IPC指令受信・状態送信、1 msアクチュエータタスク、制限、安全監視、PWM/GPIO、encoder、赤LED状態タスク |
 
-CPU0の主周期はcommand 50 ms、think 100 msで、CPU1はnominal 1 msである。IPC channel 0はCPU0→CPU1の指令とCPU1→CPU0の診断に双方向利用し、両CPUの受信をIRQ/callbackで処理する。USB eventはCPU0の`tk_audio`がtask contextからpollし、USB callbackからμT-Kernel APIを直接呼ばない。
+CPU0の主周期はcommand 50 ms、think 100 msで、CPU1はnominal 1 msである。IPC channel 0はCPU0→CPU1の指令とCPU1→CPU0の診断に双方向利用し、両CPUの受信をIRQ/callbackで処理する。USB eventはCPU0の`task_acoustic_link`がtask contextからpollし、USB callbackからμT-Kernel APIを直接呼ばない。
 
 ```mermaid
 flowchart LR
@@ -40,11 +41,11 @@ flowchart LR
     subgraph MCU["RA8P1 MCU"]
         subgraph CPU0["CPU0 / Cortex-M85 / μT-Kernel"]
             INIT["usermain / task registry<br/>全タスク生成・開始"]
-            AUDIO["tk_audio<br/>USB HCDC・frame検証"]
-            SENSOR["tk_sensor / 50 ms<br/>I2C1・ToF/IMU snapshot"]
+            AUDIO["task_acoustic_link<br/>USB HCDC送受信・frame検証"]
+            SENSOR["task_sensor / 50 ms<br/>I2C1・ToF/IMU snapshot"]
             OBS["最新音響snapshot<br/>mutex保護"]
-            THINK["tk_think / 100 ms<br/>音源追従または障害物回避・青/緑LED"]
-            COMMAND["tk_command / 50 ms<br/>期限監視・6出力一括送信"]
+            THINK["task_think / 100 ms<br/>音源追従または障害物回避・青/緑LED"]
+            COMMAND["task_command / 50 ms<br/>期限監視・6出力一括送信"]
             CLIENT["IPC client<br/>32 bitワード列へ変換"]
             INIT --> AUDIO
             INIT --> SENSOR
@@ -63,11 +64,11 @@ flowchart LR
         subgraph CPU1["CPU1 / Cortex-M33 / μT-Kernel"]
             C1INIT["usermain / task registry<br/>全タスク生成・開始"]
             SERVER["IPC server<br/>staging・commit"]
-            ACTTASK["tk_actuator / 1 ms<br/>actuator_app周期実行"]
-            APP["actuator_app<br/>制限・安全状態・指令適用"]
-            STATUS["tk_status / 10 ms<br/>heartbeat・fault表示・実出力診断"]
+            ACTTASK["task_actuator / 1 ms<br/>actuator_service周期実行"]
+            APP["actuator_service<br/>制限・安全状態・指令適用"]
+            STATUS["task_status / 10 ms<br/>heartbeat・fault表示・実出力診断"]
             SERVO["servo driver<br/>論理FR / FL / RR / RL"]
-            MOTOR["dc_motor driver<br/>論理左 / 論理右"]
+            MOTOR["drive_service / BTS7960 driver<br/>論理左 / 論理右"]
             ENC["encoder driver<br/>左右代表A/B・4逓倍・RPM"]
             RED["赤LED<br/>CPU1状態"]
             C1INIT --> ACTTASK
@@ -126,18 +127,18 @@ firmware/
    │     ├─ hal_entry.c               μT-Kernel起動入口
    │     ├─ app/main.c                CPU1起動とCPU0タスク群初期化
    │     ├─ app/tasks/task_common.h   CPU0共通fault定義
-   │     ├─ app/tasks/tk_init.c       タスク登録配列、生成・開始・失敗時解放
-   │     ├─ app/tasks/tk_audio.c      USB event、frame parser、音響snapshot
-   │     ├─ app/tasks/tk_sensor.c     I2C定周期取得、センサーsnapshot
-   │     ├─ app/tasks/tk_think.c      音源追従、青/緑LED、faultラッチ
-   │     ├─ app/tasks/tk_command.c    目標共有、期限監視、IPC送信
+   │     ├─ app/tasks/task_registry.c       タスク登録配列、生成・開始・失敗時解放
+   │     ├─ app/tasks/task_acoustic_link.c      USB event、frame parser、音響snapshot、テレメトリ送信
+   │     ├─ app/tasks/task_sensor.c     I2C定周期取得、センサーsnapshot
+   │     ├─ app/tasks/task_think.c      音源追従、青/緑LED、faultラッチ
+   │     ├─ app/tasks/task_command.c    目標共有、期限監視、IPC送信
    │     ├─ app/control/sound_follow_controller.c
    │     │                              停止聴取型の状態機械
    │     ├─ app/control/obstacle_avoidance_controller.c
    │     │                              ToF/IMUの安全・回避ルール
    │     ├─ app/sensors/               I2C bus、TCA9548A、VL53L1X、BMI270、hub
    │     ├─ ipc/actuator_ipc_client.c IPC送信処理
-   │     └─ cpu0_config.h             周期、閾値、優先度、LED設定
+   │     └─ config/{task,control,sensor,ipc,pin}_config.h             周期、閾値、優先度、LED設定
    └─ SoundExplorationRover_CPU1/
       ├─ configuration.xml            GPT、IPC、IRQ設定
       ├─ mtk3_bsp2 -> ../common/       共通μT-Kernel submoduleへのlinked resource
@@ -146,23 +147,23 @@ firmware/
          ├─ hal_entry.c               μT-Kernel起動入口
          ├─ mtkernel_config/include/  Cortex-M33、250 MHz、CPU1 RAM領域の上書き定義
          ├─ app/main.c                CPU1タスク群初期化
-         ├─ app/tasks/tk_init.c       タスク登録配列、生成・開始・失敗時解放
-         ├─ app/tasks/tk_actuator.c   1 msアクチュエータ周期タスク
-         ├─ app/tasks/tk_status.c     10 ms状態表示タスク
-         ├─ app/actuator_app.c        指令検証、安全状態、driver統合
+         ├─ app/tasks/task_registry.c       タスク登録配列、生成・開始・失敗時解放
+         ├─ app/tasks/task_actuator.c   1 msアクチュエータ周期タスク
+         ├─ app/tasks/task_status.c     10 ms状態表示タスク
+         ├─ app/actuator_service.c        指令検証、安全状態、driver統合
          ├─ ipc/actuator_ipc_server.c IPC受信・スナップショット確定
          ├─ drivers/servo.c           4サーボPWM
-         ├─ drivers/dc_motor.c        左右モーターPWM・ランプ
+         ├─ drivers/drive_service.c / bts7960.c        左右モーターPWM・ランプ
          ├─ drivers/encoder.c         A/B相カウント・RPM算出
-         └─ cpu1_config.h             制限、PWM、校正
+         └─ config/{task,actuator,drive,servo,pin}_config.h             制限、PWM、校正
 ```
 
 主要ファイル:
 
 - 共通契約: [`acoustic_protocol.h`](../../firmware/common/acoustic_protocol.h)、[`ipc_message.h`](../../firmware/ra8p1/common/ipc_message.h)
 - 音響frontend: [`acoustic_frontend.c`](../../firmware/esp32s3/src/acoustic_frontend.c)、[`xvf3800_control.c`](../../firmware/esp32s3/src/xvf3800_control.c)、[`audio_capture.c`](../../firmware/esp32s3/src/audio_capture.c)、[`usb_link.c`](../../firmware/esp32s3/src/usb_link.c)
-- CPU0: [`main.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/main.c)、[`tk_init.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_init.c)、[`tk_audio.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_audio.c)、[`tk_sensor.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_sensor.c)、[`tk_think.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_think.c)、[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/control/sound_follow_controller.c)、[`obstacle_avoidance_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/control/obstacle_avoidance_controller.c)、[`sensor_hub.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/sensors/sensor_hub.c)、[`tk_command.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_command.c)
-- CPU1: [`main.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/main.c)、[`tk_init.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/tasks/tk_init.c)、[`tk_actuator.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/tasks/tk_actuator.c)、[`tk_status.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/tasks/tk_status.c)、[`actuator_app.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/app/actuator_app.c)、[`actuator_ipc_server.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/ipc/actuator_ipc_server.c)、[`servo.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/servo.c)、[`dc_motor.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/dc_motor.c)
+- CPU0: [`main.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/main.c)、[`task_registry.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/task_registry.c)、[`task_acoustic_link.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/task_acoustic_link.c)、[`task_sensor.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/task_sensor.c)、[`task_think.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/task_think.c)、[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/control/sound_follow_controller.c)、[`obstacle_avoidance_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/control/obstacle_avoidance_controller.c)、[`sensor_hub.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/services/sensor_hub.c)、[`task_command.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/task_command.c)
+- CPU1: [`main.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/main.c)、[`task_registry.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/tasks/task_registry.c)、[`task_actuator.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/tasks/task_actuator.c)、[`task_status.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/tasks/task_status.c)、[`actuator_service.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/services/actuator_service.c)、[`actuator_ipc_server.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/ipc/actuator_ipc_server.c)、[`servo.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/servo.c)、[`drive_service.c / bts7960.c`](../../firmware/ra8p1/SoundExplorationRover_CPU1/src/services/drive_service.c)
 
 `ra/`、`ra_cfg/`、`ra_gen/`、`configuration.xml`はFSP設定と生成処理に属する。特に`ra_gen/`は直接編集せず、設定変更後にGenerate Project Contentで再生成する。
 
@@ -173,12 +174,12 @@ sequenceDiagram
     participant ESP as XIAO ESP32S3
     participant RESET as Reset / BSP
     participant MAIN as CPU0 usermain / 初期タスク
-    participant AUDIO as CPU0 tk_audio
-    participant CMD as CPU0 tk_command
-    participant THINK as CPU0 tk_think
+    participant AUDIO as CPU0 task_acoustic_link
+    participant CMD as CPU0 task_command
+    participant THINK as CPU0 task_think
     participant C1MAIN as CPU1 usermain
-    participant C1ACT as CPU1 tk_actuator
-    participant C1STAT as CPU1 tk_status
+    participant C1ACT as CPU1 task_actuator
+    participant C1STAT as CPU1 task_status
 
     RESET->>MAIN: μT-Kernel起動後にusermain()
     MAIN->>C1: R_BSP_SecondaryCoreStart()
@@ -215,7 +216,7 @@ sequenceDiagram
     end
 ```
 
-各コアの`usermain()`は、それぞれのμT-Kernelが生成した高優先度の初期タスクから呼ばれる。CPU0はCPU1を起動してから、CPU0側`tk_init.c`の登録配列で`tk_command`、`tk_audio`、`tk_think`を生成・開始する。CPU1はCPU1側`tk_init.c`の登録配列で`tk_actuator`と`tk_status`を生成・開始する。どちらも、全タスクの生成成功後に登録順で開始し、失敗時は生成済みリソースを逆順で解放する。初期化完了後の`usermain()`は`tk_slp_tsk(TMO_FEVR)`で永久休止し、各独立タスクが優先度に従って実行される。
+各コアの`usermain()`は、それぞれのμT-Kernelが生成した高優先度の初期タスクから呼ばれる。CPU0はCPU1を起動してから、CPU0側`task_registry.c`の登録配列で`task_command`、`task_acoustic_link`、`task_think`を生成・開始する。CPU1はCPU1側`task_registry.c`の登録配列で`task_actuator`と`task_status`を生成・開始する。どちらも、全タスクの生成成功後に登録順で開始し、失敗時は生成済みリソースを逆順で解放する。初期化完了後の`usermain()`は`tk_slp_tsk(TMO_FEVR)`で永久休止し、各独立タスクが優先度に従って実行される。
 
 両コアのμT-Kernel tickは1 msに統一している。周期タスクは`tk_dly_tsk()`を使うため、記載周期は処理時間を含まないnominal値であり、ハードウェアタイマー基準の厳密な周期ではない。
 
@@ -231,25 +232,25 @@ RA8P1ユーザーコードの整数・真偽値とリンケージは、μT-Kerne
 
 | タスク | 優先度 | スタック | 実行 | 責務 |
 |---|---:|---:|---|---|
-| `cpu0_command_task` | 6 | 1024 B | 50 ms | 最新目標、500 ms期限監視、6出力のIPC一括送信 |
-| `cpu0_audio_task` | 8 | 2048 B | nominal 1 ms poll | HCDC event、stream parser、最新音響snapshot |
-| `cpu0_think_task` | 10 | 1024 B | 100 ms | 音源追従、状態遷移、青/緑LED、faultラッチ |
+| `task_command_entry` | 6 | 1024 B | 50 ms | 最新目標、500 ms期限監視、6出力のIPC一括送信 |
+| `task_acoustic_link_entry` | 8 | 2048 B | nominal 1 ms poll | HCDC event、stream parser、最新音響snapshot、テレメトリ送信 |
+| `task_think_entry` | 10 | 1024 B | 100 ms | 音源追従、状態遷移、青/緑LED、faultラッチ |
 
-μT-Kernelでは数値が小さいほど高優先度である。IPC keep-aliveを行う`tk_command`を最優先の周期task、USBを受ける`tk_audio`をその次、判断を行う`tk_think`をその次とし、通信処理が一時的に増えてもCPU1への指令更新を優先する。
+μT-Kernelでは数値が小さいほど高優先度である。IPC keep-aliveを行う`task_command`を最優先の周期task、USBを受ける`task_acoustic_link`をその次、判断を行う`task_think`をその次とし、通信処理が一時的に増えてもCPU1への指令更新を優先する。
 
 ### 5.1 目標データの流れ
 
-`tk_audio`はCDC byte streamを共有protocol parserへ渡し、CRC、version、length、sequenceを検証して最新観測を優先度継承mutex内へcommitする。USB detach時は古い観測を即座に無効化する。
+`task_acoustic_link`はCDC byte streamを共有protocol parserへ渡し、CRC、version、length、sequenceを検証して最新観測を優先度継承mutex内へcommitする。同じUSB CDCリンクでCPU0/CPU1の状態とセンサー診断のテレメトリもESP32S3へ送信する。USB detach時は古い観測を即座に無効化する。
 
-`tk_think`は100 msごとに音響snapshotを取得する。`tk_audio`が持つ観測時刻に加え、`tk_think`自身も観測専用sequenceの変化から`g_cpu0_think_observation_watchdog_ms`を更新し、どちらかが600 msの期限を満たさない観測は`sound_follow_controller`へ渡さない。controller出力を`rover_motion_target_t`へ展開し、左右モーター、FR/FL/RR/RL、enable、emergency stopを一括更新する。`cpu0_command_set_target()`は構造体全体を別の優先度継承mutexで保護する。
+`task_think`は100 msごとに音響snapshotを取得する。`task_acoustic_link`が持つ観測時刻に加え、`task_think`自身も観測専用sequenceの変化から`g_task_think_observation_watchdog_ms`を更新し、どちらかが600 msの期限を満たさない観測は`sound_follow_controller`へ渡さない。controller出力を`rover_motion_target_t`へ展開し、左右モーター、FR/FL/RR/RL、enable、emergency stopを一括更新する。`task_command_set_target()`は構造体全体を別の優先度継承mutexで保護する。
 
-`tk_command`は50 msごとにmutex内の構造体をコピーし、次のIPC処理をmutex外で行う。目標更新が500 ms途絶した場合は`enable=0`、`emergency_stop=1`へ置き換え、faultを`tk_think`のイベントフラグへ通知する。
+`task_command`は50 msごとにmutex内の構造体をコピーし、次のIPC処理をmutex外で行う。目標更新が500 ms途絶した場合は`enable=0`、`emergency_stop=1`へ置き換え、faultを`task_think`のイベントフラグへ通知する。
 
 起動時または緊急停止後は、有効指令の前に`enable=0`かつ`emergency_stop=0`のフレームを1回送る。これはCPU1の緊急停止ラッチ解除手順を満たすためである。
 
 ### 5.2 CPU0 LED表示
 
-CPU0の`tk_think`が青LED（LED1/P600）と緑LED（LED2/P303）を一括して所有する。CPU1は赤LED（LED3/PA07）だけを使うため、両コアが同じLEDを同時操作しない。
+CPU0の`task_think`が青LED（LED1/P600）と緑LED（LED2/P303）を一括して所有する。CPU1は赤LED（LED3/PA07）だけを使うため、両コアが同じLEDを同時操作しない。
 
 | 表示 | 意味 |
 |---|---|
@@ -258,12 +259,12 @@ CPU0の`tk_think`が青LED（LED1/P600）と緑LED（LED2/P303）を一括して
 | 青を125 msごとに反転 | 目標方向へservo整定中 |
 | 青点灯 | 1000 msの短距離移動中 |
 | 青を250 msごとに反転 | settleまたはcooldown中 |
-| 緑を1秒ごとに100 ms点灯 | link待ち以外の`tk_think` heartbeat |
+| 緑を1秒ごとに100 ms点灯 | link待ち以外の`task_think` heartbeat |
 | 緑点灯＋青をN回点滅 | CPU0 fault。Nがfault番号 |
 | 赤を500 msごとに反転 | CPU1正常heartbeat |
 | 赤を約50 msごとに反転 | CPU1 driver/FSP error |
 
-CPU0 fault番号は、1がtask create/start、2がIPC初期化、3がIPC送信、4が目標タイムアウト、5がUSB初期化、6が目標共有失敗である。複数faultがある場合は小さい番号を優先表示し、`g_cpu0_fault_flags`には全bitを保持する。
+CPU0 fault番号は、1がtask create/start、2がIPC初期化、3がIPC送信、4が目標タイムアウト、5がUSB初期化、6が目標共有失敗である。複数faultがある場合は小さい番号を優先表示し、`g_task_think_fault_flags`には全bitを保持する。
 
 ### 5.3 I2Cセンサー走行モード
 
@@ -308,10 +309,10 @@ FSPのIPC FIFOは4段、1要素32 bitである。共有C構造体を直接書か
 
 ```mermaid
 sequenceDiagram
-    participant CMD as CPU0 tk_command
+    participant CMD as CPU0 task_command
     participant FIFO as IPC FIFO ch.0
     participant ISR as CPU1 IPC callback
-    participant APP as CPU1 tk_actuator
+    participant APP as CPU1 task_actuator
     participant OUT as 4 servo + 2 motor
 
     CMD->>FIFO: CONTROL
@@ -326,24 +327,24 @@ sequenceDiagram
     APP->>OUT: 同じ1 msタスク周期内で全指令を適用
 ```
 
-ここで「同時」とは、6値を分割受信中の中途半端な組合せで適用せず、1つのcommit済みスナップショットとしてCPU1の同じ`tk_actuator`周期で適用することを意味する。物理PWM波形が完全に同一クロックエッジで変化することを保証するものではない。
+ここで「同時」とは、6値を分割受信中の中途半端な組合せで適用せず、1つのcommit済みスナップショットとしてCPU1の同じ`task_actuator`周期で適用することを意味する。物理PWM波形が完全に同一クロックエッジで変化することを保証するものではない。
 
-CONTROLでemergency stopを受けた場合だけは、残りのワードとSEQUENCEを待たずにcommitする。実際の出力停止はIRQ内ではなくCPU1の次回`tk_actuator`周期で行う。CPU0はFIFO overflow時に1 ms待って同じワードを再送する。
+CONTROLでemergency stopを受けた場合だけは、残りのワードとSEQUENCEを待たずにcommitする。実際の出力停止はIRQ内ではなくCPU1の次回`task_actuator`周期で行う。CPU0はFIFO overflow時に1 ms待って同じワードを再送する。
 
-CPU1の`tk_status`は実デューティ、左右encoder RPM、fault、適用済み指令sequenceをsnapshot化し、4段FIFOをあふれさせないよう10 msごとに1ワードずつCPU0へ返す。CPU0は`STATUS_SEQUENCE`受信時だけsnapshotを確定する。USBでは従来互換の64 byte `ROVER_TELEMETRY`に続けて、CPU1状態を24 byte `ACTUATOR_TELEMETRY`として別送し、新旧ESP32S3間の基本診断互換性を保つ。この戻り値は診断専用であり、CPU1の1 ms制御を待たせない。
+CPU1の`task_status`は実デューティ、左右encoder RPM、fault、適用済み指令sequenceをsnapshot化し、4段FIFOをあふれさせないよう10 msごとに1ワードずつCPU0へ返す。CPU0は`STATUS_SEQUENCE`受信時だけsnapshotを確定する。USBでは従来互換の64 byte `ROVER_TELEMETRY`に続けて、CPU1状態を24 byte `ACTUATOR_TELEMETRY`として別送し、新旧ESP32S3間の基本診断互換性を保つ。この戻り値は診断専用であり、CPU1の1 ms制御を待たせない。
 
 ## 7. CPU1アクチュエータ設計
 
 | タスク | 優先度 | スタック | 実行 | 責務 |
 |---|---:|---:|---|---|
-| `cpu1_actuator_task` | 4 | 2048 B | nominal 1 ms | IPC確定指令、encoder、PWMランプ、安全停止 |
-| `cpu1_status_task` | 12 | 512 B | nominal 10 ms | 赤LED、driver/FSP fault表示、CPU1実出力診断送信 |
+| `task_actuator_entry` | 4 | 2048 B | nominal 1 ms | IPC確定指令、encoder、PWMランプ、安全停止 |
+| `task_status_entry` | 12 | 512 B | nominal 10 ms | 赤LED、driver/FSP fault表示、CPU1実出力診断送信 |
 
 数値が小さいほど高優先度であり、アクチュエータ周期処理を状態表示より優先する。IPC callbackはFSPのIRQ contextでstaging/commitだけを行い、μT-Kernelのtask APIとPWM driver APIを直接呼ばない。
 
 ### 7.1 タスクと安全状態
 
-CPU1の`usermain()`は、登録配列から`tk_actuator`と`tk_status`を生成・開始する。優先度4の`tk_actuator`は1 msごとに`actuator_app_run_1ms()`を呼び、driver housekeeping、IPC異常取得、新しいcommit済み指令の取得、期限監視、サーボとモーターへの適用を行う。優先度12の`tk_status`は10 msごとに状態を確認し、正常時500 ms、driver/FSP異常時50 ms周期で赤LEDを反転し、100 msごとに診断snapshotの送信を開始する。最終IPC指令から1500 ms以上経過するとローカルsafe stopへ移行する。
+CPU1の`usermain()`は、登録配列から`task_actuator`と`task_status`を生成・開始する。優先度4の`task_actuator`は1 msごとに`actuator_service_update_1ms()`を呼び、ドライバの周期処理、IPC異常取得、新しい確定済み指令の取得、期限監視、サーボとモーターへの適用を行う。優先度12の`task_status`は10 msごとに状態を確認し、正常時500 ms、driver/FSP異常時50 ms周期で赤LEDを反転し、100 msごとに診断snapshotの送信を開始する。最終IPC指令から1500 ms以上経過するとローカルsafe stopへ移行する。
 
 ```mermaid
 stateDiagram-v2
@@ -387,13 +388,13 @@ target RPM -> duty permille = target * 1000 / 300 RPM
 5 msごとにGPT10A/BおよびGPT7A/Bへ反映
 ```
 
-論理正RPMは車体前進として扱い、エンコーダ値は前進正・後進負とする。論理正RPMは左LPWM（P602/GPT7B）・右RPWM（P810/GPT10A）、負RPMは左RPWM（P811/GPT10B）・右LPWM（P603/GPT7A）へ出す。符号は`MOTOR_CHASSIS_FORWARD_SIGN=-1`、`MOTOR_LEFT_MOUNT_SIGN=+1`、`MOTOR_RIGHT_MOUNT_SIGN=-1`から合成する。同じ側のRPWM/LPWMは相互排他的に更新し、同時Highを避ける。停止時は4出力を0にしてから共通ENをLowにする。
+論理正RPMは車体前進として扱い、エンコーダ値は前進正・後進負とする。論理正RPMは左LPWM（P602/GPT7B）・右RPWM（P810/GPT10A）、負RPMは左RPWM（P811/GPT10B）・右LPWM（P603/GPT7A）へ出す。符号は`DRIVE_CHASSIS_FORWARD_SIGN=-1`、`DRIVE_LEFT_MOUNT_SIGN=+1`、`DRIVE_RIGHT_MOUNT_SIGN=-1`から合成する。同じ側のRPWM/LPWMは相互排他的に更新し、同時Highを避ける。停止時は4出力を0にしてから共通ENをLowにする。
 
-基本PWMは左右別の固定比で算出し、`MOTOR_LEFT_DUTY_SCALE_PERMILLE=700`、`MOTOR_RIGHT_DUTY_SCALE_PERMILLE=250`を適用する。代表エンコーダを使う速度フィードバックは`MOTOR_SPEED_FEEDBACK_ENABLE=0`で無効化している。最終PWMは0～700 permilleに制限する。左右RPMがともに0ならランプダウンを行わず、PWMと共通ENを即時停止する。各側3台のモーターを個別に制御するものではない。
+基本PWMは左右別の固定比で算出し、`DRIVE_LEFT_DUTY_SCALE_PERMILLE=700`、`DRIVE_RIGHT_DUTY_SCALE_PERMILLE=250`を適用する。代表エンコーダを使う速度フィードバックは`DRIVE_SPEED_FEEDBACK_ENABLE=0`で無効化している。最終PWMは0～700 permilleに制限する。左右RPMがともに0ならランプダウンを行わず、PWMと共通ENを即時停止する。各側3台のモーターを個別に制御するものではない。
 
 ## 8. 停止聴取型の音源追従
 
-`tk_think`は[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/control/sound_follow_controller.c)を100 msごとに更新する。USB linkと観測が500 ms安定した後だけ待受へ入り、-45 dBFS以上かつVAD検出中の1観測を音源イベントの開始条件とする。開始直後の保持DoAを使わないよう500 ms待ち、その後の最新5 sampleが相互差20度以内になった場合だけ操舵する。取得開始から2000 ms以内に安定しなければイベントを破棄する。DoAの全方位で前進を選び、側方・後方は最大45度の4輪逆相操舵に加え、内輪を90 RPM相当へ減速する。検出時にDoAと走行目標を固定し、500 msのservo整定後に1000 msだけ移動する。servoを直進へ戻して500 ms停止した後、200 msの静音を確認して次の検出を受け付ける。
+`task_think`は[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/control/sound_follow_controller.c)を100 msごとに更新する。USB linkと観測が500 ms安定した後だけ待受へ入り、-45 dBFS以上かつVAD検出中の1観測を音源イベントの開始条件とする。開始直後の保持DoAを使わないよう500 ms待ち、その後の最新5 sampleが相互差20度以内になった場合だけ操舵する。取得開始から2000 ms以内に安定しなければイベントを破棄する。DoAの全方位で前進を選び、側方・後方は最大45度の4輪逆相操舵に加え、内輪を90 RPM相当へ減速する。検出時にDoAと走行目標を固定し、500 msのservo整定後に1000 msだけ移動する。servoを直進へ戻して500 ms停止した後、200 msの静音を確認して次の検出を受け付ける。
 
 ```mermaid
 stateDiagram-v2
@@ -490,16 +491,16 @@ P801、P803、P808をサーボへ転用しているため、現行構成ではOc
 | 監視箇所 | 条件 | 動作 |
 |---|---|---|
 | ESP32S3 frontend | XVF I2C失敗、I2S overrun | observation flag/statusと累積health countで通知 |
-| CPU0 `tk_audio` | CRC/version/length/sequence異常 | frame破棄。正常観測が途絶えれば600 ms timeoutへ収束 |
+| CPU0 `task_acoustic_link` | CRC/version/length/sequence異常 | frame破棄。正常観測が途絶えれば600 ms timeoutへ収束 |
 | CPU0 `sound_follow_controller` | USB detach、HELLO未成立、観測時刻または思考側sequence watchdogが600 msの期限超過 | `WAIT_LINK`、enable=0、estop=1 |
 | CPU0 `sound_follow_controller` | XVF ready以外、VADなし、I2C error、mute、I2S stale | 走行triggerへ使わず停止聴取を継続。単発のI2S overrunは診断値として記録 |
-| CPU0 `tk_command` | 思考目標が500 ms更新されない | enable=0、estop=1を送信、CPU0 fault通知 |
+| CPU0 `task_command` | 思考目標が500 ms更新されない | enable=0、estop=1を送信、CPU0 fault通知 |
 | CPU0 IPC client | 通常指令の送信失敗 | 緊急停止送信を追加試行、CPU0 fault通知 |
 | CPU1 IPC server | emergency stop受信 | SEQUENCEを待たずcommit |
-| CPU1 `actuator_app` | IPC指令が1500 ms届かない | ローカルsafe stop |
+| CPU1 `actuator_service` | IPC指令が1500 ms届かない | ローカルsafe stop |
 | CPU1 driver統合 | driver API error | DRIVER fault、safe stop |
 
-現状の制約は、ハードウェア非常停止入力なし、CPU間watchdogなし、各側3台の個別速度フィードバックなしである。論理左右代表モーターのA/Bを4逓倍で数え、`JGA25_ENCODER_COUNTS_PER_REV=900`と100 msの差分からRPMを算出する。カウントとRPMは前進正、後進負を契約とする。`MOTOR_SPEED_FEEDBACK_ENABLE=0`のため、実測RPMは診断にのみ使用する。また論理左右各3台を1台のBTS7960へ並列接続しているため、6台の個別制御には対応しない。
+現状の制約は、ハードウェア非常停止入力なし、CPU間watchdogなし、各側3台の個別速度フィードバックなしである。論理左右代表モーターのA/Bを4逓倍で数え、`WHEEL_ENCODER_COUNTS_PER_REV=900`と100 msの差分からRPMを算出する。カウントとRPMは前進正、後進負を契約とする。`DRIVE_SPEED_FEEDBACK_ENABLE=0`のため、実測RPMは診断にのみ使用する。また論理左右各3台を1台のBTS7960へ並列接続しているため、6台の個別制御には対応しない。
 
 ## 11. ビルド・生成・書き込み
 
@@ -525,23 +526,23 @@ e² studioではCPU0/CPU1 projectをRefreshし、Generate Project Content、Clea
 
 | 変数 | 確認できること |
 |---|---|
-| `g_cpu0_think_state` | WAIT_LINK、LISTEN、STEER_PREP、MOVE_STEP、SETTLE、COOLDOWN、FAULT |
-| `g_cpu0_think_cycle_count` | 思考タスクの周期実行回数 |
-| `g_cpu0_think_observation_sequence` | 思考で最後に使用した音響観測sequence |
-| `g_cpu0_think_observation_watchdog_ms` | `tk_think`で同じ観測sequenceが続いた時間。600 msでlink無効、未成立時は`UINT32_MAX` |
-| `g_cpu0_fault_flags` | CPU0でラッチした全fault bit |
-| `g_cpu0_command_sequence` | 最終IPC sequence |
-| `g_cpu0_command_send_count` | 正常にcommitした指令数 |
-| `g_cpu0_command_last_error` | 最後のIPC FSP error |
-| `g_cpu0_audio_usb_configured` | HCDC deviceの列挙状態 |
-| `g_cpu0_audio_hello_received` | 必須capabilityを持つHELLOの成立 |
-| `g_cpu0_audio_frame_count` | CRC/format検証を通過したframe数 |
-| `g_cpu0_audio_crc_error_count` | CRC不一致frame数 |
-| `g_cpu0_audio_format_error_count` | length/version/format異常数 |
-| `g_cpu0_audio_sequence_drop_count` | 同値または逆行sequenceの破棄数 |
-| `g_cpu0_audio_observation_age_ms` | 最新音響観測からの経過時間 |
-| `g_cpu0_audio_observation` | 最新DoA、level、peak、VAD、status、flags |
-| `g_cpu0_audio_last_error` | 最後のFSP USB error |
+| `g_task_think_state` | WAIT_LINK、LISTEN、STEER_PREP、MOVE_STEP、SETTLE、COOLDOWN、FAULT |
+| `g_task_think_cycle_count` | 思考タスクの周期実行回数 |
+| `g_task_think_observation_sequence` | 思考で最後に使用した音響観測sequence |
+| `g_task_think_observation_watchdog_ms` | `task_think`で同じ観測sequenceが続いた時間。600 msでlink無効、未成立時は`UINT32_MAX` |
+| `g_task_think_fault_flags` | CPU0でラッチした全fault bit |
+| `g_task_command_sequence` | 最終IPC sequence |
+| `g_task_command_send_count` | 正常にcommitした指令数 |
+| `g_task_command_last_error` | 最後のIPC FSP error |
+| `g_task_acoustic_link_usb_configured` | HCDC deviceの列挙状態 |
+| `g_task_acoustic_link_hello_received` | 必須capabilityを持つHELLOの成立 |
+| `g_task_acoustic_link_frame_count` | CRC/format検証を通過したframe数 |
+| `g_task_acoustic_link_crc_error_count` | CRC不一致frame数 |
+| `g_task_acoustic_link_format_error_count` | length/version/format異常数 |
+| `g_task_acoustic_link_sequence_drop_count` | 同値または逆行sequenceの破棄数 |
+| `g_task_acoustic_link_observation_age_ms` | 最新音響観測からの経過時間 |
+| `g_task_acoustic_link_observation` | 最新DoA、level、peak、VAD、status、flags |
+| `g_task_acoustic_link_last_error` | 最後のFSP USB error |
 
 ### CPU1
 
@@ -551,23 +552,23 @@ e² studioではCPU0/CPU1 projectをRefreshし、Generate Project Content、Clea
 | `g_servo_center_trim_us[0..3]` | 各輪の原点補正 |
 | `g_drive_left_duty_permille` | 左モーターの現在ランプ値 |
 | `g_drive_right_duty_permille` | 右モーターの現在ランプ値 |
-| `g_actuator_fault_flags` | timeout、estop、制限、driver異常 |
-| `g_actuator_last_error` | 最後のFSP error |
-| `g_jga25_left_encoder_count` / `g_jga25_right_encoder_count` | 左右代表モーターの4逓倍累積値 |
-| `g_jga25_left_rpm_x10` / `g_jga25_right_rpm_x10` | 左右代表モーター推定RPMの10倍（100 ms更新） |
+| `g_actuator_service_fault_flags` | timeout、estop、制限、driver異常 |
+| `g_actuator_service_last_error` | 最後のFSP error |
+| `g_encoder_left_encoder_count` / `g_encoder_right_encoder_count` | 左右代表モーターの4逓倍累積値 |
+| `g_encoder_left_rpm_x10` / `g_encoder_right_rpm_x10` | 左右代表モーター推定RPMの10倍（100 ms更新） |
 
 ## 13. 変更時の参照先
 
 | 変更内容 | 主に変更する場所 | 併せて確認する場所 |
 |---|---|---|
-| 音量閾値・DoA校正・step時間 | CPU0 `cpu0_config.h` | `sound_follow_controller.c`、実環境測定 |
-| 音源追従状態遷移 | CPU0 `sound_follow_controller.c` | `tk_think.c`、`rover_motion_target_t` |
-| USB音響protocol | `firmware/common/acoustic_protocol.h/.c` | ESP32S3、`tk_audio.c`、versionを同時更新 |
+| 音量閾値・DoA校正・step時間 | CPU0 `config/{task,control,sensor,ipc,pin}_config.h` | `sound_follow_controller.c`、実環境測定 |
+| 音源追従状態遷移 | CPU0 `sound_follow_controller.c` | `task_think.c`、`rover_motion_target_t` |
+| USB音響protocol | `firmware/common/acoustic_protocol.h/.c` | ESP32S3、`task_acoustic_link.c`、versionを同時更新 |
 | XVF I2C/I2S取得 | ESP32S3 `xvf3800_control.c`、`audio_capture.c` | XVF I2S firmware、DoA/VAD実測 |
 | USB host設定・J7 | CPU0 FSP、Solution Pins | HCDC/IP1/HS、P408/PD07、CPU1は変更しない |
-| 指令周期・期限監視 | CPU0 `tk_command.c`、`cpu0_config.h` | CPU1 timeout |
+| 指令周期・期限監視 | CPU0 `task_command.c`、`config/{task,control,sensor,ipc,pin}_config.h` | CPU1 timeout |
 | IPC項目追加 | `common/ipc_message.h` | client/server、両CPUを同時更新 |
-| サーボ原点・方向 | CPU1 `cpu1_config.h` | `g_servo_pulse_us`を実測 |
+| サーボ原点・方向 | CPU1 `config/{task,actuator,drive,servo,pin}_config.h` | `g_servo_pulse_us`を実測 |
 | サーボPWMピン | Solution Pins、CPU1 GPT instance | CPU0 `pin_data.c`、配線、SW4 |
-| モーターPWM・enable | Solution Pins、CPU1 GPT/GPIO | `dc_motor.c`、BTS7960配線 |
-| encoder確認・RPM換算 | CPU1 IRQ・Solution Pins・`cpu1_config.h` | 4入力の配線、信号電圧、実測counts/rev |
+| モーターPWM・enable | Solution Pins、CPU1 GPT/GPIO | `drive_service.c / bts7960.c`、BTS7960配線 |
+| encoder確認・RPM換算 | CPU1 IRQ・Solution Pins・`config/{task,actuator,drive,servo,pin}_config.h` | 4入力の配線、信号電圧、実測counts/rev |

@@ -52,7 +52,6 @@
             overflow: hidden;
         }
 
-        /* サイドバー */
         .sidebar {
             width: 260px;
             display: flex;
@@ -75,7 +74,6 @@
         .val-error { color: var(--error); }
         .val-blue { color: #2196f3; }
 
-        /* 中央ペイン & タブ */
         .content-pane {
             flex: 1;
             display: flex;
@@ -94,7 +92,6 @@
         .tab-content { display: none; flex: 1; overflow: hidden; padding: 10px; }
         .tab-content.active { display: flex; flex-direction: column; }
 
-        /* ダッシュボードタブ内のグラフエリア */
         .charts-area {
             flex: 1;
             display: flex;
@@ -131,7 +128,6 @@
         .map-container { flex: 1; position: relative; min-height: 0; }
         .map-canvas { display: block; width: 100%; height: 100%; }
 
-        /* テレメトリログタブ (Table) */
         .table-container { flex: 1; overflow: auto; background: var(--panel-bg); border-radius: 6px; }
         .table-container::-webkit-scrollbar { width: 8px; height: 8px; }
         .table-container::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
@@ -141,7 +137,6 @@
         .data-table tr:hover { background-color: rgba(255,255,255,0.05); }
         .data-table td { color: #ccc; }
 
-        /* フォーカスモード */
         .charts-area.focus-mode { overflow: hidden; }
         .charts-area.focus-mode .chart-box { display: none; }
         .charts-area.focus-mode .chart-box.focused {
@@ -164,7 +159,6 @@
     </div>
 
     <div class="main-container">
-        <!-- 整理されたサイドバー -->
         <div class="sidebar">
             <div class="panel">
                 <h3 class="panel-title">System & Link</h3>
@@ -217,7 +211,6 @@
 
             <div class="tab-content active" id="tab-dashboard">
                 <div class="charts-area">
-                    <!-- 軌道・地図 (Gyro補正版) -->
                     <div class="chart-box" id="box-trajectory" style="width: 100%;">
                         <button class="btn-close">Close</button>
                         <div class="chart-controls" style="right: 15px; left: auto;">
@@ -231,7 +224,6 @@
                         </div>
                     </div>
 
-                    <!-- 統合レーダーマップ (ToF + Steering + DoA) -->
                     <div class="chart-box" id="box-radar">
                         <button class="btn-close">Close</button>
                         <div class="map-container">
@@ -259,10 +251,15 @@
                         <button class="btn-close">Close</button>
                         <div class="chart-container"><canvas id="audioChart"></canvas></div>
                     </div>
+                    
+                    <!-- 追加: ToF距離とGyro Zの時系列グラフ -->
+                    <div class="chart-box" id="box-sensor">
+                        <button class="btn-close">Close</button>
+                        <div class="chart-container"><canvas id="sensorChart"></canvas></div>
+                    </div>
                 </div>
             </div>
 
-            <!-- JSON Table Log -->
             <div class="tab-content" id="tab-telemetry">
                 <div class="table-container">
                     <table id="telemetry-table" class="data-table">
@@ -275,9 +272,6 @@
     </div>
 
     <script>
-        // =====================================
-        // UI タブ制御
-        // =====================================
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -288,9 +282,6 @@
             });
         });
 
-        // =====================================
-        // 定数 & ユーティリティ
-        // =====================================
         const THINK_STATES = { 0: "WAIT_LINK", 1: "LISTEN", 2: "STEER_PREP", 3: "MOVE_STEP", 4: "SETTLE", 5: "COOLDOWN", 6: "FAULT" };
         function getThinkStateClass(c) {
             switch(c) { case 0: case 5: return 'val-warn'; case 1: return 'val-blue'; case 2: case 3: case 4: return 'val-ok'; case 6: return 'val-error'; default: return ''; }
@@ -340,17 +331,39 @@
             { label: 'Peak', borderColor: '#e91e63', data: Array(MAX_POINTS).fill(-100) }
         ]);
 
-        const SENSOR_BEARINGS_DEG = [-45, 0, 45];
+        // 追加: 障害物回避と旋回の相関を可視化するToF & Gyroグラフ
+        const sensorChart = new Chart(document.getElementById('sensorChart').getContext('2d'), {
+            type: 'line',
+            data: { labels: Array(MAX_POINTS).fill(''),
+                datasets: [
+                    { label: 'ToF L', yAxisID: 'yTof', borderColor: '#ff9800', data: Array(MAX_POINTS).fill(0) },
+                    { label: 'ToF C', yAxisID: 'yTof', borderColor: '#4caf50', data: Array(MAX_POINTS).fill(0) },
+                    { label: 'ToF R', yAxisID: 'yTof', borderColor: '#2196f3', data: Array(MAX_POINTS).fill(0) },
+                    { label: 'Gyro Z', yAxisID: 'yGyro', borderColor: '#9c27b0', borderDash: [5, 5], data: Array(MAX_POINTS).fill(0) }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false, animation: false,
+                plugins: { title: { display: true, text: 'ToF Distance & Gyro Z', color: '#e0e0e0', font: { size: 14 } }, legend: { labels: { color: '#e0e0e0', boxWidth: 12 } } },
+                scales: {
+                    x: { display: false },
+                    yTof: { type: 'linear', display: true, position: 'left', grid: { color: '#333' }, title: { display: true, text: 'Distance (mm)', color: '#888' }, min: 0, max: 2000 },
+                    yGyro: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Gyro Z (dps)', color: '#888' } }
+                },
+                elements: { point: { radius: 0 }, line: { tension: 0.2, borderWidth: 2 } }
+            }
+        });
+
+        const TOF_BEARINGS_DEG = [45, 0, -45];
         const MAP_DEFAULT_RANGE_MM = 2000;
         let latestSensors = null;
-        let latestSteer = 0; let latestAudioDoa = 0;
+        let latestSteer = 0; 
+        let latestAudioDoa = 0;
+        let latestAudioLevel = -100; // 追加: Audio Levelの保持
 
         function sensorValue(values, index) { return Number.isFinite(values?.[index]) ? values[index] : null; }
         function isSensorValid(sensors, index) { return ((Number(sensors?.valid_flags) || 0) & (1 << index)) !== 0; }
 
-        // =====================================
-        // 統合レーダーマップ
-        // =====================================
         function drawIntegratedRadar() {
             const canvas = document.getElementById('radarCanvas');
             if(!canvas) return;
@@ -379,7 +392,7 @@
             ctx.fillText('90°', ox - r - 25, oy); ctx.fillText('-90°', ox + r + 25, oy);
 
             if (latestSensors) {
-                SENSOR_BEARINGS_DEG.forEach((deg, i) => {
+                TOF_BEARINGS_DEG.forEach((deg, i) => {
                     if (!isSensorValid(latestSensors, i)) return;
                     const dist = sensorValue(latestSensors.tof_mm, i);
                     if (dist === null || dist <= 0) return;
@@ -396,9 +409,11 @@
                 });
             }
 
-            function drawArrow(deg, color, isDashed) {
+            // 変更: 矢印の長さを lenFactor で動的にスケール可能にする
+            function drawArrow(deg, color, isDashed, lenFactor = 1.0) {
                 const angle = (-deg - 90) * Math.PI / 180;
-                const ex = ox + Math.cos(angle) * r, ey = oy + Math.sin(angle) * r;
+                const arrowR = r * lenFactor;
+                const ex = ox + Math.cos(angle) * arrowR, ey = oy + Math.sin(angle) * arrowR;
                 ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.setLineDash(isDashed ? [5, 5] : []);
                 ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke(); ctx.setLineDash([]);
 
@@ -409,14 +424,16 @@
                 ctx.fill();
             }
 
-            drawArrow(latestAudioDoa, '#ff9800', true);
-            drawArrow(latestSteer, '#4caf50', false);
+            // -100dBFSを最小(0.1)、0dBFSを最大(1.0)としてマッピング
+            let audioLenFactor = (latestAudioLevel + 100) / 100;
+            audioLenFactor = Math.max(0.1, Math.min(1.0, audioLenFactor));
+
+            drawArrow(latestAudioDoa, '#ff9800', true, audioLenFactor);
+            drawArrow(latestSteer, '#4caf50', false, 1.0);
+            
             ctx.fillStyle = '#4caf50'; ctx.beginPath(); ctx.arc(ox, oy, 4, 0, 2 * Math.PI); ctx.fill();
         }
 
-        // =====================================
-        // グローバル軌道＆マップ (IMU Sensor Fusion + Proximity Filter)
-        // =====================================
         let odomX = 0, odomY = 0, odomTheta = Math.PI / 2;
         let lastEspMs = null;
         const pathHistory = []; const obstaclePoints = [];
@@ -461,16 +478,15 @@
             }
 
             if (d.sensors && Number(d.sensors.valid_flags) > 0) {
-                SENSOR_BEARINGS_DEG.forEach((bearingDeg, index) => {
+                TOF_BEARINGS_DEG.forEach((bearingDeg, index) => {
                     if (!isSensorValid(d.sensors, index)) return;
                     const distance = sensorValue(d.sensors.tof_mm, index);
 
                     if (distance !== null && distance > 50 && distance < 2000) {
-                        const angle = odomTheta + (-bearingDeg * Math.PI / 180);
+                        const angle = odomTheta + (bearingDeg * Math.PI / 180);
                         const targetX = odomX + distance * Math.cos(angle);
                         const targetY = odomY + distance * Math.sin(angle);
 
-                        // 100mm空間閾値チェック (接近による引き伸ばし防止)
                         let isDuplicate = false;
                         for (let i = 0; i < obstaclePoints.length; i++) {
                             if (Math.hypot(obstaclePoints[i].x - targetX, obstaclePoints[i].y - targetY) < 100) {
@@ -534,9 +550,6 @@
             ctx.fill();
         }
 
-        // =====================================
-        // JSON テーブルロガー
-        // =====================================
         let logColumns = ['esp_ms'];
         const MAX_LOG_ROWS = 100;
         let logCounter = 0;
@@ -560,13 +573,12 @@
 
         function addTableRow(d) {
             logCounter++;
-            if (logCounter % 5 !== 0) return; // UI描画負荷軽減のために間引く
+            if (logCounter % 5 !== 0) return;
 
             const flat = flattenObject(d);
             const thead = document.getElementById('log-thead-tr');
             const tbody = document.getElementById('log-tbody');
 
-            // 動的カラム追加
             Object.keys(flat).forEach(k => {
                 if (!logColumns.includes(k) && k !== 'esp_ms') {
                     logColumns.push(k);
@@ -576,7 +588,6 @@
                 }
             });
 
-            // 行生成
             const tr = document.createElement('tr');
             logColumns.forEach(col => {
                 const td = document.createElement('td');
@@ -593,9 +604,6 @@
             container.scrollTop = container.scrollHeight;
         }
 
-        // =====================================
-        // グラフUI インタラクション & WebSocket
-        // =====================================
         const chartsArea = document.querySelector('.charts-area');
         document.querySelectorAll('.chart-box').forEach(box => {
             box.addEventListener('click', function(e) {
@@ -658,7 +666,6 @@
         ws.onmessage = (event) => {
             const d = JSON.parse(event.data);
 
-            // ログテーブルへの出力
             addTableRow(d);
 
             const leftDuty = (d.actuator?.left_duty_permille != null) ? (d.actuator.left_duty_permille / 10) : 0;
@@ -670,7 +677,15 @@
                 leftDuty, rightDuty
             ]);
 
-            updateChartData(audioChart, [(d.audio?.level_dbfs_x100||0)/100, (d.audio?.peak_dbfs_x100||0)/100]);
+            latestAudioLevel = (d.audio?.level_dbfs_x100 || -10000) / 100;
+            updateChartData(audioChart, [latestAudioLevel, (d.audio?.peak_dbfs_x100||0)/100]);
+            
+            // 追加: ToFとGyroの時系列データを更新
+            const tofL = sensorValue(d.sensors?.tof_mm, 0) || 0;
+            const tofC = sensorValue(d.sensors?.tof_mm, 1) || 0;
+            const tofR = sensorValue(d.sensors?.tof_mm, 2) || 0;
+            const gyroZ = d.sensors?.gyro_dps_x10 ? (d.sensors.gyro_dps_x10[2] / 10.0) : 0;
+            updateChartData(sensorChart, [tofL, tofC, tofR, gyroZ]);
 
             setVal('val_esp_ms', `${d.esp_ms} ms`);
             setVal('val_cpu_valid', d.cpu_valid ? 'TRUE' : 'FALSE', d.cpu_valid ? 'val-ok' : 'val-error');

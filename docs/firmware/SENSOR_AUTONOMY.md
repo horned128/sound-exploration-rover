@@ -17,11 +17,11 @@ flowchart LR
     C --> HUB
     R --> HUB
     BMI --> HUB
-    HUB --> TASK["tk_sensor / 50 ms<br/>mutex保護snapshot"]
-    TASK --> THINK["tk_think / 100 ms<br/>障害物回避ルール"]
-    THINK --> CMD["tk_command / 50 ms"]
-    CMD -->|IPC| CPU1["CPU1 actuator_app<br/>サーボ・左右モーター"]
-    TASK --> TEL["tk_audio診断テレメトリ"]
+    HUB --> TASK["task_sensor / 50 ms<br/>mutex保護snapshot"]
+    TASK --> THINK["task_think / 100 ms<br/>障害物回避ルール"]
+    THINK --> CMD["task_command / 50 ms"]
+    CMD -->|IPC| CPU1["CPU1 actuator_service<br/>サーボ・左右モーター"]
+    TASK --> TEL["task_acoustic_link診断テレメトリ"]
     TEL --> ESP["ESP32 Wi-Fi UDP JSON"]
 ```
 
@@ -114,13 +114,13 @@ P511/P512は既にSolutionとCPU0のPin ConfigurationでIIC1として選択さ�
 3. Generate Project Contentを実行する。ra_gen/hal_data、ra/fsp/src/r_iic_master、割込み設定はFSPに生成させる。生成コードを直接編集しない。
 4. I2C単体確認中はCPU0_AUTONOMY_MODE_SOUND_FOLLOWのままにし、CPU0をClean Buildする。
 
-CPU0_SENSOR_I2C_ENABLEDの初期値は1Uです。センサー未接続・I2C通信失敗時は、`tk_sensor`が無効状態を公開して1秒ごとに再初期化を試みます。SENSOR_RULEモードではこの状態を安全停止として扱うため、未接続のまま走り出しません。
+CPU0_SENSOR_I2C_ENABLEDの初期値は1Uです。センサー未接続・I2C通信失敗時は、`task_sensor`が無効状態を公開して1秒ごとに再初期化を試みます。SENSOR_RULEモードではこの状態を安全停止として扱うため、未接続のまま走り出しません。
 
 `hal_data.h`に`r_iic_master.h`が追加されたのに`ra/fsp/src/r_iic_master/`が存在しない場合は、CPU0プロジェクトをRefreshし、`configuration.xml`を一度閉じて開き直してから再度Generate Project Contentを実行します。`raComponentSelection`に`r_iic_master`を登録済みなので、正常ならsupport filesも展開されます。support filesが現れた後も、CPU0をRefreshしてClean Buildを行い、`Debug`のビルド対象へ`ra/fsp/src/r_iic_master/r_iic_master.c`が追加されたことを確認します。`ra_gen`や`Debug`のmakefileを手編集しません。
 
 ## 4. 取得状態と安全条件
 
-tk_sensorは50 ms周期で全3距離と6軸raw値を更新します。VL53L1XはGPIO statusのData Readyを最大100 ms待ってから読出すため、準備前の値を通信異常として再初期化しません。ToF値は直近値へ3:1で平滑化し、BMI270は4 g / 500 dps / 100 Hz設定のraw値をmg、0.1 dpsへ換算します。
+task_sensorは50 ms周期で全3距離と6軸raw値を更新します。VL53L1XはGPIO statusのData Readyを最大100 ms待ってから読出すため、準備前の値を通信異常として再初期化しません。ToF値は直近値へ3:1で平滑化し、BMI270は4 g / 500 dps / 100 Hz設定のraw値をmg、0.1 dpsへ換算します。
 
 | valid_flags bit | 意味 |
 |---:|---|
@@ -130,9 +130,9 @@ tk_sensorは50 ms周期で全3距離と6軸raw値を更新します。VL53L1Xは
 | 0x08 | BMI270有効 |
 | 0x0F | 走行判断に必要な全センサー有効 |
 
-I2C open失敗、TCA応答なし、ToFモデルID不一致、範囲status異常、BMI270応答なし、または200 ms以上更新されない場合、tk_thinkはSENSOR_SAFE_STOPを選択してモーター出力を止めます。センサータスクは1秒ごとに初期化を再試行するため、配線修正や再接続後はCPU0全体をリセットせず回復できます。
+I2C open失敗、TCA応答なし、ToFモデルID不一致、範囲status異常、BMI270応答なし、または200 ms以上更新されない場合、task_thinkはSENSOR_SAFE_STOPを選択してモーター出力を止めます。センサータスクは1秒ごとに初期化を再試行するため、配線修正や再接続後はCPU0全体をリセットせず回復できます。
 
-IMUでは次を超えるとSENSOR_IMU_STOPにします。値は[cpu0_config.h](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/cpu0_config.h)へ集約しています。
+IMUでは次を超えるとSENSOR_IMU_STOPにします。値は[config/{task,control,sensor,ipc,pin}_config.h](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/config/)へ集約しています。
 
 - X/Y accelerationの絶対値: 700 mg（大きな傾き）
 - 3軸acceleration絶対値和: 2400 mg（衝撃）
@@ -151,7 +151,7 @@ IMUでは次を超えるとSENSOR_IMU_STOPにします。値は[cpu0_config.h](.
 | LEFT/CENTER/RIGHTが全て ≤ 350 mm | 停止 |
 | ToF/IMU異常・stale・CPU0 fault | 安全停止 |
 
-正の操舵角は車体として右、負は左です。サーボ個別の物理符号は既存のCPU0_STEERING_SERVO_OUTPUT_SIGNとCPU1の校正値に従います。速度・距離・操舵は全てcpu0_config.hの定数で調整します。
+正の操舵角は車体として右、負は左です。サーボ個別の物理符号は既存のCPU0_STEERING_SERVO_OUTPUT_SIGNとCPU1の校正値に従います。速度・距離・操舵は全てconfig/{task,control,sensor,ipc,pin}_config.hの定数で調整します。
 
 ## 6. デバッグと段階確認
 
@@ -182,7 +182,7 @@ Live Watchでは、次を追加します。
 | g_cpu0_sensor_error_flags / g_cpu0_sensor_last_error | I2C・デバイス異常の切り分け |
 | g_cpu0_sensor_age_ms / g_cpu0_sensor_update_count | 50 ms更新とstale判定 |
 | g_cpu0_sensor_rule | 現在のルール |
-| g_cpu0_think_left_rpm / g_cpu0_think_right_rpm | IPCへ渡す左右RPM |
+| g_task_think_left_rpm / g_task_think_right_rpm | IPCへ渡す左右RPM |
 
 確認順序は以下です。
 

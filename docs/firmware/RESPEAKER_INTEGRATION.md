@@ -54,9 +54,9 @@ flowchart LR
 
 - 共有protocol: [`acoustic_protocol.h`](../../firmware/common/acoustic_protocol.h)、[`acoustic_protocol.c`](../../firmware/common/acoustic_protocol.c)
 - ESP32S3 frontend: [`acoustic_frontend.c`](../../firmware/esp32s3/src/acoustic_frontend.c)、[`xvf3800_control.c`](../../firmware/esp32s3/src/xvf3800_control.c)、[`audio_capture.c`](../../firmware/esp32s3/src/audio_capture.c)、[`usb_link.c`](../../firmware/esp32s3/src/usb_link.c)、[`wifi_telemetry.c`](../../firmware/esp32s3/src/wifi_telemetry.c)
-- CPU0 USB受信: [`tk_audio.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_audio.c)
-- CPU0判断: [`tk_think.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_think.c)
-- CPU0→CPU1指令: [`tk_command.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/app/tasks/tk_command.c)
+- CPU0 USB CDCリンク: [`task_acoustic_link.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/task_acoustic_link.c)
+- CPU0判断: [`task_think.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/task_think.c)
+- CPU0→CPU1指令: [`task_command.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/task_command.c)
 
 ## 3. ReSpeaker内部インターフェース
 
@@ -93,7 +93,7 @@ EK-RA8P1側はJ7をUSB High Speed hostとして使う。J7のhost modeではPD07
 | FSP class | HCDC ACM |
 | FSP model / basic instance | `g_hcdc0` / `g_basic0` |
 | transfer / hub / multi CDC | DMAなし / hubなし / 無効 |
-| callback / context | `NULL` / `NULL`。`tk_audio`が`eventGet()`をpoll |
+| callback / context | `NULL` / `NULL`。`task_acoustic_link`が`eventGet()`をpoll |
 | USBHS IRQ priority | main、D0FIFO、D1FIFOとも12 |
 | VBUS control | PD07 / `USBHS_VBUSEN`、host時High |
 | VBUS sense | P408 / `USBHS_VBUS` |
@@ -101,7 +101,7 @@ EK-RA8P1側はJ7をUSB High Speed hostとして使う。J7のhost modeではPD07
 
 J11のUSB Full Speedや`USB_FS_VBUSEN`はこの接続には使わない。USB設定はhost処理を担当するCPU0だけに置き、CPU1へ重複生成しない。物理ピンは従来どおりSolutionを正として一元管理し、Generate Project Content後もCPU1の`pin_data.c`は0ピンを維持する。
 
-FSPの`BSP_CFG_RTOS`は0のままHCDC ACM hostを使用し、FSPとは独立にμT-Kernelを起動する。`tk_audio`はμT-Kernel task contextからUSB eventをpollし、USB callback/IRQ contextから`tk_loc_mtx()`などのtask APIを直接呼ばない。FSP 6.4で生成したUSB source、config、`hal_data`、`vector_data`はCPU0 projectへ反映し、CPU1とSolutionのpin ownershipは変更しない。
+FSPの`BSP_CFG_RTOS`は0のままHCDC ACM hostを使用し、FSPとは独立にμT-Kernelを起動する。`task_acoustic_link`はμT-Kernel task contextからUSB eventをpollし、USB callback/IRQ contextから`tk_loc_mtx()`などのtask APIを直接呼ばない。FSP 6.4で生成したUSB source、config、`hal_data`、`vector_data`はCPU0 projectへ反映し、CPU1とSolutionのpin ownershipは変更しない。
 
 ### 4.2 電源条件
 
@@ -194,12 +194,12 @@ CPU0 parserは次を満たさないframeを走行判断へ渡さない。
 - magic、対応version、message type、payload length、CRCが正しい。
 - 走行判断へcommitする`doa_deg`が0～359であり、無効値を古いDoAの更新として扱わない。
 - sequenceが単調に進む。ESP32S3の`boot_id`変更は新しい起動としてsequence判定を初期化し、再起動前のobservation/healthを即座に無効化して新しい観測を待つ。`uptime_ms`は診断情報として保持する。
-- 最新の有効な`ACOUSTIC_OBSERVATION`から600 ms以内で、`tk_think`側でも観測専用sequenceが600 ms未満に更新されている。
+- 最新の有効な`ACOUSTIC_OBSERVATION`から600 ms以内で、`task_think`側でも観測専用sequenceが600 ms未満に更新されている。
 - byte列が壊れたときはmagicを再探索し、壊れたpayloadを部分利用しない。
 
 ### 5.2 CPU0診断返送
 
-基本の`ROVER_TELEMETRY`は従来互換の64 byte payloadを維持し、CPU0が判断・送信した状態を返す。内容はUSB/HELLO/観測の有効状態、DoA・level・peak・VAD・XVF/audio flags、観測sequenceとage、`tk_think`状態・link判定・fault・操舵角、左右目標RPM、FR/FL/RR/RL角度、enable/非常停止、指令age/sequence/IPC結果である。
+基本の`ROVER_TELEMETRY`は従来互換の64 byte payloadを維持し、CPU0が判断・送信した状態を返す。内容はUSB/HELLO/観測の有効状態、DoA・level・peak・VAD・XVF/audio flags、観測sequenceとage、`task_think`状態・link判定・fault・操舵角、左右目標RPM、FR/FL/RR/RL角度、enable/非常停止、指令age/sequence/IPC結果である。
 
 CPU1から返された実出力は、24 byteの`ACTUATOR_TELEMETRY`追加フレームで送る。内容はCPU1状態のvalid/age/fault/sequence、適用済み指令sequence、左右実デューティ、左右encoder RPM×10である。旧ESP32S3 firmwareは未知の追加フレームだけを無視して基本診断を継続でき、新ESP32S3 firmwareは両フレームを統合してschema 2のUDP JSONを生成する。CPU0の送信はいずれも非同期Bulk OUTとし、Bulk INの音響受信を停止して完了待ちしない。
 
@@ -348,7 +348,7 @@ CPU0/CPU1のビルドではprojectをRefreshし、CPU0、CPU1の順にGenerate P
 1. motor・servo電源を切ったまま、J7からXIAO ESP32S3側USB-Cへ接続する。
 2. J7 VBUS、XIAO起動、USB enumerationを確認する。
 3. CPU0でCDC初期化が`SET_LINE_CODING → SET_CONTROL_LINE_STATE → GET_LINE_CODING → READY`と進み、`HELLO`受信、protocol version、sequence、CRC error countを確認する。
-4. 50 ms周期の`ACOUSTIC_OBSERVATION`と1 s周期の`HEALTH`が継続し、`g_cpu0_think_observation_sequence`が更新されるたびに`g_cpu0_think_observation_watchdog_ms`が0へ戻ることを確認する。
+4. 50 ms周期の`ACOUSTIC_OBSERVATION`と1 s周期の`HEALTH`が継続し、`g_task_think_observation_sequence`が更新されるたびに`g_task_think_observation_watchdog_ms`が0へ戻ることを確認する。
 5. USBを抜くか観測更新を止め、独立watchdogが600 msへ達するまでにCPU0の状態が`WAIT_LINK`へ戻り、停止目標になることを確認する。
 
 ### 8.3 静止音響試験
@@ -377,7 +377,7 @@ CPU0/CPU1のビルドではprojectをRefreshし、CPU0、CPU1の順にGenerate P
 | USB mounted/configured | XIAOをHCDC deviceとして列挙 | motor停止、`WAIT_LINK` |
 | protocol version | CPU0とESP32S3が一致 | frame破棄、走行禁止 |
 | sequence | HELLO/観測/healthを含む送信frameごとに単調増加 | 重複・逆行を破棄してcountする。欠落は観測鮮度timeoutで検出 |
-| observation freshness | 受信時刻と`tk_think`のsequence watchdogがともに600 msの期限内 | motor停止、`WAIT_LINK` |
+| observation freshness | 受信時刻と`task_think`のsequence watchdogがともに600 msの期限内 | motor停止、`WAIT_LINK` |
 | CRC error | 通常0 | frame破棄。正常観測が600 ms途絶れれば`WAIT_LINK` |
 | frontend XVF status | `READY` | starting/errorでは走行開始禁止 |
 | audio flags | bit 1 I2C error、bit 2 mute、bit 3 I2S staleが0 | これらは走行開始禁止。bit 0の一時的overrunは記録し、累積値と頻度を点検 |
@@ -391,16 +391,16 @@ Live Watchでは次の順序で確認する。
 
 | 変数 | 正常値・変化 |
 |---|---|
-| `g_cpu0_audio_usb_state` | 1 `WAIT_DEVICE` → 2 → 3 → 4 → 5 `READY` |
-| `g_cpu0_audio_usb_configured` | J7で列挙後に`true` |
-| `g_cpu0_audio_device_address` | 列挙後に1以上 |
-| `g_cpu0_audio_event_count` | USB eventごとに増加 |
-| `g_cpu0_audio_transfer_busy_count` | 通常は低頻度。増え続ける場合はcontrol/Bulk転送停滞 |
-| `g_cpu0_audio_hello_received` | 周期HELLO受信後に`true` |
-| `g_cpu0_audio_frame_count` | 約20 Hz以上で増加 |
-| `g_cpu0_audio_observation.level_dbfs_x100` | 音を大きくすると0に近づく |
-| `g_cpu0_audio_observation.doa_deg` | 有効時0～359 |
-| `g_cpu0_think_state` | `WAIT_LINK` → `LISTEN` → `STEER_PREP` → `MOVE_STEP` |
+| `g_task_acoustic_link_usb_state` | 1 `WAIT_DEVICE` → 2 → 3 → 4 → 5 `READY` |
+| `g_task_acoustic_link_usb_configured` | J7で列挙後に`true` |
+| `g_task_acoustic_link_device_address` | 列挙後に1以上 |
+| `g_task_acoustic_link_event_count` | USB eventごとに増加 |
+| `g_task_acoustic_link_transfer_busy_count` | 通常は低頻度。増え続ける場合はcontrol/Bulk転送停滞 |
+| `g_task_acoustic_link_hello_received` | 周期HELLO受信後に`true` |
+| `g_task_acoustic_link_frame_count` | 約20 Hz以上で増加 |
+| `g_task_acoustic_link_observation.level_dbfs_x100` | 音を大きくすると0に近づく |
+| `g_task_acoustic_link_observation.doa_deg` | 有効時0～359 |
+| `g_task_think_state` | `WAIT_LINK` → `LISTEN` → `STEER_PREP` → `MOVE_STEP` |
 
 ## 10. 参照資料
 

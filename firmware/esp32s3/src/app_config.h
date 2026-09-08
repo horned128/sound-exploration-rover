@@ -31,7 +31,7 @@
 /* 接続先PCと同じLANの値を設定する。空文字の間はWi-Fiを開始しない。 */
 #define APP_WIFI_SSID                      "Fight Club"
 #define APP_WIFI_PASSWORD                  "soap1999"
-#define APP_UDP_DESTINATION_IPV4           "192.168.0.165"
+#define APP_UDP_DESTINATION_IPV4           "192.168.0.232"
 #define APP_UDP_DESTINATION_PORT           (5005U)
 #define APP_UDP_TELEMETRY_PERIOD_MS        (250U)
 #define APP_TELEMETRY_USB_POLL_MS          (20U)

@@ -1,4 +1,4 @@
-/* CPU1-specific μT-Kernel machine definition for EK-RA8P1. */
+/* EK-RA8P1用のCPU1固有μT-Kernelマシン定義。 */
 #ifndef _MTKBSP_SYS_SYSDEPEND_MACHINE_H_
 #define _MTKBSP_SYS_SYSDEPEND_MACHINE_H_
 
