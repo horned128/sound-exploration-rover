@@ -67,6 +67,7 @@
 									<listOptionValue builtIn="false" value="_RAFSP_EK_RA8P1_"/>
 									<listOptionValue builtIn="false" value="_RA_CORE=CPU1"/>
 									<listOptionValue builtIn="false" value="_RA_ORDINAL=2"/>
+									<listOptionValue builtIn="false" value="_RA_PRIMARY_CORE=CPU0"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnuarmeclipse.managedbuild.cross.option.assembler.include.paths.876309781" name="Include paths (-I)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.assembler.include.paths" valueType="includePath">
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ra_cfg/fsp_cfg/bsp}&quot;"/>
@@ -96,6 +97,7 @@
 									<listOptionValue builtIn="false" value="_RAFSP_EK_RA8P1_"/>
 									<listOptionValue builtIn="false" value="_RA_CORE=CPU1"/>
 									<listOptionValue builtIn="false" value="_RA_ORDINAL=2"/>
+									<listOptionValue builtIn="false" value="_RA_PRIMARY_CORE=CPU0"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnuarmeclipse.managedbuild.cross.option.c.compiler.include.paths.1024457139" name="Include paths (-I)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.c.compiler.include.paths" useByScannerDiscovery="false" valueType="includePath">
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ra_cfg/fsp_cfg/bsp}&quot;"/>
@@ -296,6 +298,7 @@
 									<listOptionValue builtIn="false" value="_RAFSP_EK_RA8P1_"/>
 									<listOptionValue builtIn="false" value="_RA_CORE=CPU1"/>
 									<listOptionValue builtIn="false" value="_RA_ORDINAL=2"/>
+									<listOptionValue builtIn="false" value="_RA_PRIMARY_CORE=CPU0"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnuarmeclipse.managedbuild.cross.option.assembler.include.paths.766440718" name="Include paths (-I)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.assembler.include.paths" valueType="includePath">
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ra_cfg/fsp_cfg/bsp}&quot;"/>
@@ -325,6 +328,7 @@
 									<listOptionValue builtIn="false" value="_RAFSP_EK_RA8P1_"/>
 									<listOptionValue builtIn="false" value="_RA_CORE=CPU1"/>
 									<listOptionValue builtIn="false" value="_RA_ORDINAL=2"/>
+									<listOptionValue builtIn="false" value="_RA_PRIMARY_CORE=CPU0"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="ilg.gnuarmeclipse.managedbuild.cross.option.c.compiler.include.paths.362230904" name="Include paths (-I)" superClass="ilg.gnuarmeclipse.managedbuild.cross.option.c.compiler.include.paths" useByScannerDiscovery="false" valueType="includePath">
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/ra_cfg/fsp_cfg/bsp}&quot;"/>

@@ -67,6 +67,9 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPOSITORY_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RA_ROOT="$REPOSITORY_ROOT/firmware/ra8p1"
+SOLUTION_NAME="SoundExplorationRover"
+SOLUTION_DIR="$RA_ROOT/$SOLUTION_NAME"
+SOLUTION_BUNDLE="$SOLUTION_DIR/build/$SOLUTION_NAME.sbd"
 
 PROJECT_NAMES=()
 case "$TARGET" in
@@ -209,16 +212,45 @@ invoke_fast_build() {
 invoke_managed_build() {
     local project_name="$1"
     local e2_exec="$2"
+    local project_dir="$RA_ROOT/$project_name"
+    local project_file="$project_dir/.project"
     local headless_root="$REPOSITORY_ROOT/.vscode/.e2studio-headless"
-    local workspace="$headless_root/workspace"
-    local configuration="$headless_root/configuration"
+    local workspace="$headless_root/workspace-$project_name"
     local stdout_log="$headless_root/$project_name.stdout.log"
     local stderr_log="$headless_root/$project_name.stderr.log"
     local operation="-build"
     local pid exit_code=0 build_finished=0
     local deadline wait_index
 
-    mkdir -p "$workspace" "$configuration"
+    if [[ ! -f "$project_file" ]]; then
+        echo "Eclipse project descriptor is missing: $project_file" >&2
+        echo "Restore the .project file for $project_name before running the managed build." >&2
+        return 1
+    fi
+
+    if [[ ! -f "$SOLUTION_DIR/.project" ]]; then
+        echo "RA multicore solution project is missing: $SOLUTION_DIR/.project" >&2
+        return 1
+    fi
+
+    # RA multicore solution projects generate a solution Smart Bundle (.sbd) in
+    # the e2 studio GUI. CDT headless build cannot generate the solution project
+    # itself, but CPU0/CPU1 DDSC generation depends on this bundle.
+    if [[ ! -f "$SOLUTION_BUNDLE" ]]; then
+        echo "RA multicore solution Smart Bundle is missing:" >&2
+        echo "  $SOLUTION_BUNDLE" >&2
+        echo >&2
+        echo "Open the SoundExplorationRover solution in e2 studio GUI once so that" >&2
+        echo "build/SoundExplorationRover.sbd is generated, then run this task again." >&2
+        echo "For clean-clone/headless builds, keep that solution .sbd under version control." >&2
+        return 1
+    fi
+
+    # A failed Eclipse import can leave stale workspace metadata that points at a
+    # project whose .project descriptor can no longer be resolved. Regenerate
+    # always starts from a clean, project-specific headless workspace.
+    rm -rf "$workspace"
+    mkdir -p "$headless_root" "$workspace"
     : > "$stdout_log"
     : > "$stderr_log"
 
@@ -229,8 +261,8 @@ invoke_managed_build() {
     echo "Generating and building $project_name with e2 studio..."
     "$e2_exec" \
         -nosplash \
+        --launcher.suppressErrors \
         -consoleLog \
-        -configuration "$configuration" \
         -application org.eclipse.cdt.managedbuilder.core.headlessbuild \
         -data "$workspace" \
         -importAll "$RA_ROOT" \
@@ -286,6 +318,11 @@ invoke_managed_build() {
 
     if [[ $build_finished -eq 0 && $exit_code -ne 0 ]]; then
         echo "$project_name managed build failed with exit code $exit_code." >&2
+        local eclipse_log="$workspace/.metadata/.log"
+        if [[ -s "$eclipse_log" ]]; then
+            echo "--- e2 studio workspace log (tail) ---" >&2
+            tail -n 120 "$eclipse_log" >&2 || true
+        fi
         return 1
     fi
 
