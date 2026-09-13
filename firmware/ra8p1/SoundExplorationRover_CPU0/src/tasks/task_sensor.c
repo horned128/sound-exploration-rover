@@ -27,6 +27,9 @@ LOCAL T_CTSK const sensor_task_config = {
     .bufptr = NULL,
 };
 
+/* Live WatchからTRUEにすると取得だけを一時停止し、古いsnapshotの検出を試験できる。 */
+EXPORT volatile BOOL g_task_sensor_test_pause;              /**< 既定FALSE、更新停止試験専用 */
+
 LOCAL ID sensor_task_id;                                    /**< センサータスクID */
 LOCAL ID sensor_mutex_id;                                   /**< スナップショットmutex ID */
 LOCAL BOOL sensor_task_started;                             /**< センサータスク開始状態 */
@@ -153,6 +156,7 @@ LOCAL void task_sensor_snapshot_mark_stale(const sensor_snapshot_t * p_failure) 
  * @return CPU0異常コード
  * ================================================================= */
 EXPORT app_fault_t task_sensor_create(void) {
+    g_task_sensor_test_pause = FALSE;
     sensor_task_id = 0;
     sensor_mutex_id = 0;
     sensor_task_started = FALSE;
@@ -237,8 +241,8 @@ EXPORT void task_sensor_delete(void) {
  * @brief  最新センサースナップショットを取得
  * @param[out] p_snapshot 取得先
  * @return μT-Kernelエラーコード
- * @details タスクコンテキスト専用。公開側がコピー中の場合だけ待機し、
- *          テレメトリに初期値を送らないようにする。
+ * @details タスクコンテキスト専用。取得側がmutex保持中に停止しても思考を止めないよう、
+ *          ロック競合時は待たずにエラーを返す。呼出側は古い値で走行を継続しない。
  * ================================================================= */
 EXPORT ER task_sensor_snapshot_get(sensor_snapshot_t * p_snapshot) {
     if (NULL == p_snapshot) {
@@ -248,7 +252,7 @@ EXPORT ER task_sensor_snapshot_get(sensor_snapshot_t * p_snapshot) {
         return E_NOEXS;
     }
 
-    ER const err = tk_loc_mtx(sensor_mutex_id, TMO_FEVR);
+    ER const err = tk_loc_mtx(sensor_mutex_id, TMO_POL);
     if (E_OK != err) {
         return err;
     }
@@ -268,6 +272,10 @@ LOCAL void task_sensor_entry(INT stacd, void * exinf) {
     BOOL hub_ready = FALSE;
     UW update_count = 0U;
     while (1) {
+        if (g_task_sensor_test_pause) {
+            (void) tk_dly_tsk(CPU0_SENSOR_PERIOD_MS);
+            continue;
+        }
         if (!hub_ready) {
             fsp_err_t const init_err = sensor_hub_init();
             if (FSP_SUCCESS == init_err) {

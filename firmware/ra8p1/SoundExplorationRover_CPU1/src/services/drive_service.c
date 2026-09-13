@@ -85,16 +85,17 @@ LOCAL H drive_service_feedback_duty_permille(H target_rpm, B forward_sign, UH du
  * @brief  デューティ変化率制限
  * @param[in] current 現在デューティ[0.1%]
  * @param[in] target 目標デューティ[0.1%]
+ * @param[in] elapsed_ms 前回更新からの実経過時間[ms]
  * @return 次周期のデューティ[0.1%]
  * ================================================================= */
-LOCAL H drive_service_ramp_value(H current, H target) {
-    if (current < target) {
-        W const next = (W) current + DRIVE_RAMP_PER_MS;
-        return (H) ((next > target) ? target : next);
+LOCAL H drive_service_ramp_value(H current, H target, UW elapsed_ms) {
+    UD const step = (UD) DRIVE_RAMP_PER_MS * elapsed_ms;
+    W const distance = (W) target - current;
+    if (distance > 0) {
+        return (step >= (UD) distance) ? target : (H) ((W) current + (W) step);
     }
-    if (current > target) {
-        W const next = (W) current - DRIVE_RAMP_PER_MS;
-        return (H) ((next < target) ? target : next);
+    if (distance < 0) {
+        return (step >= (UD) -distance) ? target : (H) ((W) current - (W) step);
     }
     return current;
 }
@@ -161,29 +162,50 @@ EXPORT fsp_err_t drive_service_set_target_rpm(H left_rpm, H right_rpm) {
     return FSP_SUCCESS;
 }
 
+#if DRIVE_MEASUREMENT_TEST_ENABLE
 /** =================================================================*
- * @brief  車体駆動1 ms周期更新
+ * @brief  実機計測用の左右同値前進デューティ設定
+ * @param[in] magnitude_permille 前進デューティの大きさ[0.1%]
+ * @return FSPエラーコード
+ * @details 出力の所有権はdrive_serviceに残し、通常のランプとPWM更新を通す。
+ *          上限の保護は呼出し側でも行うが、このAPI単体でも検査する。
+ * ================================================================= */
+EXPORT fsp_err_t drive_service_set_test_duty_permille(UH magnitude_permille) {
+    if (magnitude_permille > DRIVE_DUTY_MAX_PERMILLE) {
+        return FSP_ERR_INVALID_ARGUMENT;
+    }
+
+    g_left_target_duty_permille =
+        (DRIVE_LEFT_FORWARD_SIGN < 0) ? (H) -(W) magnitude_permille : (H) magnitude_permille;
+    g_right_target_duty_permille =
+        (DRIVE_RIGHT_FORWARD_SIGN < 0) ? (H) -(W) magnitude_permille : (H) magnitude_permille;
+    return FSP_SUCCESS;
+}
+#endif
+
+/** =================================================================*
+ * @brief  車体駆動実時間更新
+ * @param[in] elapsed_ms 前回更新からの実経過時間[ms]（初回0）
  * @return FSPエラーコード
  * ================================================================= */
-EXPORT fsp_err_t drive_service_update_1ms(void) {
+EXPORT fsp_err_t drive_service_update(UW elapsed_ms) {
     if ((0 != g_left_target_rpm) || (0 != g_right_target_rpm)) {
-        if (g_speed_feedback_elapsed_ms < UINT32_MAX) {
-            g_speed_feedback_elapsed_ms++;
-        }
+        UW const remaining = UINT32_MAX - g_speed_feedback_elapsed_ms;
+        g_speed_feedback_elapsed_ms += (elapsed_ms < remaining) ? elapsed_ms : remaining;
     } else {
         g_speed_feedback_elapsed_ms = 0U;
     }
 
     g_drive_left_duty_permille =
-        drive_service_ramp_value(g_drive_left_duty_permille, g_left_target_duty_permille);
+        drive_service_ramp_value(g_drive_left_duty_permille, g_left_target_duty_permille, elapsed_ms);
     g_drive_right_duty_permille =
-        drive_service_ramp_value(g_drive_right_duty_permille, g_right_target_duty_permille);
+        drive_service_ramp_value(g_drive_right_duty_permille, g_right_target_duty_permille, elapsed_ms);
 
-    g_drive_update_elapsed_ms++;
-    if (g_drive_update_elapsed_ms < DRIVE_UPDATE_PERIOD_MS) {
+    UD const update_elapsed_ms = (UD) g_drive_update_elapsed_ms + elapsed_ms;
+    g_drive_update_elapsed_ms = (UW) (update_elapsed_ms % DRIVE_UPDATE_PERIOD_MS);
+    if (update_elapsed_ms < DRIVE_UPDATE_PERIOD_MS) {
         return FSP_SUCCESS;
     }
-    g_drive_update_elapsed_ms = 0U;
     return bts7960_set_signed_duty(g_drive_left_duty_permille, g_drive_right_duty_permille);
 }
 

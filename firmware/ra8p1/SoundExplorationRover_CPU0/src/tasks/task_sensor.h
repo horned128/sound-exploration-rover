@@ -35,4 +35,6 @@ IMPORT volatile UW g_task_sensor_tof_data_ready_timeout_count[CPU0_SENSOR_TOF_CO
 IMPORT volatile UW g_task_sensor_invalid_data_count[CPU0_SENSOR_TOF_COUNT]; /**< ToF測距無効回数 */
 IMPORT volatile UW g_task_sensor_hub_recovery_count;         /**< I2C障害後ハブ再初期化回数 */
 
+IMPORT volatile BOOL g_task_sensor_test_pause;              /**< 更新停止試験用、既定FALSE */
+
 #endif /* SEROV_CPU0_TASK_SENSOR_H */

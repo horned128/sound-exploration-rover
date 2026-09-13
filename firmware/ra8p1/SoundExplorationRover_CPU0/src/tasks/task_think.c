@@ -8,6 +8,7 @@
 #include "config/sensor_config.h"                          /* センサー安全判定値 */
 #include "config/task_config.h"                            /* 思考周期と優先度 */
 #include "control/obstacle_avoidance_controller.h"         /* ToF・IMU走行判断 */
+#include "control/sensor_liveness.h"                       /* 取得タスクと独立した更新監視 */
 #include "control/sound_follow_controller.h"                /* 音源追従状態機械 */
 #include "hal_data.h"                                       /* BSP LED情報、ピンAPI */
 #include "task_acoustic_link.h"                                       /* 最新音響状態取得API */
@@ -41,6 +42,28 @@ LOCAL T_CTSK const think_task_config = {
     .stksz = CPU0_THINK_TASK_STACK_SIZE,
     .bufptr = NULL,
 };
+
+LOCAL sensor_liveness_t sensor_liveness;                  /**< 思考側のセンサー更新監視 */
+EXPORT volatile UW g_task_think_sensor_watchdog_ms;         /**< 更新進行を観測してからの時間[ms] */
+EXPORT volatile BOOL g_task_think_sensor_fresh;             /**< 更新期限内か */
+EXPORT volatile ER g_task_think_sensor_clock_error;         /**< 実時間取得の異常 */
+
+/** =================================================================*
+ * @brief  センサー取得タスクが止まっても進む時刻で鮮度を確認
+ * @param[in] p_snapshot 最新値
+ * @param[in] snapshot_error 取得結果
+ * @return 更新進行を観測し期限内ならTRUE
+ * ================================================================= */
+LOCAL BOOL task_think_sensor_fresh(const sensor_snapshot_t * p_snapshot, ER snapshot_error) {
+    SYSTIM now;
+    ER const err = tk_get_otm(&now);
+    UD const now_ms = (E_OK == err) ? (((UD) (UW) now.hi << 32U) | now.lo) : 0U;
+    g_task_think_sensor_clock_error = err;
+    g_task_think_sensor_fresh = sensor_liveness_update(&sensor_liveness, p_snapshot->update_count, now_ms,
+        (E_OK == err) && (E_OK == snapshot_error) && p_snapshot->initialized, CPU0_SENSOR_STALE_TIMEOUT_MS);
+    g_task_think_sensor_watchdog_ms = sensor_liveness.age_ms;
+    return g_task_think_sensor_fresh;
+}
 
 LOCAL ID think_task_id;                                    /**< 思考タスクID */
 LOCAL ID think_fault_flag_id;                              /**< CPU0異常イベントフラグID */
@@ -89,6 +112,10 @@ LOCAL BOOL task_think_sound_motion_allowed(const sensor_snapshot_t * p_snapshot)
  * @return CPU0異常コード
  * ================================================================= */
 EXPORT app_fault_t task_think_create(void) {
+    sensor_liveness = (sensor_liveness_t){.age_ms = UINT32_MAX};
+    g_task_think_sensor_watchdog_ms = UINT32_MAX;
+    g_task_think_sensor_fresh = FALSE;
+    g_task_think_sensor_clock_error = E_OK;
     think_task_id = 0;
     think_fault_flag_id = 0;
     think_task_started = FALSE;
@@ -366,9 +393,10 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
 #if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SENSOR_RULE)
         sensor_snapshot_t sensor_snapshot = {0};
         ER const sensor_snapshot_err = task_sensor_snapshot_get(&sensor_snapshot);
+        BOOL const sensor_fresh = task_think_sensor_fresh(&sensor_snapshot, sensor_snapshot_err);
         obstacle_avoidance_output_t output;
         sound_follow_state_t const previous_state = g_task_think_state;
-        obstacle_avoidance_controller_step((E_OK == sensor_snapshot_err) ? &sensor_snapshot : NULL,
+        obstacle_avoidance_controller_step(sensor_fresh ? &sensor_snapshot : NULL,
                                            APP_FAULT_NONE != g_task_think_fault_flags, &output);
         g_task_think_state = output.state;
         if (previous_state != g_task_think_state) {
@@ -384,7 +412,7 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
                                               output.actuator_enable, output.emergency_stop);
         }
 
-        g_task_think_link_ready = (E_OK == sensor_snapshot_err) && sensor_snapshot.initialized &&
+        g_task_think_link_ready = sensor_fresh && sensor_snapshot.initialized &&
                                   (CPU0_SENSOR_VALID_ALL == sensor_snapshot.valid_flags) &&
                                   (sensor_snapshot.age_ms <= CPU0_SENSOR_STALE_TIMEOUT_MS);
         g_task_think_new_observation = FALSE;
@@ -399,6 +427,7 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         sensor_snapshot_t sensor_snapshot = {0};
         ER const snapshot_err = task_acoustic_link_snapshot_get(&snapshot);
         ER const sensor_snapshot_err = task_sensor_snapshot_get(&sensor_snapshot);
+        BOOL const sensor_fresh = task_think_sensor_fresh(&sensor_snapshot, sensor_snapshot_err);
         BOOL const observation_usable =
             (E_OK == snapshot_err) && snapshot.usb_configured && snapshot.hello_received &&
             snapshot.observation_received && (ACOUSTIC_XVF_STATUS_READY == snapshot.observation.xvf_status) &&
@@ -430,7 +459,7 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             .link_ready = link_ready,
             .new_observation = new_observation,
             .fault_active = APP_FAULT_NONE != g_task_think_fault_flags,
-            .motion_allowed = (E_OK == sensor_snapshot_err) && task_think_sound_motion_allowed(&sensor_snapshot),
+            .motion_allowed = sensor_fresh && task_think_sound_motion_allowed(&sensor_snapshot),
             .observation = snapshot.observation,
         };
         sound_follow_output_t output;

@@ -39,6 +39,7 @@ firmware/**/common/
 - `firmware/common/`のようにESP32S3とRA8P1で共有する通信契約では、移植性とwire formatを優先して`stdint.h`の固定幅型と`stdbool.h`の`bool`を使用する。
 - 共有通信契約などのAPI境界で`size_t`が宣言されている場合は、そのシグネチャを維持する。RA8P1内部の件数・添字には`UW`を使用する。
 - `ra/`、`ra_cfg/`、`ra_gen/`などの生成コードは型やリンケージマクロの統一対象に含めず、直接編集しない。
+- `firmware/ra8p1/common/tflm/` は公式ベンダツリーとして型・リンケージ統一、整形、リネーム、lintの対象から除外する。アプリへ公開する `src/ai/tflm_runtime.h/.cc` の薄いC境界は本規約に従う。
 
 ```c
 LOCAL UW command_age_ms;                                  /**< 最終指令からの経過時間 */

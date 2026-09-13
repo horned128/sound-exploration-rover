@@ -209,6 +209,20 @@ invoke_fast_build() {
     popd >/dev/null
 }
 
+# Clean-only passes also print "Build Finished. 0 errors". Only accept the
+# requested project's actual build; otherwise a large build is killed mid-compile.
+managed_build_succeeded() {
+    awk -v project="$2" '
+        /\*\*\*\* .*([Bb]uild) of configuration/ {
+            current = index($0, "for project " project " ****") && $0 !~ /Clean-only/
+            if (current) success = 0
+        }
+        current && /Build Finished\. 0 errors/ { success = 1 }
+        current && /Build Failed/ { success = 0 }
+        END { exit !success }
+    ' "$1" 2>/dev/null
+}
+
 invoke_managed_build() {
     local project_name="$1"
     local e2_exec="$2"
@@ -272,7 +286,7 @@ invoke_managed_build() {
 
     deadline=$((SECONDS + 900))
     while kill -0 "$pid" 2>/dev/null; do
-        if grep -q "Build Finished\. 0 errors" "$stdout_log" 2>/dev/null; then
+        if managed_build_succeeded "$stdout_log" "$project_name"; then
             build_finished=1
             break
         fi
@@ -305,7 +319,7 @@ invoke_managed_build() {
     exit_code=$?
     set -e
 
-    if grep -q "Build Finished\. 0 errors" "$stdout_log" 2>/dev/null; then
+    if managed_build_succeeded "$stdout_log" "$project_name"; then
         build_finished=1
     fi
 

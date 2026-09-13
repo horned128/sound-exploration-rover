@@ -14,6 +14,9 @@ EXPORT volatile W g_encoder_right_rpm_x10 = 0;                 /**< 右代表モ
 
 LOCAL UB g_left_encoder_previous_ab;                  /**< 左エンコーダ前回A/B状態 */
 LOCAL UB g_right_encoder_previous_ab;                 /**< 右エンコーダ前回A/B状態 */
+LOCAL BOOL g_speed_sample_started;                         /**< 初回カウント基準の取得完了 */
+EXPORT volatile UW g_encoder_sample_elapsed_ms;             /**< 最後の速度窓の実経過時間[ms] */
+EXPORT volatile UW g_encoder_sample_count;                  /**< 速度窓の更新回数 */
 LOCAL UW g_speed_elapsed_ms;                         /**< 速度算出周期の経過時間（単位: ms） */
 LOCAL W g_left_speed_previous_count;                 /**< 左速度算出時の前回カウント */
 LOCAL W g_right_speed_previous_count;                /**< 右速度算出時の前回カウント */
@@ -44,9 +47,13 @@ LOCAL void encoder_update(BOOL left) {
     B const forward_sign = left ? WHEEL_ENCODER_LEFT_FORWARD_SIGN : WHEEL_ENCODER_RIGHT_FORWARD_SIGN;
     W const delta = (W) encoder_transition_delta[transition] * forward_sign;
     if (left) {
-        g_encoder_left_count += delta;
+        W const count = g_encoder_left_count;
+        g_encoder_left_count = (delta > 0 && count == INT32_MAX) ? INT32_MIN :
+            ((delta < 0 && count == INT32_MIN) ? INT32_MAX : count + delta);
     } else {
-        g_encoder_right_count += delta;
+        W const count = g_encoder_right_count;
+        g_encoder_right_count = (delta > 0 && count == INT32_MAX) ? INT32_MIN :
+            ((delta < 0 && count == INT32_MIN) ? INT32_MAX : count + delta);
     }
     *p_previous_ab = current_ab;
 }
@@ -60,10 +67,18 @@ LOCAL void encoder_update(BOOL left) {
  * ================================================================= */
 LOCAL void encoder_speed_update(W count, W * p_previous_count, volatile W * p_rpm_x10,
                                  UW elapsed_ms) {
-    W const delta = count - *p_previous_count;
+    /* 32 bit累積カウントの折返し。1窓の変位は2^31 count未満を前提とする。 */
+    D delta = (D) count - *p_previous_count;
+    if (delta > INT32_MAX) {
+        delta -= 4294967296LL;
+    } else if (delta < INT32_MIN) {
+        delta += 4294967296LL;
+    }
     D const numerator = (D) delta * 600000LL;
     D const denominator = (D) WHEEL_ENCODER_COUNTS_PER_REV * elapsed_ms;
-    *p_rpm_x10 = (W) (numerator / denominator);
+    D const rpm_x10 = numerator / denominator;
+    *p_rpm_x10 = (rpm_x10 > INT32_MAX) ? INT32_MAX :
+        ((rpm_x10 < INT32_MIN) ? INT32_MIN : (W) rpm_x10);
     *p_previous_count = count;
 }
 
@@ -98,6 +113,9 @@ EXPORT fsp_err_t encoder_init(void) {
     g_left_encoder_previous_ab = (UB) (((UB) left_a << 1U) | (UB) left_b);
     g_right_encoder_previous_ab = (UB) (((UB) right_a << 1U) | (UB) right_b);
     g_speed_elapsed_ms = 0U;
+    g_speed_sample_started = FALSE;
+    g_encoder_sample_elapsed_ms = 0U;
+    g_encoder_sample_count = 0U;
     g_left_speed_previous_count = 0;
     g_right_speed_previous_count = 0;
 
@@ -128,15 +146,25 @@ EXPORT fsp_err_t encoder_init(void) {
 }
 
 /** =================================================================*
- * @brief  エンコーダを1 ms周期で保守
+ * @brief  実経過時間によるエンコーダ速度更新
+ * @param[in] elapsed_ms 前回呼出しからの実経過時間[ms]（初回は基準取得のみ）
  * ================================================================= */
-EXPORT void encoder_housekeeping_1ms(void) {
-    g_speed_elapsed_ms++;
+EXPORT void encoder_housekeeping(UW elapsed_ms) {
+    if (!g_speed_sample_started) {
+        g_left_speed_previous_count = g_encoder_left_count;
+        g_right_speed_previous_count = g_encoder_right_count;
+        g_speed_sample_started = TRUE;
+        return;
+    }
+    UW const remaining = UINT32_MAX - g_speed_elapsed_ms;
+    g_speed_elapsed_ms += (elapsed_ms < remaining) ? elapsed_ms : remaining;
     if (g_speed_elapsed_ms >= WHEEL_SPEED_SAMPLE_PERIOD_MS) {
         encoder_speed_update(g_encoder_left_count, &g_left_speed_previous_count, &g_encoder_left_rpm_x10,
                              g_speed_elapsed_ms);
         encoder_speed_update(g_encoder_right_count, &g_right_speed_previous_count, &g_encoder_right_rpm_x10,
                              g_speed_elapsed_ms);
+        g_encoder_sample_elapsed_ms = g_speed_elapsed_ms;
+        g_encoder_sample_count++;
         g_speed_elapsed_ms = 0U;
     }
 }

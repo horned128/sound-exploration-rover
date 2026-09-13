@@ -19,7 +19,7 @@ CPU0 / Cortex-M85 / μT-Kernel
                                       v
 CPU1 / Cortex-M33 / μT-Kernel
   usermain() ──> CPU1 task registry
-                   ├─ task_actuator (priority 4 / 1 ms)
+                   ├─ task_actuator (priority 4 / 周期通知1 ms、実Δt更新)
                    │    └─ actuator_service ──> services/drive_service ──> drivers/{bts7960,encoder}
                    └─ task_status   (priority 12 / 10 ms)
                         └─ 赤LED heartbeat／fault表示
@@ -156,7 +156,7 @@ EK-RA8P1 J18-6/7 GND ----+
 
 A相だけでも指令方向を前提に速度の大きさは測れますが、逆転判定と4逓倍カウントにはA/B両方が必要です。本ソフトは左右ともA/Bの両相を両エッジ割り込みで読み取ります。未配線の入力を浮かせると誤カウントするため、エンコーダを接続しない状態で走行させないでください。
 
-`WHEEL_ENCODER_COUNTS_PER_REV=900`として、100 msごとに左右のRPMを算出します。モーター仕様は[JGA25-370 12 V・300 RPM仕様書](../../hardware/actuator/spec/jga25-370-12v-300rpm.md)を参照してください。
+`WHEEL_ENCODER_COUNTS_PER_REV=702`として、100 msごとに左右のRPMを算出します。この値は2000 mm手押し10区間から得た実機校正値です。モーターの公称仕様は[JGA25-370 12 V・300 RPM仕様書](../../hardware/actuator/spec/jga25-370-12v-300rpm.md)を参照してください。
 
 `g_encoder_left_encoder_count`と`g_encoder_right_encoder_count`は、左右とも前進で増加し、後進で減少する4逓倍累積カウントです。`g_encoder_left_rpm_x10`と`g_encoder_right_rpm_x10`も同じ符号規則の推定RPMの10倍であり、`-1234`は後進方向の`-123.4 RPM`を表します。現在は`DRIVE_SPEED_FEEDBACK_ENABLE=0`として実測RPMを診断だけに使用します。
 
@@ -279,3 +279,16 @@ CPU0では次の変数をLive Watchへ追加します。
 | `task_think.c` | `task_think_entry` | 10 | 100 ms | 音源追従目標、LED、faultラッチ |
 
 IPCの構成方法と、受信側に割り込み・コールバックが必要という条件は、Renesasの[Getting Started with IPC on Dual Core MCU](https://www.renesas.com/en/document/apn/getting-started-ipc-dual-core-mcu)に準拠しています。
+
+## TFLM推論環境（Phase 1）
+
+CPU0のC++17参照カーネル版TFLMと静的96 KiBアリーナを導入済みです。
+取得元・ライセンス・C API・ビルド条件は [common/tflm/README.md](common/tflm/README.md)、
+学習環境とホスト推論検証は [acoustic-trainer](../../software/acoustic-trainer/README.md) を参照してください。
+モデルの学習と推論タスクの走行経路への接続はPhase 2で実装します。
+
+## CPU1タイミング是正（Phase 0-A 第1段）
+
+駆動周期をイベントフラグで起床する構成へ移し、RPM・ランプ・指令期限を実時間化しました。
+ビルドとホスト試験は成功、実機の停止・周期確認は未実施です。
+監視変数と必須の測定項目は [検証記録](../../docs/firmware/validation/README.md) を参照してください。

@@ -2,8 +2,7 @@
 
 最終更新: 2026-09-08 / 対象: RA8P1 CPU0/CPU1、ReSpeaker/XIAO、I2Cセンサー統合の現行ファームウェア実装
 
-参考用のインタラクティブな全体図は、[構造図](archify/SEROV_ARCHITECTURE.html)を参照する。現行のディレクトリ構成は本書と下記レイヤー構成を正とする。
-ユーザーコードの層構成と依存方向は、[RA8P1レイヤー構成](LAYERED_ARCHITECTURE.md)を参照する。
+参考用のインタラクティブな全体図は、[構造図](archify/SEROV_ARCHITECTURE.html)を参照する。現行のディレクトリ構成、RA8P1ユーザーコードの層構成、および依存方向は本書を正とする。
 
 ## 1. 目的と設計方針
 
@@ -158,6 +157,38 @@ firmware/
          └─ config/{task,actuator,drive,servo,pin}_config.h             制限、PWM、校正
 ```
 
+### 3.1 RA8P1ユーザーコードのレイヤー構成
+
+RA8P1のユーザーコードは、責務に基づいて次の5層へ分ける。ディレクトリ名には層番号を含めず、役割を表す名称を使う。
+
+```text
+L4 tasks
+    ↓
+L3 control
+    ↓
+L2 services
+    ↓
+L1 drivers
+    ↓
+L0 platform
+    ↓
+Renesas FSP / ハードウェア
+```
+
+| 層 | ディレクトリ | 責務 | 代表例 |
+|---|---|---|---|
+| L0 | `platform/` | FSPに近い汎用的な基盤機能 | CPU0 `i2c_bus` |
+| L1 | `drivers/` | 個別デバイス、PWM、GPIO、IRQの操作 | `vl53l1x`、`bmi270`、`tca9548a`、`bts7960`、`servo`、`encoder` |
+| L2 | `services/` | 複数ドライバの統合、安全状態、変換・校正 | `sensor_hub`、`drive_service`、`actuator_service` |
+| L3 | `control/` | センサー状態から走行目標を決定 | `sound_follow_controller`、`obstacle_avoidance_controller` |
+| L4 | `tasks/` | μT-Kernelタスクの生成、周期、待機、上位層の呼出し | `task_acoustic_link`、`task_sensor`、`task_think`、`task_command` |
+
+`ipc/` と `config/` は横断的な役割を持つ。`ipc/` はCPU間通信の変換・送受信を、`config/` は用途別の調整値と基板上の役割を保持する。FSPのピン多重化設定は引き続きSolutionを正とし、`pin_config.h` はアプリケーション側の役割対応だけを定義する。
+
+CPU0では、`sensor_hub` がTCA9548Aのチャネルを選択してからToFまたはIMUドライバを呼ぶ。各センサードライバはTCA9548A上の接続チャネルを知らない。CPU1では、`drive_service` がRPM、符号、校正、変化率制限を担当し、`bts7960` は符号付きデューティをPWM出力へ反映するだけにする。
+
+この構成は動作を変えないリファクタリングである。IPCのペイロード、TCA9548Aチャネル割当て、モーター極性、非常停止、指令タイムアウト、センサー回復、および音源追従の振る舞いは既存の契約を維持する。
+
 主要ファイル:
 
 - 共通契約: [`acoustic_protocol.h`](../../firmware/common/acoustic_protocol.h)、[`ipc_message.h`](../../firmware/ra8p1/common/ipc_message.h)
@@ -218,7 +249,7 @@ sequenceDiagram
 
 各コアの`usermain()`は、それぞれのμT-Kernelが生成した高優先度の初期タスクから呼ばれる。CPU0はCPU1を起動してから、CPU0側`task_registry.c`の登録配列で`task_command`、`task_acoustic_link`、`task_think`を生成・開始する。CPU1はCPU1側`task_registry.c`の登録配列で`task_actuator`と`task_status`を生成・開始する。どちらも、全タスクの生成成功後に登録順で開始し、失敗時は生成済みリソースを逆順で解放する。初期化完了後の`usermain()`は`tk_slp_tsk(TMO_FEVR)`で永久休止し、各独立タスクが優先度に従って実行される。
 
-両コアのμT-Kernel tickは1 msに統一している。周期タスクは`tk_dly_tsk()`を使うため、記載周期は処理時間を含まないnominal値であり、ハードウェアタイマー基準の厳密な周期ではない。
+両コアのμT-Kernel tickは1 msに統一している。CPU1の`task_actuator`は周期ハンドラ＋イベントフラグで1 ms基準に起床し、`tk_get_otm()`による実経過時間を処理へ渡す。その他の`tk_dly_tsk()`を使う周期タスクの記載値はnominal値であり、+1 tickと処理時間が加わる。CPU1タイミング是正の実機検証は未完了（[検証記録](validation/README.md)）。
 
 ### 4.1 μT-Kernelの両コア構成
 
@@ -337,14 +368,19 @@ CPU1の`task_status`は実デューティ、左右encoder RPM、fault、適用�
 
 | タスク | 優先度 | スタック | 実行 | 責務 |
 |---|---:|---:|---|---|
-| `task_actuator_entry` | 4 | 2048 B | nominal 1 ms | IPC確定指令、encoder、PWMランプ、安全停止 |
-| `task_status_entry` | 12 | 512 B | nominal 10 ms | 赤LED、driver/FSP fault表示、CPU1実出力診断送信 |
+| `task_actuator_entry` | 4 | 2048 B | 周期通知1 ms・実Δt更新 | IPC確定指令、encoder、PWMランプ、安全停止 |
+| `task_status_entry` | 12 | 512 B | 周期通知10 ms・実Δt更新 | 赤LED、driver/FSP fault表示、CPU1実出力診断送信 |
 
 数値が小さいほど高優先度であり、アクチュエータ周期処理を状態表示より優先する。IPC callbackはFSPのIRQ contextでstaging/commitだけを行い、μT-Kernelのtask APIとPWM driver APIを直接呼ばない。
 
+CPU0のセンサー鮮度は`task_think`がupdate_countの進行と`tk_get_otm()`の実時間で独立監視する。
+200 ms更新が進まなければ音源追従・センサー走行の両方で通常停止へ移行する。初回は進行観測まで不許可。
+取得側のage_msだけを生存判定には使わず、snapshotのmutex競合も無待機で取得失敗として扱う。
+[センサー更新停止の検証記録](validation/README.md)を参照。
+
 ### 7.1 タスクと安全状態
 
-CPU1の`usermain()`は、登録配列から`task_actuator`と`task_status`を生成・開始する。優先度4の`task_actuator`は1 msごとに`actuator_service_update_1ms()`を呼び、ドライバの周期処理、IPC異常取得、新しい確定済み指令の取得、期限監視、サーボとモーターへの適用を行う。優先度12の`task_status`は10 msごとに状態を確認し、正常時500 ms、driver/FSP異常時50 ms周期で赤LEDを反転し、100 msごとに診断snapshotの送信を開始する。最終IPC指令から1500 ms以上経過するとローカルsafe stopへ移行する。
+CPU1の`usermain()`は、登録配列から`task_actuator`と`task_status`を生成・開始する。優先度4の`task_actuator`は周期ハンドラのイベントフラグ通知で起床し、実経過時間を引数とする`actuator_service_update(elapsed_ms)`でエンコーダ保守、IPC指令取得、期限監視、サーボとモーターへの適用を行う。通知の合流時も実経過時間を使い、期限切れはPWM更新より前に判定する。優先度12の`task_status`も周期ハンドラのイベントフラグで10 msごとに起床し、実経過時間で正常時500 ms、driver/FSP異常時50 msの赤LED反転と100 msの診断snapshot採取を管理する。送信中の時間も採取周期へ含め、1起床につき最大1語を送る。FIFO混雑時は同一snapshotの同じ語を再試行し、最終語成功時だけsequenceを進める。最終IPC指令から1500 ms以上経過するとローカルsafe stopへ移行する。
 
 ```mermaid
 stateDiagram-v2
@@ -484,6 +520,9 @@ J11/USB Full Speed、P500、`USB_FS_VBUSEN`はReSpeaker経路に使用しない�
 
 I2CバスはTCA9548AとBMI270で共有し、同一address `0x29`のVL53L1XはTCA9548AのCH0/CH1/CH2で分離する。P511/P512を上記の外部I2Cコネクタへ接続するには、EK-RA8P1のSW4-5をOFFにしてIIC1を選ぶ。[EK-RA8P1 User's Manual](https://www.renesas.com/en/document/mat/ek-ra8p1-v1-users-manual)のI2C/I3C切替も確認する。
 
+ToFの光学中心は、車体座標（前方`+y`、右方向`+x`）でLEFT=(-90, +94) mm、
+CENTER=(0, 0) mm、RIGHT=(+90, +94) mm。3台とも前方へ平行に向ける。
+
 P801、P803、P808をサーボへ転用しているため、現行構成ではOcto-SPIフラッシュを使用できない。SW4-3をONにしてOcto-SPIを無効、SW4-4をONにしてArduino端子を有効にする。LPWMはPmod2 J25-2/J25-3へ割り当て、OSPI0とは競合させない。BTS7960は左右のVCCを共通化し、R_EN/L_ENをPD01へまとめる。VCCとENは直結せず、P312は未使用のまま解放する。電源はJ18-5の+5 VをBTS7960 VCC、J18-4の+3.3 Vを左右代表エンコーダVCC、J18-6/J18-7のGNDを全機器共通GNDとして分岐する。I2CセンサーはPmod2 J25-6の+3.3 VとJ25-5のGNDから別枝で給電する。これらは同じ+3.3 V/GNDネットであり、別電源ではないが、BTS7960のGNDからセンサーを数珠つなぎにしない。BTS7960のモーター電流の帰路はバッテリーとモータードライバの間で直接配線する。ただしBTS7960モジュールの仕様が3.3 V対応でない場合は5 Vを使用し、電流容量が不足する場合は外部安定化電源を使用する。
 
 ## 10. 安全設計
@@ -500,7 +539,7 @@ P801、P803、P808をサーボへ転用しているため、現行構成ではOc
 | CPU1 `actuator_service` | IPC指令が1500 ms届かない | ローカルsafe stop |
 | CPU1 driver統合 | driver API error | DRIVER fault、safe stop |
 
-現状の制約は、ハードウェア非常停止入力なし、CPU間watchdogなし、各側3台の個別速度フィードバックなしである。論理左右代表モーターのA/Bを4逓倍で数え、`WHEEL_ENCODER_COUNTS_PER_REV=900`と100 msの差分からRPMを算出する。カウントとRPMは前進正、後進負を契約とする。`DRIVE_SPEED_FEEDBACK_ENABLE=0`のため、実測RPMは診断にのみ使用する。また論理左右各3台を1台のBTS7960へ並列接続しているため、6台の個別制御には対応しない。
+現状の制約は、ハードウェア非常停止入力なし、CPU間watchdogなし、各側3台の個別速度フィードバックなしである。論理左右代表モーターのA/Bを4逓倍で数え、実機校正値`WHEEL_ENCODER_COUNTS_PER_REV=702`と100 msの差分からRPMを算出する。カウントとRPMは前進正、後進負を契約とする。`DRIVE_SPEED_FEEDBACK_ENABLE=0`のため、実測RPMは診断にのみ使用する。また論理左右各3台を1台のBTS7960へ並列接続しているため、6台の個別制御には対応しない。
 
 ## 11. ビルド・生成・書き込み
 
