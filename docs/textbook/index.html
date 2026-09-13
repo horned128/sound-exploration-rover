@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SEROV 開発・設計教科書ポータル | Sound Exploration ROVer</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --surface: #131b2e;
+      --surface-border: #23314e;
+      --card-bg: #1a243b;
+      --card-hover: #223150;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --accent: #f43f5e;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --code-bg: #0d1321;
+    }
+    [data-theme="light"] {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --surface-border: #e2e8f0;
+      --card-bg: #f1f5f9;
+      --card-hover: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --primary: #0284c7;
+      --primary-hover: #0369a1;
+      --code-bg: #e2e8f0;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      transition: background-color 0.25s, color 0.25s;
+    }
+
+    /* ナビゲーションバー */
+    nav {
+      position: sticky;
+      top: 0;
+      background: rgba(19, 27, 46, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--surface-border);
+      padding: 0.8rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 100;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+    }
+    .brand-logo {
+      width: 34px;
+      height: 34px;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      color: #0b0f19;
+      font-size: 1.1rem;
+    }
+    .brand-text h1 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .brand-text p {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .nav-links {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+    .nav-link {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-link:hover { color: var(--primary); }
+    .btn {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      border: 1px solid var(--surface-border);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: all 0.2s;
+    }
+    .btn:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #0b0f19 !important;
+      border-color: var(--primary);
+    }
+    .btn-primary:hover {
+      background: var(--primary-hover);
+      border-color: var(--primary-hover);
+      color: #fff !important;
+    }
+
+    /* ヒーローセクション */
+    .hero {
+      max-width: 1200px;
+      margin: 3rem auto 2rem;
+      padding: 0 1.5rem;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.3rem 0.8rem;
+      border-radius: 9999px;
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      color: var(--primary);
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+    }
+    .hero h2 {
+      font-size: 2.5rem;
+      font-weight: 800;
+      line-height: 1.2;
+      margin-bottom: 1rem;
+      background: linear-gradient(135deg, #f8fafc 40%, #38bdf8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    [data-theme="light"] .hero h2 {
+      background: linear-gradient(135deg, #0f172a 40%, #0284c7 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero p {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+      max-width: 750px;
+      margin: 0 auto 2rem;
+    }
+    .hero-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    /* インタラクティブバナー */
+    .banner-card {
+      max-width: 1200px;
+      margin: 0 auto 3rem;
+      padding: 0 1.5rem;
+    }
+    .banner-inner {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.1), rgba(129, 140, 248, 0.05));
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: 12px;
+      padding: 1.5rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+    }
+    .banner-text h3 {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 0.4rem;
+    }
+    .banner-text p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      max-width: 650px;
+    }
+
+    /* 学習ロードマップ */
+    .section-title {
+      max-width: 1200px;
+      margin: 0 auto 1.5rem;
+      padding: 0 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    .section-title h3 {
+      font-size: 1.5rem;
+      font-weight: 700;
+    }
+    .roadmap-steps {
+      display: flex;
+      gap: 0.5rem;
+    }
+    .roadmap-badge {
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      color: var(--text-muted);
+    }
+    .roadmap-badge.active {
+      background: var(--primary);
+      color: #0b0f19;
+      border-color: var(--primary);
+    }
+
+    /* 検索バー */
+    .search-box {
+      max-width: 1200px;
+      margin: 0 auto 2rem;
+      padding: 0 1.5rem;
+    }
+    .search-input {
+      width: 100%;
+      padding: 0.8rem 1.2rem;
+      border-radius: 8px;
+      border: 1px solid var(--surface-border);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-input:focus {
+      border-color: var(--primary);
+    }
+
+    /* カードグリッド */
+    .chapter-grid {
+      max-width: 1200px;
+      margin: 0 auto 4rem;
+      padding: 0 1.5rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 1.5rem;
+    }
+    .chapter-card {
+      background: var(--card-bg);
+      border: 1px solid var(--surface-border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+    .chapter-card:hover {
+      transform: translateY(-3px);
+      border-color: var(--primary);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    }
+    .chapter-card-top {
+      margin-bottom: 1.2rem;
+    }
+    .chapter-tag {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--primary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.4rem;
+    }
+    .chapter-title {
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-bottom: 0.6rem;
+      line-height: 1.3;
+    }
+    .chapter-desc {
+      font-size: 0.88rem;
+      color: var(--text-muted);
+      line-height: 1.5;
+      margin-bottom: 1rem;
+    }
+    .chapter-topics {
+      list-style: none;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 1rem;
+    }
+    .chapter-topics li {
+      margin-bottom: 0.3rem;
+      padding-left: 0.8rem;
+      position: relative;
+    }
+    .chapter-topics li::before {
+      content: "✓";
+      color: var(--primary);
+      position: absolute;
+      left: 0;
+      font-weight: bold;
+    }
+    .chapter-footer {
+      border-top: 1px solid var(--surface-border);
+      padding-top: 1rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .file-ref {
+      font-size: 0.75rem;
+      font-family: monospace;
+      color: var(--text-muted);
+    }
+
+    /* 用語集セクション */
+    .glossary-section {
+      max-width: 1200px;
+      margin: 0 auto 4rem;
+      padding: 0 1.5rem;
+    }
+    .glossary-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .glossary-item {
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .glossary-term {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 0.3rem;
+    }
+    .glossary-def {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    /* フッター */
+    footer {
+      background: var(--surface);
+      border-top: 1px solid var(--surface-border);
+      padding: 2.5rem 1.5rem;
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    footer p { margin-bottom: 0.5rem; }
+  </style>
+</head>
+<body>
+
+  <!-- ナビゲーション -->
+  <nav>
+    <div class="brand">
+      <div class="brand-logo">S</div>
+      <div class="brand-text">
+        <h1>SEROV 教科書ポータル</h1>
+        <p>Sound Exploration ROVer | TRON 2026</p>
+      </div>
+    </div>
+    <div class="nav-links">
+      <a href="#chapters" class="nav-link">教科書目次</a>
+      <a href="#glossary" class="nav-link">用語集</a>
+      <a href="interactive_system_architecture.html" class="btn btn-primary">⚡ アーキテクチャ図</a>
+      <button id="themeToggle" class="btn">🌓</button>
+    </div>
+  </nav>
+
+  <!-- ヒーロー -->
+  <section class="hero">
+    <div class="hero-badge">TRONプログラミングコンテスト2026 参加プロジェクト</div>
+    <h2>極限環境を走破する、音源探査ローバーの全貌</h2>
+    <p>
+      Arm Cortex-M85 / Cortex-M33 デュアルコア（RA8P1）と μT-Kernel 3.0、
+      XVF3800 音響DSP、ESP32-S3 によるLog-MelエッジAI、そして火星探査ローバー直系のロッカーボギー機構。
+      最先端の組み込みリアルタイム技術を完全制覇するための総合教科書です。
+    </p>
+    <div class="hero-buttons">
+      <a href="#chapters" class="btn btn-primary">📚 第1章から学習を始める</a>
+      <a href="interactive_system_architecture.html" class="btn">🗺️ インタラクティブ構造図を見る</a>
+      <a href="README.md" class="btn">📖 教科書README</a>
+    </div>
+  </section>
+
+  <!-- インタラクティブバナー -->
+  <div class="banner-card">
+    <div class="banner-inner">
+      <div class="banner-text">
+        <h3>⚡ インタラクティブ・システムアーキテクチャ図 公開中</h3>
+        <p>
+          4つのプロセッサ（XVF3800, ESP32-S3, RA8P1 CPU0/CPU1）、センサ、アクチュエータ、通信バス（USB, IPC, I2C, PWM）の結線とデータフローを視覚的・対話的に探索できるWeb教材です。
+        </p>
+      </div>
+      <a href="interactive_system_architecture.html" class="btn btn-primary">今すぐ体験する →</a>
+    </div>
+  </div>
+
+  <!-- 検索バー -->
+  <div class="search-box">
+    <input type="text" id="searchInput" class="search-input" placeholder="章のタイトル、トピック、キーワード（例: IPC, ToF, TFLM, エンコーダ, 周期ハンドラ）を検索...">
+  </div>
+
+  <!-- 目次セクション -->
+  <div id="chapters" class="section-title">
+    <h3>全10章 学習カリキュラム</h3>
+    <div class="roadmap-steps">
+      <span class="roadmap-badge active">入門・全体像 (1-3)</span>
+      <span class="roadmap-badge active">ファームウェア中核 (4-7)</span>
+      <span class="roadmap-badge active">検証・運用・実践 (8-10)</span>
+    </div>
+  </div>
+
+  <div class="chapter-grid" id="chapterGrid">
+
+    <!-- 第1章 -->
+    <div class="chapter-card" data-keywords="プロジェクト概要 ミッション 背景 TRON2026 モノレポ 設計哲学">
+      <div class="chapter-card-top">
+        <span class="chapter-tag">Chapter 01 / 入門</span>
+        <h4 class="chapter-title">プロジェクト概要とミッション</h4>
+        <p class="chapter-desc">TRONプログラミングコンテスト2026に向けた挑戦目的、暗闇や濃霧での音源探査の意義、モノレポ構成、および4つの基本設計哲学を解説。</p>
+        <ul class="chapter-topics">
+          <li>音源探査ローバー（SEROV）の挑戦課題</li>
+          <li>リポジトリ構造とモノレポの必然性</li>
+          <li>安全第一・実時間性の分離・固定契約哲学</li>
+        </ul>
+      </div>
+      <div class="chapter-footer">
+        <span class="file-ref">01_introduction_and_overview.md</span>
+        <a href="01_introduction_and_overview.md" class="btn">読む →</a>
+      </div>
+    </div>
+
+    <!-- 第2章 -->
+    <div class="chapter-card" data-keywords="ハードウェア メカニクス ロッカーボギー サスペンション モータ サーボ 電源 GND スター配線 SW4">
+      <div class="chapter-card-top">
+        <span class="chapter-tag">Chapter 02 / メカ・電気</span>
+        <h4 class="chapter-title">ハードウェア機構とメカニカル設計</h4>
+        <p class="chapter-desc">火星探査機直系のロッカーボギー機構の動作原理、独自3Dプリント追加パーツ、モータ・サーボ選定、ノイズを排除する独立電源・スターGND設計。</p>
+        <ul class="chapter-topics">
+          <li>バネを使わない6輪接地サスペンションの幾何学</li>
+          <li>JGA25-370 モータ × 6 ＆ DS3225MG サーボ × 4</li>
+          <li>大電流モータ系と弱電マイコン系のスターGND分離</li>
+        </ul>
+      </div>
+      <div class="chapter-footer">
+        <span class="file-ref">02_hardware_and_mechanics.md</span>
+        <a href="02_hardware_and_mechanics.md" class="btn">読む →</a>
+      </div>
+    </div>
+
+    <!-- 第3章 -->
+    <div class="chapter-card" data-keywords="アーキテクチャ 4プロセッサ 責務分離 5層レイヤー FSP ピン所有権 Solution">
+      <div class="chapter-card-top">
+        <span class="chapter-tag">Chapter 03 / アーキテクチャ</span>
+        <h4 class="chapter-title">4プロセッサ協調アーキテクチャとレイヤー設計</h4>
+        <p class="chapter-desc">XVF3800、ESP32-S3、RA8P1 CPU0/CPU1の4プロセッサ責務分離、L0〜L4の5層ソフトウェアレイヤー、デュアルコア特有のピン所有権モデル。</p>
+        <ul class="chapter-topics">
+          <li>なぜプロセッサとコアを分離するのか？（通信ジッタ隔離）</li>
+          <li>L0 Platform 〜 L4 Tasks 5層アーキテクチャ</li>
+          <li>Solution pins によるCPU0一括ピン所有権（CPU1は0ピン）</li>
+        </ul>
+      </div>
+      <div class="chapter-footer">
+        <span class="file-ref">03_system_architecture.md</span>
+        <a href="03_system_architecture.md" class="btn">読む →</a>
+      </div>
+    </div>
+
+    <!-- 第4章 -->
+    <div class="chapter-card" data-keywords="RTOS μT-Kernel 3.0 デュアルコア Cortex-M85 Cortex-M33 SRAM 起動シーケンス 周期ハンドラ 実時間化">
+      <div class="chapter-card-top">
+        <span class="chapter-tag">Chapter 04 / RTOS・制御</span>
+        <h4 class="chapter-title">μT-Kernel 3.0とデュアルコア制御</h4>
+        <p class="chapter-desc">Cortex-M85（1GHz）とCortex-M33（250MHz）の異種マルチコア構成、SRAM領域完全分離、BSP上書き手法、および周期ハンドラによる1ms実時間化。</p>
+        <ul class="chapter-topics">
+          <li>R_BSP_SecondaryCoreStart による安全な起動順序</li>
+          <li>mtkernel_config によるBSPクリーン上書き</li>
+          <li>tk_dly_tskのドリフト解消: 周期ハンドラ＋イベントフラグ</li>
+        </ul>
+      </div>
+      <div class="chapter-footer">
+        <span class="file-ref">04_rtos_and_multicore.md</span>
+        <a href="04_rtos_and_multicore.md" class="btn">読む →</a>
+      </div>
+    </div>
+
+    <!-- 第5章 -->
+    <div class="chapter-card" data-keywords="通信プロトコル IPC FIFO 32bit アトミックコミット SEQUENCE USB CDC CRC-16 Wi-Fi UDP">
+      <div class="chapter-card-top">
+        <span class="chapter-tag">Chapter 05 / 通信プロトコル</span>
+        <h4 class="chapter-title">プロセッサ間通信プロトコル（IPC & USB CDC）</h4>
+        <p class="chapter-desc">4段32-bit IPC FIFOのフォーマット、SEQUENCEマーカーによる6出力アトミックコミット、USB CDC固定長バイナリフレーム、CRC-16検証技術。</p>
+        <ul class="chapter-topics">
+          <li>Staging → Committed ダブルバッファによる安全コミット</li>
+          <li>緊急停止（estop）の即時割り込み処理</li>
+          <li>Magic('S''R')・CRC-16付きバイナリプロトコル設計</li>
+        </ul>
+      </div>
+      <div class="chapter-footer">
+        <span class="file-ref">05_interprocessor_communication.md</span>
+        <a href="05_interprocessor_communication.md" class="btn">読む →</a>
+      </div>
+    </div>
+
+    <!-- 第6章 -->
+    <div class="chapter-card" data-keywords="音響DSP エッジAI XVF3800 DoA VAD Log-Mel int8 量子化 TFLM TensorFlow 停止聴取型">
+      <div class="chapter-card-top">
+        <span class="chapter-tag">Chapter 06 / 音響・AI</span>
+        <h4 class="chapter-title">音響信号処理・Log-Mel特徴量・エッジAI</h4>
+        <p class="chapter-desc">XVF3800によるビームフォーミング、ESP32-S3での100fps Log-Mel抽出とint8量子化、CPU0のTFLM推論基盤、および「停止聴取型」音源追従。</p>
+        <ul class="chapter-topics">
+          <li>固定数値契約: 400点窓/160点ホップ/32bin/int8</li>
+          <li>CPU0 TFLMランタイム: 96 KiB静的テンソルアリーナ</li>
+          <li>自車ノイズを排除する「停止聴取型」ステートマシン</li>
+        </ul>
+      </div>
+      <div class="chapter-footer">
+        <span class="file-ref">06_acoustic_dsp_and_edge_ai.md</span>
+        <a href="06_acoustic_dsp_and_edge_ai.md" class="btn">読む →</a>
+      </div>
+    </div>
+
+    <!-- 第7章 -->
+    <div class="chapter-card" data-keywords="センサ自律走行 ToF VL53L1X TCA9548A BMI270 IMU 回避ルール 生存性監視 ウォッチドッグ">
+      <div class="chapter-card-top">
+        <span class="chapter-tag">Chapter 07 / センサ・自律走行</span>
+        <h4 class="chapter-title">センサ統合と自律走行アルゴリズム</h4>
+        <p class="chapter-desc">TCA9548Aによる前方3眼ToF分離、死角ゼロの幾何学配置、ルールベース回避判断、および200msセンサ生存性監視（Liveness Watchdog）。</p>
+        <ul class="chapter-topics">
+          <li>前方3眼ToF（LEFT -45°, CENTER 0°, RIGHT +45°）</li>
+          <li>自律後退の禁止理由と前進・減速・旋回・停止ルール</li>
+          <li>I2Cハング時の暴走を防ぐ200ms独立生存性監視</li>
+        </ul>
+      </div>
+      <div class="chapter-footer">
+        <span class="file-ref">07_sensor_and_autonomy.md</span>
+        <a href="07_sensor_and_autonomy.md" class="btn">読む →</a>
+      </div>
+    </div>
+
+    <!-- 第8章 -->
+    <div class="chapter-card" data-keywords="ソフトウェア検証 rover-monitor control-sim ASan UBSan acoustic-trainer ホストテスト">
+      <div class="chapter-card-top">
+        <span class="chapter-tag">Chapter 08 / 検証環境</span>
+        <h4 class="chapter-title">ソフトウェアエコシステムとシミュレーション</h4>
+        <p class="chapter-desc">FastAPIリアルタイムWebモニタ、CコードをネイティブClangで直ビルドするcontrol-sim、ASan/UBSanサニタイザ検証、AI学習環境の全貌。</p>
+        <ul class="chapter-topics">
+          <li>rover-monitor: オドメトリ・DoA方位・局所地図の描画</li>
+          <li>control-sim: Cコード再実装を排したネイティブ回帰テスト</li>
+          <li>acoustic-trainer: 演算順序まで揃えたビット完全一致テスト</li>
+        </ul>
+      </div>
+      <div class="chapter-footer">
+        <span class="file-ref">08_software_ecosystem_and_sim.md</span>
+        <a href="08_software_ecosystem_and_sim.md" class="btn">読む →</a>
+      </div>
+    </div>
+
+    <!-- 第9章 -->
+    <div class="chapter-card" data-keywords="開発ワークフロー ビルド e2studio VS Code macOS Equinox FSP 生成サイクル PlatformIO">
+      <div class="chapter-card-top">
+        <span class="chapter-tag">Chapter 09 / 開発・ビルド</span>
+        <h4 class="chapter-title">開発ワークフロー・ビルド・FSP生成手順</h4>
+        <p class="chapter-desc">macOSでのヘッドレスSIGABRTクラッシュを防ぐInvoke-RaBuild.shの仕組み、FSP設定変更の黄金7ステップ、ESP32のROMモード移行。</p>
+        <ul class="chapter-topics">
+          <li>macOSでe2studioバイナリ直叩きがSIGABRTする理由</li>
+          <li>Invoke-RaBuild.sh によるEquinoxランチャ直接起動</li>
+          <li>FSP生成とMulticore Launch Groupによるペア書込み</li>
+        </ul>
+      </div>
+      <div class="chapter-footer">
+        <span class="file-ref">09_development_workflow_and_build.md</span>
+        <a href="09_development_workflow_and_build.md" class="btn">読む →</a>
+      </div>
+    </div>
+
+    <!-- 第10章 -->
+    <div class="chapter-card" data-keywords="実機校正 キャリブレーション 702 counts/rev トレッド260mm Live Watch デバッグ トラブルシューティング">
+      <div class="chapter-card-top">
+        <span class="chapter-tag">Chapter 10 / 実機テスト</span>
+        <h4 class="chapter-title">実機キャリブレーション・テスト・トラブルシューティング</h4>
+        <p class="chapter-desc">手押し2000mm実測から導出した702 counts/rev、Live Watch必携監視変数、SW4スイッチ設定、モータ・I2C障害の即効処方箋。</p>
+        <ul class="chapter-topics">
+          <li>実測統計によるエンコーダ校正（702 counts/rev）</li>
+          <li>CPU0/CPU1 Live Watch 必須デバッグシンボル一覧</li>
+          <li>SW4・電源・通信リンク障害のトラブルシューティング集</li>
+        </ul>
+      </div>
+      <div class="chapter-footer">
+        <span class="file-ref">10_testing_tuning_and_troubleshooting.md</span>
+        <a href="10_testing_tuning_and_troubleshooting.md" class="btn">読む →</a>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 用語集セクション -->
+  <div id="glossary" class="glossary-section">
+    <div class="section-title" style="padding:0;">
+      <h3>重要技術用語集（Glossary）</h3>
+    </div>
+    <div class="glossary-grid">
+      <div class="glossary-item">
+        <div class="glossary-term">DoA (Direction of Arrival)</div>
+        <div class="glossary-def">音源の到来方向推定。本システムでは4chマイクアレイの位相差から水平方位角（0〜359°）を推定。</div>
+      </div>
+      <div class="glossary-item">
+        <div class="glossary-term">VAD (Voice Activity Detection)</div>
+        <div class="glossary-def">音声区間検出。背景雑音の中から目的の音声・有意音が存在する区間を判定する技術。</div>
+      </div>
+      <div class="glossary-item">
+        <div class="glossary-term">μT-Kernel 3.0</div>
+        <div class="glossary-def">トロンフォーラムが策定したIoTエッジ向け高信頼リアルタイムOS標準仕様。本機ではRA8P1両コアで稼働。</div>
+      </div>
+      <div class="glossary-item">
+        <div class="glossary-term">ロッカーボギー機構</div>
+        <div class="glossary-def">バネを使わずにリンク機構の幾何学的連動で6輪を常時接地させ、車輪径を超える段差を踏破するサスペンション。</div>
+      </div>
+      <div class="glossary-item">
+        <div class="glossary-term">Log-Mel 特徴量</div>
+        <div class="glossary-def">音響波形をメル尺度三角フィルタバンクで圧縮し対数を取ったスペクトログラム。本機は32bin/100fps/int8仕様。</div>
+      </div>
+      <div class="glossary-item">
+        <div class="glossary-term">TFLM</div>
+        <div class="glossary-def">TensorFlow Lite for Microcontrollers。動的メモリ割り当てを行わず、固定アリーナで動く組込み用深層学習ランタイム。</div>
+      </div>
+      <div class="glossary-item">
+        <div class="glossary-term">32-bit IPC FIFO</div>
+        <div class="glossary-def">RA8P1内蔵のハードウェア4段FIFO。上位8bitメッセージID＋下位24bitペイロードの固定語でコア間通信を実施。</div>
+      </div>
+      <div class="glossary-item">
+        <div class="glossary-term">アトミックコミット</div>
+        <div class="glossary-def">6出力（4サーボ＋左右モータ）の指示値をSEQUENCEマーカー受信時に一括確定し、同一ループ内で同時適用する仕組み。</div>
+      </div>
+      <div class="glossary-item">
+        <div class="glossary-term">ToF (Time of Flight)</div>
+        <div class="glossary-def">光の飛行時間から距離を測るセンサ。本機はVL53L1Xを前方3眼（左・中央・右）に配置し最大4m測距。</div>
+      </div>
+      <div class="glossary-item">
+        <div class="glossary-term">702 counts/rev</div>
+        <div class="glossary-def">JGA25-370モータエンコーダの実機手押し実測統計から確定した1回転あたりのパルス積算値（カタログ値900を改定）。</div>
+      </div>
+      <div class="glossary-item">
+        <div class="glossary-term">control-sim</div>
+        <div class="glossary-def">実ファームウェアのCコードをホストClangで直接ビルドし、ASan/UBSan下で検証するネイティブシミュレータ。</div>
+      </div>
+      <div class="glossary-item">
+        <div class="glossary-term">Invoke-RaBuild.sh</div>
+        <div class="glossary-def">macOS環境でのe² studioヘッドレスビルドクラッシュ（SIGABRT）を回避し、Equinoxランチャを直起動するスクリプト。</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- フッター -->
+  <footer>
+    <p><strong>Sound Exploration ROVer（SEROV）プロジェクト 教科書</strong></p>
+    <p>TRONプログラミングコンテスト2026 参加開発リポジトリ</p>
+    <p style="color: #64748b; font-size: 0.75rem;">Documented by Antigravity AI Pair Programmer &copy; 2026</p>
+  </footer>
+
+  <script>
+    // 検索フィルタ処理
+    const searchInput = document.getElementById('searchInput');
+    const cards = document.querySelectorAll('.chapter-card');
+
+    searchInput.addEventListener('input', (e) => {
+      const query = e.target.value.toLowerCase().trim();
+      cards.forEach(card => {
+        const text = card.textContent.toLowerCase();
+        const keywords = card.dataset.keywords.toLowerCase();
+        if (text.includes(query) || keywords.includes(query)) {
+          card.style.display = 'flex';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    });
+
+    // テーマ切り替え
+    const themeBtn = document.getElementById('themeToggle');
+    themeBtn.addEventListener('click', () => {
+      const isLight = document.body.getAttribute('data-theme') === 'light';
+      document.body.setAttribute('data-theme', isLight ? 'dark' : 'light');
+    });
+  </script>
+</body>
+</html>

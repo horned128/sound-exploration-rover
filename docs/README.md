@@ -4,6 +4,7 @@
 
 ## 構成
 
+- [`textbook/`](textbook/): プロジェクトを体系的に理解・習得するための総合教科書（全10章＋ポータルWeb・インタラクティブ構造図）
 - [`firmware/ARCHITECTURE.md`](firmware/ARCHITECTURE.md): CPU0、CPU1、XIAO ESP32S3の全体設計とRA8P1の5層構成
 - [`firmware/archify/SEROV_ARCHITECTURE.html`](firmware/archify/SEROV_ARCHITECTURE.html): 現行コードのCPU0、CPU1、XIAO ESP32S3、監視ツール間の構造を示すインタラクティブ図
 - [`firmware/SENSOR_AUTONOMY.md`](firmware/SENSOR_AUTONOMY.md): BMI270、TCA9548A、VL53L1X×3の接続、ルールベース走行、FSP生成、試験手順

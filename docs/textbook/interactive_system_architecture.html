@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SEROV インタラクティブ・システムアーキテクチャ図</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card-bg: #1e293b;
+      --card-border: #334155;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --accent: #f43f5e;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --bus-usb: #06b6d4;
+      --bus-ipc: #ec4899;
+      --bus-i2c: #8b5cf6;
+      --bus-i2s: #3b82f6;
+      --bus-pwm: #f97316;
+    }
+    [data-theme="light"] {
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --card-border: #cbd5e1;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --primary: #0284c7;
+      --primary-hover: #0369a1;
+      --accent: #e11d48;
+      --bus-usb: #0891b2;
+      --bus-ipc: #db2777;
+      --bus-i2c: #7c3aed;
+      --bus-i2s: #2563eb;
+      --bus-pwm: #ea580c;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      transition: background-color 0.2s, color 0.2s;
+    }
+
+    /* ヘッダー */
+    header {
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--card-border);
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 10;
+    }
+    .header-title h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--primary);
+    }
+    .header-title p {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .header-actions {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+    }
+    .btn {
+      padding: 0.4rem 0.8rem;
+      font-size: 0.85rem;
+      border-radius: 6px;
+      border: 1px solid var(--card-border);
+      background: var(--card-bg);
+      color: var(--text);
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      transition: all 0.2s;
+    }
+    .btn:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #fff !important;
+      border-color: var(--primary);
+    }
+
+    /* フィルタバー */
+    .filter-bar {
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(8px);
+      padding: 0.5rem 1.5rem;
+      border-bottom: 1px solid var(--card-border);
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      font-size: 0.85rem;
+    }
+    .filter-chip {
+      padding: 0.25rem 0.6rem;
+      border-radius: 9999px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      cursor: pointer;
+      font-size: 0.75rem;
+      transition: all 0.2s;
+    }
+    .filter-chip.active {
+      background: var(--primary);
+      color: #fff;
+      border-color: var(--primary);
+      font-weight: 600;
+    }
+
+    /* メインコンテナ */
+    .main-layout {
+      display: flex;
+      flex: 1;
+      height: calc(100vh - 110px);
+      overflow: hidden;
+    }
+
+    /* ダイアグラム領域 */
+    .diagram-pane {
+      flex: 1;
+      position: relative;
+      background: radial-gradient(circle at center, rgba(56, 189, 248, 0.03) 0%, transparent 70%);
+      overflow: auto;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 1rem;
+    }
+    svg.architecture-svg {
+      width: 1000px;
+      height: 700px;
+      user-select: none;
+    }
+
+    /* SVG要素スタイル */
+    .node-group {
+      cursor: pointer;
+      transition: transform 0.2s, filter 0.2s;
+    }
+    .node-group:hover {
+      filter: brightness(1.15) drop-shadow(0 0 10px rgba(56, 189, 248, 0.4));
+    }
+    .node-group.selected rect {
+      stroke: var(--accent) !important;
+      stroke-width: 3px !important;
+      filter: drop-shadow(0 0 12px rgba(244, 63, 94, 0.6));
+    }
+    .bus-path {
+      fill: none;
+      stroke-width: 3px;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      transition: opacity 0.3s, stroke-width 0.3s;
+    }
+    .bus-path.dimmed { opacity: 0.15; }
+    .bus-path.highlighted {
+      stroke-width: 5px;
+      filter: drop-shadow(0 0 8px currentColor);
+    }
+
+    /* サイドパネル */
+    .info-panel {
+      width: 380px;
+      background: var(--card-bg);
+      border-left: 1px solid var(--card-border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      padding: 1.25rem;
+      transition: transform 0.3s ease;
+    }
+    .info-panel h2 {
+      font-size: 1.2rem;
+      color: var(--primary);
+      margin-bottom: 0.5rem;
+    }
+    .info-badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--primary);
+      margin-bottom: 1rem;
+    }
+    .info-section {
+      margin-bottom: 1.2rem;
+    }
+    .info-section h3 {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 0.4rem;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 0.2rem;
+    }
+    .info-list {
+      list-style: none;
+      font-size: 0.85rem;
+    }
+    .info-list li {
+      margin-bottom: 0.4rem;
+      padding-left: 0.8rem;
+      position: relative;
+    }
+    .info-list li::before {
+      content: "•";
+      position: absolute;
+      left: 0;
+      color: var(--primary);
+    }
+    .code-tag {
+      font-family: monospace;
+      background: rgba(0,0,0,0.25);
+      padding: 0.1rem 0.3rem;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      color: #38bdf8;
+    }
+
+    /* フッター */
+    footer {
+      background: var(--card-bg);
+      border-top: 1px solid var(--card-border);
+      padding: 0.4rem 1.5rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ヘッダー -->
+  <header>
+    <div class="header-title">
+      <h1>SEROV インタラクティブ・システムアーキテクチャ図</h1>
+      <p>4プロセッサ協調・センサ統合・アクチュエータ駆動の相互関係ビジュアライザ</p>
+    </div>
+    <div class="header-actions">
+      <a href="index.html" class="btn">📚 教科書ポータル</a>
+      <a href="03_system_architecture.md" class="btn">第3章 設計書</a>
+      <button id="themeToggle" class="btn">🌓 テーマ切替</button>
+    </div>
+  </header>
+
+  <!-- フィルタバー -->
+  <div class="filter-bar">
+    <span>強調表示フィルタ:</span>
+    <button class="filter-chip active" data-filter="all">すべて表示</button>
+    <button class="filter-chip" data-filter="control">制御フロー (C0→C1→モータ)</button>
+    <button class="filter-chip" data-filter="telemetry">診断フロー (C1→C0→ESP→PC)</button>
+    <button class="filter-chip" data-filter="acoustic">音響AIパイプライン</button>
+    <button class="filter-chip" data-filter="sensor">障害物センサ系</button>
+  </div>
+
+  <!-- メインレイアウト -->
+  <div class="main-layout">
+    
+    <!-- SVGダイアグラム -->
+    <div class="diagram-pane">
+      <svg class="architecture-svg" viewBox="0 0 1000 700" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="grad-xvf" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#1e3a8a" />
+            <stop offset="100%" stop-color="#0f172a" />
+          </linearGradient>
+          <linearGradient id="grad-esp" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#065f46" />
+            <stop offset="100%" stop-color="#064e3b" />
+          </linearGradient>
+          <linearGradient id="grad-c0" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#1e293b" />
+            <stop offset="100%" stop-color="#0f172a" />
+          </linearGradient>
+          <linearGradient id="grad-c1" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#312e81" />
+            <stop offset="100%" stop-color="#1e1b4b" />
+          </linearGradient>
+
+          <!-- 矢印マーカー -->
+          <marker id="arrow-usb" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--bus-usb)" />
+          </marker>
+          <marker id="arrow-ipc" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--bus-ipc)" />
+          </marker>
+          <marker id="arrow-i2c" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--bus-i2c)" />
+          </marker>
+          <marker id="arrow-pwm" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--bus-pwm)" />
+          </marker>
+        </defs>
+
+        <!-- 背景グループ枠 -->
+        <!-- 音響フロントエンド枠 -->
+        <rect x="30" y="30" width="300" height="420" rx="12" fill="rgba(30, 41, 59, 0.4)" stroke="#334155" stroke-dasharray="4 4" />
+        <text x="45" y="55" fill="#94a3b8" font-size="12" font-weight="bold">HEAD: 音声・無線フロントエンド</text>
+
+        <!-- RA8P1 MCU枠 -->
+        <rect x="360" y="30" width="380" height="640" rx="16" fill="rgba(15, 23, 42, 0.6)" stroke="#38bdf8" stroke-width="2" />
+        <text x="380" y="58" fill="#38bdf8" font-size="15" font-weight="bold">ルネサス RA8P1 MCU (デュアルコア)</text>
+
+        <!-- 外部アクチュエータ枠 -->
+        <rect x="770" y="350" width="200" height="320" rx="12" fill="rgba(30, 41, 59, 0.4)" stroke="#334155" stroke-dasharray="4 4" />
+        <text x="785" y="375" fill="#94a3b8" font-size="12" font-weight="bold">MUSCLE: 駆動機構</text>
+
+        <!-- バス配線ライン -->
+        <!-- XVF3800 -> ESP32-S3 (I2S/I2C) -->
+        <path id="bus-xvf-esp" class="bus-path acoustic" d="M 180 180 L 180 230" stroke="var(--bus-i2s)" marker-end="url(#arrow-usb)" />
+        <text x="190" y="210" fill="var(--bus-i2s)" font-size="10">I2S (音声) / I2C (DoA)</text>
+
+        <!-- ESP32-S3 <-> RA8P1 CPU0 (USB High Speed) -->
+        <path id="bus-esp-c0" class="bus-path control telemetry acoustic" d="M 290 320 L 390 320" stroke="var(--bus-usb)" marker-end="url(#arrow-usb)" />
+        <text x="305" y="310" fill="var(--bus-usb)" font-size="11" font-weight="bold">J7 USB HS CDC</text>
+
+        <!-- CPU0 -> CPU1 (IPC FIFO) -->
+        <path id="bus-c0-c1" class="bus-path control telemetry" d="M 550 350 L 550 430" stroke="var(--bus-ipc)" marker-end="url(#arrow-ipc)" />
+        <text x="560" y="395" fill="var(--bus-ipc)" font-size="11" font-weight="bold">IPC FIFO (32-bit)</text>
+
+        <!-- I2C センサバス (CPU0 -> TCA9548A/BMI270) -->
+        <path id="bus-c0-sensor" class="bus-path sensor" d="M 450 140 L 450 110 L 250 110" stroke="var(--bus-i2c)" />
+        <path id="bus-c0-tof" class="bus-path sensor" d="M 140 110 L 80 110" stroke="var(--bus-i2c)" marker-end="url(#arrow-i2c)" />
+
+        <!-- CPU1 -> アクチュエータ (PWM) -->
+        <path id="bus-c1-servo" class="bus-path control" d="M 710 490 L 780 490" stroke="var(--bus-pwm)" marker-end="url(#arrow-pwm)" />
+        <text x="720" y="480" fill="var(--bus-pwm)" font-size="10">4ch PWM</text>
+
+        <path id="bus-c1-motor" class="bus-path control" d="M 710 590 L 780 590" stroke="var(--bus-pwm)" marker-end="url(#arrow-pwm)" />
+        <text x="720" y="580" fill="var(--bus-pwm)" font-size="10">20kHz PWM</text>
+
+        <!-- ノード要素群 -->
+        <!-- 1. XVF3800 -->
+        <g id="node-xvf" class="node-group" onclick="selectNode('xvf')">
+          <rect x="70" y="80" width="220" height="100" rx="8" fill="url(#grad-xvf)" stroke="#3b82f6" stroke-width="2" />
+          <text x="180" y="115" text-anchor="middle" fill="#fff" font-size="14" font-weight="bold">① XVF3800</text>
+          <text x="180" y="135" text-anchor="middle" fill="#93c5fd" font-size="11">音響DSP / 4ch マイクアレイ</text>
+          <text x="180" y="155" text-anchor="middle" fill="#60a5fa" font-size="10">AEC, ビームフォーミング, DoA/VAD</text>
+        </g>
+
+        <!-- 2. XIAO ESP32-S3 -->
+        <g id="node-esp" class="node-group" onclick="selectNode('esp')">
+          <rect x="70" y="240" width="220" height="160" rx="8" fill="url(#grad-esp)" stroke="#10b981" stroke-width="2" />
+          <text x="180" y="275" text-anchor="middle" fill="#fff" font-size="14" font-weight="bold">② XIAO ESP32-S3</text>
+          <text x="180" y="295" text-anchor="middle" fill="#a7f3d0" font-size="11">通信 & 音響フロントエンド</text>
+          <text x="180" y="325" text-anchor="middle" fill="#6ee7b7" font-size="10">• Log-Mel抽出 (32bin/100fps)</text>
+          <text x="180" y="345" text-anchor="middle" fill="#6ee7b7" font-size="10">• int8量子化 & 800msリング</text>
+          <text x="180" y="365" text-anchor="middle" fill="#6ee7b7" font-size="10">• TinyUSB CDC & Wi-Fi UDP</text>
+        </g>
+
+        <!-- 3. RA8P1 CPU0 -->
+        <g id="node-c0" class="node-group" onclick="selectNode('c0')">
+          <rect x="390" y="80" width="320" height="260" rx="10" fill="url(#grad-c0)" stroke="#38bdf8" stroke-width="2" />
+          <text x="550" y="115" text-anchor="middle" fill="#fff" font-size="15" font-weight="bold">③ RA8P1 CPU0 (Cortex-M85)</text>
+          <text x="550" y="135" text-anchor="middle" fill="#38bdf8" font-size="11">主制御・AI思考・統合 (1 GHz / μT-Kernel 3.0)</text>
+          
+          <!-- タスク一覧小箱 -->
+          <rect x="410" y="150" width="280" height="32" rx="4" fill="rgba(56, 189, 248, 0.1)" stroke="#0284c7" />
+          <text x="420" y="171" fill="#e0f2fe" font-size="10" font-weight="bold">task_command (50ms / 優先度6)</text>
+
+          <rect x="410" y="190" width="280" height="32" rx="4" fill="rgba(56, 189, 248, 0.1)" stroke="#0284c7" />
+          <text x="420" y="211" fill="#e0f2fe" font-size="10" font-weight="bold">task_sensor (50ms / 優先度7) & sensor_hub</text>
+
+          <rect x="410" y="230" width="280" height="32" rx="4" fill="rgba(56, 189, 248, 0.1)" stroke="#0284c7" />
+          <text x="420" y="251" fill="#e0f2fe" font-size="10" font-weight="bold">task_acoustic_link (1ms poll / 優先度8)</text>
+
+          <rect x="410" y="270" width="280" height="32" rx="4" fill="rgba(56, 189, 248, 0.1)" stroke="#0284c7" />
+          <text x="420" y="291" fill="#e0f2fe" font-size="10" font-weight="bold">task_think (100ms / 優先度10) & TFLM AI</text>
+        </g>
+
+        <!-- 4. RA8P1 CPU1 -->
+        <g id="node-c1" class="node-group" onclick="selectNode('c1')">
+          <rect x="390" y="440" width="320" height="210" rx="10" fill="url(#grad-c1)" stroke="#818cf8" stroke-width="2" />
+          <text x="550" y="475" text-anchor="middle" fill="#fff" font-size="15" font-weight="bold">④ RA8P1 CPU1 (Cortex-M33)</text>
+          <text x="550" y="495" text-anchor="middle" fill="#a5b4fc" font-size="11">リアルタイム駆動・安全監視 (250 MHz / μT-Kernel)</text>
+
+          <rect x="410" y="515" width="280" height="42" rx="4" fill="rgba(99, 102, 241, 0.15)" stroke="#6366f1" />
+          <text x="420" y="535" fill="#e0e7ff" font-size="10" font-weight="bold">task_actuator (優先度4 / 1ms周期ハンドラ)</text>
+          <text x="420" y="550" fill="#c7d2fe" font-size="9">実Δt更新, PWMランプ, 1500msタイムアウト</text>
+
+          <rect x="410" y="570" width="280" height="42" rx="4" fill="rgba(99, 102, 241, 0.15)" stroke="#6366f1" />
+          <text x="420" y="590" fill="#e0e7ff" font-size="10" font-weight="bold">task_status (優先度12 / 10ms周期ハンドラ)</text>
+          <text x="420" y="605" fill="#c7d2fe" font-size="9">赤LED点滅, 診断スナップショット順次返送</text>
+        </g>
+
+        <!-- 5. センサ群 (ToF & IMU) -->
+        <g id="node-sensor" class="node-group" onclick="selectNode('sensor')">
+          <rect x="50" y="480" width="260" height="170" rx="8" fill="var(--card-bg)" stroke="var(--bus-i2c)" stroke-width="2" />
+          <text x="180" y="510" text-anchor="middle" fill="#fff" font-size="13" font-weight="bold">I2C センサ統合系</text>
+          <text x="180" y="530" text-anchor="middle" fill="#a78bfa" font-size="10">P511 SDA1 / P512 SCL1 (400kbps)</text>
+          <text x="70" y="560" fill="#ddd" font-size="10">• TCA9548A 8chマルチプレクサ (0x70)</text>
+          <text x="70" y="580" fill="#ddd" font-size="10">• VL53L1X ToF × 3台 (CH0/1/2, 0x29)</text>
+          <text x="70" y="600" fill="#ddd" font-size="10">• BMI270 6軸IMU (直結, 0x68/0x69)</text>
+          <text x="70" y="625" fill="#f43f5e" font-size="9" font-weight="bold">★ 200ms更新停止 独立監視 (Safe Stop)</text>
+        </g>
+
+        <!-- 6. アクチュエータ群 -->
+        <g id="node-actuator" class="node-group" onclick="selectNode('actuator')">
+          <rect x="790" y="420" width="160" height="100" rx="8" fill="var(--card-bg)" stroke="var(--bus-pwm)" stroke-width="2" />
+          <text x="870" y="450" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">DS3225MG サーボ × 4</text>
+          <text x="870" y="470" text-anchor="middle" fill="#fed7aa" font-size="9">4輪逆相操舵 (FR/FL/RR/RL)</text>
+          <text x="870" y="490" text-anchor="middle" fill="#fed7aa" font-size="9">50Hz PWM (1000〜2000μs)</text>
+
+          <rect x="790" y="540" width="160" height="110" rx="8" fill="var(--card-bg)" stroke="var(--bus-pwm)" stroke-width="2" />
+          <text x="870" y="570" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">BTS7960 & JGA25 × 6</text>
+          <text x="870" y="590" text-anchor="middle" fill="#fed7aa" font-size="9">論理左右各3台 並列駆動</text>
+          <text x="870" y="610" text-anchor="middle" fill="#fed7aa" font-size="9">20kHz PWM (Duty 0〜700‰)</text>
+          <text x="870" y="630" text-anchor="middle" fill="#38bdf8" font-size="9">代表エンコーダ: 702 counts/rev</text>
+        </g>
+
+        <!-- 7. 外部監視PC -->
+        <g id="node-pc" class="node-group" onclick="selectNode('pc')">
+          <rect x="70" y="670" width="220" height="20" rx="4" fill="#334155" />
+          <text x="180" y="684" text-anchor="middle" fill="#94a3b8" font-size="9">監視PC (Wi-Fi UDP 5005 / rover-monitor)</text>
+        </g>
+      </svg>
+    </div>
+
+    <!-- 詳細情報サイドパネル -->
+    <div id="infoPanel" class="info-panel">
+      <h2 id="panelTitle">ブロックを選択してください</h2>
+      <span id="panelBadge" class="info-badge">概要</span>
+      
+      <div class="info-section">
+        <h3>担当責務・ハードウェア</h3>
+        <ul id="panelResponsibilities" class="info-list">
+          <li>図中のプロセッサやセンサをクリックすると、詳細情報が表示されます。</li>
+        </ul>
+      </div>
+
+      <div class="info-section">
+        <h3>通信プロトコル / インターフェース</h3>
+        <div id="panelProtocols" style="font-size: 0.85rem;">—</div>
+      </div>
+
+      <div class="info-section">
+        <h3>関連ソースコード</h3>
+        <div id="panelSources" style="font-size: 0.85rem;">—</div>
+      </div>
+
+      <div class="info-section">
+        <h3>教科書 参照章</h3>
+        <div id="panelChapters" style="font-size: 0.85rem;">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- フッター -->
+  <footer>
+    <span>TRONプログラミングコンテスト2026: Sound Exploration ROVer（SEROV）</span>
+    <span>EK-RA8P1 (Cortex-M85 + Cortex-M33) / μT-Kernel 3.0</span>
+  </footer>
+
+  <script>
+    // ノード詳細データ辞書
+    const nodeData = {
+      xvf: {
+        title: "① XVF3800 (XMOS 音響専用DSP)",
+        badge: "音響センシング・ビームフォーミング",
+        resp: [
+          "4ch MEMSマイクアレイからの16kHz/32bit PCM空間音響処理",
+          "音響エコーキャンセル (AEC) & 背景ノイズ抑圧",
+          "到来方向推定 (DoA: 0〜359°) & 音声区間検出 (VAD)",
+          "走行判断や通信には関与せず、純粋な音響フロントエンドとして稼働"
+        ],
+        proto: "I2C Resource Command (ID 20: DoA/VAD) / I2S Master (16kHz stereo 32bit)",
+        sources: [
+          "firmware/esp32s3/src/xvf3800_control.c",
+          "firmware/esp32s3/src/audio_capture.c"
+        ],
+        chapters: [
+          "<a href='06_acoustic_dsp_and_edge_ai.md' class='btn btn-primary' style='padding:0.2rem 0.5rem;'>第6章 音響信号処理</a>"
+        ]
+      },
+      esp: {
+        title: "② XIAO ESP32-S3 (音声・無線フロントエンド)",
+        badge: "ESP-IDF 5.5.3 / FreeRTOS",
+        resp: [
+          "I2S PCMからのLog-Mel特徴量ストリーミング抽出 (400点窓/160点ホップ/32bin/100fps)",
+          "int8量子化 (scale 0.125) および 800ms (80フレーム) リングバッファ保持",
+          "TinyUSB CDC-ACM デバイス (RA8P1 J7へバイナリ電文送信)",
+          "Wi-Fi UDP JSON Lines 診断テレメトリ送信 (監視PC向け、250ms周期)"
+        ],
+        proto: "USB CDC バイナリフレーム (Magic: 'S''R', CRC-16) / Wi-Fi UDP (ポート5005)",
+        sources: [
+          "firmware/esp32s3/src/log_mel_extractor.c",
+          "firmware/esp32s3/src/acoustic_frontend.c",
+          "firmware/esp32s3/src/usb_link.c",
+          "firmware/common/acoustic_protocol.h"
+        ],
+        chapters: [
+          "<a href='05_interprocessor_communication.md' class='btn btn-primary' style='padding:0.2rem 0.5rem;'>第5章 通信プロトコル</a>",
+          "<a href='06_acoustic_dsp_and_edge_ai.md' class='btn btn-primary' style='padding:0.2rem 0.5rem;'>第6章 音響エッジAI</a>"
+        ]
+      },
+      c0: {
+        title: "③ RA8P1 CPU0 (Cortex-M85 @ 1GHz)",
+        badge: "μT-Kernel 3.0 主制御・思考コア",
+        resp: [
+          "USB HCDC Host: ESP32-S3からの音響観測パケット受信・CRC検証",
+          "I2C1 センサ統合: TCA9548A経由のToF×3およびBMI270の50ms周期取得",
+          "自律走行思考: 停止聴取型音源追従 & ルールベース障害物回避",
+          "エッジAI: TensorFlow Lite for Microcontrollers (TFLM) 完全int8モデル実行",
+          "IPC送信: 50ms周期で左右モータRPM・4輪サーボ角度を一括コミット送信",
+          "物理ピン所有権: Solutionで定義された全ピンをg_bsp_pin_cfgで一括初期化"
+        ],
+        proto: "USB HCDC Host / 4段32-bit IPC FIFO (Ch 0) / IIC1 Master (400kbps)",
+        sources: [
+          "firmware/ra8p1/SoundExplorationRover_CPU0/src/main.c",
+          "firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/task_command.c",
+          "firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/task_think.c",
+          "firmware/ra8p1/SoundExplorationRover_CPU0/src/ai/tflm_runtime.cc"
+        ],
+        chapters: [
+          "<a href='03_system_architecture.md' class='btn btn-primary' style='padding:0.2rem 0.5rem;'>第3章 アーキテクチャ</a>",
+          "<a href='04_rtos_and_multicore.md' class='btn btn-primary' style='padding:0.2rem 0.5rem;'>第4章 μT-Kernel 3.0</a>",
+          "<a href='07_sensor_and_autonomy.md' class='btn btn-primary' style='padding:0.2rem 0.5rem;'>第7章 センサ自律走行</a>"
+        ]
+      },
+      c1: {
+        title: "④ RA8P1 CPU1 (Cortex-M33 @ 250MHz)",
+        badge: "μT-Kernel 3.0 リアルタイム駆動コア",
+        resp: [
+          "1ms絶対周期アクチュエータ制御 (周期ハンドラ＋イベントフラグ起床)",
+          "実Δt駆動によるPWM目標ランプ (2‰/ms) および安全リミット (最大700‰)",
+          "4輪独立逆相ステアリングPWM生成 (50Hz, 1000〜2000μs)",
+          "左右代表エンコーダ割込積算 & 実時間RPMオドメトリ算出 (702 counts/rev)",
+          "1500ms IPC指令途絶時のローカル安全停止 (Safe Stop)",
+          "10ms周期ハンドラによる診断スナップショットの1語分散返送 (赤LED制御)"
+        ],
+        proto: "4段32-bit IPC FIFO (Ch 0 受信割込・送信) / GPTタイマPWM",
+        sources: [
+          "firmware/ra8p1/SoundExplorationRover_CPU1/src/tasks/task_actuator.c",
+          "firmware/ra8p1/SoundExplorationRover_CPU1/src/services/actuator_service.c",
+          "firmware/ra8p1/SoundExplorationRover_CPU1/src/services/drive_service.c",
+          "firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/encoder.c"
+        ],
+        chapters: [
+          "<a href='04_rtos_and_multicore.md' class='btn btn-primary' style='padding:0.2rem 0.5rem;'>第4章 リアルタイム制御</a>",
+          "<a href='05_interprocessor_communication.md' class='btn btn-primary' style='padding:0.2rem 0.5rem;'>第5章 IPCプロトコル</a>",
+          "<a href='10_testing_tuning_and_troubleshooting.md' class='btn btn-primary' style='padding:0.2rem 0.5rem;'>第10章 実機テスト</a>"
+        ]
+      },
+      sensor: {
+        title: "I2C センサ統合系 (ToF × 3 + 6軸IMU)",
+        badge: "障害物検知・姿勢監視",
+        resp: [
+          "TCA9548A (0x70) を介して同アドレス (0x29) のVL53L1X 3台をチャンネル分離",
+          "前方配置: LEFT (-45°), CENTER (0°), RIGHT (+45°) による死角ゼロ検知",
+          "BMI270 6軸IMU (0x68/0x69) による転倒・急傾斜 (700mg)・衝突衝撃 (2400mg) 監視",
+          "200ms更新停止をCPU0思考タスクが独立監視し、通信凍結時の暴走を未然防止"
+        ],
+        proto: "I2C Fast-mode (400 kbit/s) on P511 (SDA1) / P512 (SCL1)",
+        sources: [
+          "firmware/ra8p1/SoundExplorationRover_CPU0/src/services/sensor_hub.c",
+          "firmware/ra8p1/SoundExplorationRover_CPU0/src/control/obstacle_avoidance_controller.c",
+          "firmware/ra8p1/SoundExplorationRover_CPU0/src/control/sensor_liveness.h"
+        ],
+        chapters: [
+          "<a href='07_sensor_and_autonomy.md' class='btn btn-primary' style='padding:0.2rem 0.5rem;'>第7章 センサ自律走行</a>"
+        ]
+      },
+      actuator: {
+        title: "アクチュエータ & 駆動機構",
+        badge: "6輪駆動・4輪逆相操舵",
+        resp: [
+          "JGA25-370 12V 300RPM DCモータ × 6台 (論理左右各3並列駆動)",
+          "BTS7960 大電流Hブリッジドライバ × 2台 (定格43A, 20kHz PWM)",
+          "DS3225MG 25kgf·cm デジタルサーボ × 4台 (FR/FL/RR/RL 逆相操舵)",
+          "代表エンコーダ実機校正値: 702 counts/rev, 車体トレッド: 260 mm"
+        ],
+        proto: "GPTタイマ 20kHz PWM (モータ) / 50Hz PWM (サーボ) / IRQ外部割込 (エンコーダ)",
+        sources: [
+          "firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/servo.c",
+          "firmware/ra8p1/SoundExplorationRover_CPU1/src/drivers/bts7960.c",
+          "hardware/actuator/README.md"
+        ],
+        chapters: [
+          "<a href='02_hardware_and_mechanics.md' class='btn btn-primary' style='padding:0.2rem 0.5rem;'>第2章 ハードウェア機構</a>",
+          "<a href='10_testing_tuning_and_troubleshooting.md' class='btn btn-primary' style='padding:0.2rem 0.5rem;'>第10章 実機校正</a>"
+        ]
+      },
+      pc: {
+        title: "外部監視PC (rover-monitor)",
+        badge: "FastAPI / WebSocket / Webブラウザ",
+        resp: [
+          "Wi-Fi UDP 5005番ポートでJSON Linesテレメトリを受信",
+          "ブラウザ (http://127.0.0.1:8000) 上でオドメトリ、DoA、局所地図、DSPヘルスを描画",
+          "実機ログ (rover-monitor.log) を記録し、control-sim でのリプレイ回帰検証に活用"
+        ],
+        proto: "Wi-Fi UDP (ポート5005) JSON Lines",
+        sources: [
+          "software/rover-monitor/main.py",
+          "software/rover-monitor/index.html"
+        ],
+        chapters: [
+          "<a href='08_software_ecosystem_and_sim.md' class='btn btn-primary' style='padding:0.2rem 0.5rem;'>第8章 ソフトウェア環境</a>"
+        ]
+      }
+    };
+
+    // ノード選択処理
+    function selectNode(key) {
+      const data = nodeData[key];
+      if (!data) return;
+
+      // 選択状態のスタイル更新
+      document.querySelectorAll('.node-group').forEach(el => el.classList.remove('selected'));
+      const target = document.getElementById(`node-${key}`);
+      if (target) target.classList.add('selected');
+
+      // サイドパネル更新
+      document.getElementById('panelTitle').textContent = data.title;
+      document.getElementById('panelBadge').textContent = data.badge;
+
+      const respUl = document.getElementById('panelResponsibilities');
+      respUl.innerHTML = '';
+      data.resp.forEach(text => {
+        const li = document.createElement('li');
+        li.textContent = text;
+        respUl.appendChild(li);
+      });
+
+      document.getElementById('panelProtocols').innerHTML = `<span class="code-tag">${data.proto}</span>`;
+      
+      const srcDiv = document.getElementById('panelSources');
+      srcDiv.innerHTML = data.sources.map(s => `<div><span class="code-tag">${s}</span></div>`).join('');
+
+      const chapDiv = document.getElementById('panelChapters');
+      chapDiv.innerHTML = data.chapters.join(' ');
+    }
+
+    // フィルタボタン処理
+    document.querySelectorAll('.filter-chip').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.filter-chip').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const filter = btn.dataset.filter;
+
+        document.querySelectorAll('.bus-path').forEach(path => {
+          if (filter === 'all' || path.classList.contains(filter)) {
+            path.classList.remove('dimmed');
+            if (filter !== 'all') path.classList.add('highlighted');
+            else path.classList.remove('highlighted');
+          } else {
+            path.classList.add('dimmed');
+            path.classList.remove('highlighted');
+          }
+        });
+      });
+    });
+
+    // テーマ切り替え
+    const themeBtn = document.getElementById('themeToggle');
+    themeBtn.addEventListener('click', () => {
+      const isLight = document.body.getAttribute('data-theme') === 'light';
+      document.body.setAttribute('data-theme', isLight ? 'dark' : 'light');
+    });
+
+    // 初期選択
+    selectNode('c0');
+  </script>
+</body>
+</html>
