@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>音響AIパイプライン・インタラクティブシミュレータ | SEROV エッジAI教材</title>
+  <style>
+    :root {
+      --bg: #090d16;
+      --surface: #111827;
+      --border: #1f293d;
+      --card-bg: #1a2234;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --primary: #38bdf8;
+      --primary-hover: #0284c7;
+      --accent: #f43f5e;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --chart-line: #38bdf8;
+      --chart-fill: rgba(56, 189, 248, 0.2);
+    }
+    [data-theme="light"] {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --border: #e2e8f0;
+      --card-bg: #f1f5f9;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --primary: #0284c7;
+      --primary-hover: #0369a1;
+      --chart-line: #0284c7;
+      --chart-fill: rgba(2, 132, 199, 0.2);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding-bottom: 2rem;
+      transition: background-color 0.2s, color 0.2s;
+    }
+
+    /* ヘッダー */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .header-title h1 {
+      font-size: 1.25rem;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .header-title p {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .btn {
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      transition: all 0.2s;
+    }
+    .btn:hover { border-color: var(--primary); color: var(--primary); }
+    .btn-primary { background: var(--primary); color: #090d16 !important; border-color: var(--primary); }
+
+    /* メインコンテナ */
+    .container {
+      max-width: 1200px;
+      margin: 1.5rem auto;
+      padding: 0 1.5rem;
+    }
+
+    /* 音源コントロールパネル */
+    .control-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+    }
+    .control-group label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .sound-select {
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 0.9rem;
+      outline: none;
+    }
+    .slider-wrap {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+    }
+    .slider-wrap input[type="range"] {
+      cursor: pointer;
+    }
+
+    /* ステップナビゲーション */
+    .pipeline-steps {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .step-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.75rem 0.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .step-btn:hover { border-color: var(--primary); }
+    .step-btn.active {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: var(--primary);
+    }
+    .step-num {
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: var(--primary);
+      display: block;
+      text-transform: uppercase;
+    }
+    .step-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+
+    /* メインシミュレーション表示部 */
+    .stage-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .stage-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.8rem;
+    }
+    .stage-header h3 {
+      font-size: 1.2rem;
+      color: var(--primary);
+    }
+    .stage-desc {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-bottom: 1.2rem;
+    }
+    .canvas-container {
+      width: 100%;
+      height: 260px;
+      background: var(--bg);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      position: relative;
+      overflow: hidden;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* 照合ステータス */
+    .match-result-card {
+      background: var(--card-bg);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-top: 1rem;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+    .match-val {
+      font-size: 1.4rem;
+      font-weight: 800;
+    }
+    .match-pass { color: var(--success); }
+    .match-fail { color: var(--accent); }
+
+    /* 説明アコーディオン */
+    .math-box {
+      background: rgba(0, 0, 0, 0.25);
+      border-left: 3px solid var(--primary);
+      padding: 0.75rem 1rem;
+      font-family: monospace;
+      font-size: 0.85rem;
+      margin-top: 1rem;
+      border-radius: 0 6px 6px 0;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ヘッダー -->
+  <header>
+    <div class="header-title">
+      <h1>🎧 音響AIパイプライン・シミュレータ</h1>
+      <p>音波 ──▶ 窓関数 ──▶ FFT ──▶ Log-Mel ──▶ int8量子化 ──▶ 64次元照合</p>
+    </div>
+    <div style="display: flex; gap: 0.8rem;">
+      <a href="README.md" class="btn">📖 サブ教科書目次</a>
+      <button id="themeBtn" class="btn">🌓 テーマ切替</button>
+    </div>
+  </header>
+
+  <div class="container">
+
+    <!-- 音源コントロール -->
+    <div class="control-card">
+      <div class="control-group">
+        <label for="soundSelect">テスト入力音源:</label>
+        <select id="soundSelect" class="sound-select">
+          <option value="whistle">救助笛 (高音 3000 Hz ピュアトーン)</option>
+          <option value="motor">モータ走行音 (低音 300 Hz + 高調波)</option>
+          <option value="impact">障害物接触音 (広帯域インパルス)</option>
+          <option value="noise">環境ホワイトノイズ (ランダム雑音)</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <div class="slider-wrap">
+          <label>音量:</label>
+          <input type="range" id="volumeSlider" min="0.1" max="2.0" step="0.1" value="1.0">
+          <span id="volVal">1.0x</span>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <div class="slider-wrap">
+          <label>ノイズ混入率:</label>
+          <input type="range" id="noiseSlider" min="0.0" max="0.5" step="0.05" value="0.05">
+          <span id="noiseVal">5%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- パイプラインステップ切り替え -->
+    <div class="pipeline-steps">
+      <div class="step-btn active" onclick="switchStep(0)">
+        <span class="step-num">Step 1</span>
+        <span class="step-title">生PCM波形</span>
+      </div>
+      <div class="step-btn" onclick="switchStep(1)">
+        <span class="step-num">Step 2</span>
+        <span class="step-title">窓関数 (Hann)</span>
+      </div>
+      <div class="step-btn" onclick="switchStep(2)">
+        <span class="step-num">Step 3</span>
+        <span class="step-title">512点 FFT</span>
+      </div>
+      <div class="step-btn" onclick="switchStep(3)">
+        <span class="step-num">Step 4</span>
+        <span class="step-title">32帯域 Mel</span>
+      </div>
+      <div class="step-btn" onclick="switchStep(4)">
+        <span class="step-num">Step 5</span>
+        <span class="step-title">int8 量子化</span>
+      </div>
+      <div class="step-btn" onclick="switchStep(5)">
+        <span class="step-num">Step 6</span>
+        <span class="step-title">64次元 照合</span>
+      </div>
+    </div>
+
+    <!-- ステージ表示 -->
+    <div class="stage-card">
+      <div class="stage-header">
+        <h3 id="stageHeading">Step 1: 生PCM波形 (16kHz, 400サンプル / 25ms)</h3>
+        <span id="stageBadge" class="btn" style="font-size:0.75rem; pointer-events:none;">時間領域 (Time Domain)</span>
+      </div>
+      <p id="stageExplanation" class="stage-desc">
+        マイクから届いた生の音圧振動データです。400個の浮動小数点数値（$-1.0 \sim +1.0$）が並んでいます。
+        位相（タイミング）のズレに極めて弱いため、このままではAIは音の種類を安定して認識できません。
+      </p>
+
+      <div class="canvas-container">
+        <canvas id="mainCanvas"></canvas>
+      </div>
+
+      <!-- ステップ6用 照合結果表示 -->
+      <div id="matchCard" class="match-result-card" style="display: none;">
+        <div>
+          <div>照合対象プロトタイプ</div>
+          <div class="match-val" style="color: var(--primary);">救助笛 (Class 0)</div>
+        </div>
+        <div>
+          <div>二乗L2距離 ($D^2$)</div>
+          <div id="distVal" class="match-val">128</div>
+        </div>
+        <div>
+          <div>許容しきい値</div>
+          <div class="match-val" style="color: var(--text-muted);">500 以下</div>
+        </div>
+        <div>
+          <div>判定結果</div>
+          <div id="resultStatus" class="match-val match-pass">MATCHED (合格)</div>
+        </div>
+      </div>
+
+      <div id="stageMath" class="math-box">
+        x[n] = signal(n) + noise(n)  (n = 0 ... 399)
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let currentStep = 0;
+    const canvas = document.getElementById('mainCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+      canvas.width = canvas.parentElement.clientWidth;
+      canvas.height = canvas.parentElement.clientHeight;
+      drawCurrentStage();
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    // コントロール要素
+    const soundSelect = document.getElementById('soundSelect');
+    const volumeSlider = document.getElementById('volumeSlider');
+    const noiseSlider = document.getElementById('noiseSlider');
+    const volVal = document.getElementById('volVal');
+    const noiseVal = document.getElementById('noiseVal');
+
+    soundSelect.addEventListener('change', drawCurrentStage);
+    volumeSlider.addEventListener('input', (e) => {
+      volVal.textContent = e.target.value + 'x';
+      drawCurrentStage();
+    });
+    noiseSlider.addEventListener('input', (e) => {
+      noiseVal.textContent = Math.round(e.target.value * 100) + '%';
+      drawCurrentStage();
+    });
+
+    function switchStep(step) {
+      currentStep = step;
+      document.querySelectorAll('.step-btn').forEach((b, i) => {
+        if (i === step) b.classList.add('active');
+        else b.classList.remove('active');
+      });
+      updateStageMeta();
+      drawCurrentStage();
+    }
+
+    const stepMeta = [
+      {
+        heading: "Step 1: 生PCM波形 (16kHz, 400サンプル / 25ms)",
+        badge: "時間領域 (Time Domain)",
+        desc: "マイクから届いた生の音圧振動データです。400サンプルの波形（-1.0〜+1.0）です。立ち位置が数ミリ変わるだけで山と谷が逆転するため、このままではAIは認識できません。",
+        math: "PCM波形: x[n]  (n = 0 .. 399, Fs = 16,000 Hz, 窓幅 = 25 ms)",
+        showMatch: false
+      },
+      {
+        heading: "Step 2: Periodic Hann窓関数の乗算",
+        badge: "周波数漏洩防止",
+        desc: "四角くブツ切りにすると両端に急峻な絶壁ができて偽の高周波ノイズが湧くため、両端をそっとゼロに落とす滑らかなコサインカーブ（Hann窓）を掛け算します。",
+        math: "w[n] = 0.5 - 0.5 * cos(2π * n / 400)\nx_windowed[n] = x[n] * w[n]",
+        showMatch: false
+      },
+      {
+        heading: "Step 3: 512点 高速フーリエ変換 (FFT)",
+        badge: "周波数領域 (Frequency Domain)",
+        desc: "波形を「どんな高さ（周波数）のサイン波がどれくらい鳴っているか」に分解しました。400点の後ろに0を詰めて512点FFTを計算し、257本の周波数成分（0〜8000Hz）を得ます。",
+        math: "P[k] = |FFT(x_windowed)[k]|^2  (k = 0 .. 256, ビン幅 = 31.25 Hz)",
+        showMatch: false
+      },
+      {
+        heading: "Step 4: 32帯域 三角メルフィルタバンク ＆ 対数圧縮",
+        badge: "人間の耳（メル尺度）を模倣",
+        desc: "257個の数値を人間の耳に合わせて32個に圧縮！ 低音は細かく高音は大雑把にまとめ、自然対数（ln）で莫大な音量差を圧縮し、平均値を引いて音色の純度を高めます。",
+        math: "Mel_energy[m] = Σ W_m[k] * P[k]\nLogMel[m] = ln(max(Mel_energy[m], 1e-12)) - Mean",
+        showMatch: false
+      },
+      {
+        heading: "Step 5: int8 整数量子化 (scale = 0.125, zero_point = 0)",
+        badge: "メモリ1/4 ＆ Helium爆速並列化",
+        desc: "小数を8倍して四捨五入し、-128〜+127の1バイト整数に変換！ メモリが1/4になり、Cortex-M85のHelium MVEで16個同時に一括計算できるようになります。",
+        math: "int8_val[m] = clip(round(LogMel[m] * 8), -128, 127)",
+        showMatch: false
+      },
+      {
+        heading: "Step 6: CNN 64次元埋め込み ＆ プロトタイプ照合",
+        badge: "現場学習・最近傍判定",
+        desc: "CNNが80コマの特徴量を64次元の「音の指紋」へ変換。現場で登録した「救助笛プロトタイプ」との二乗L2距離（ユークリッド距離）を計算し、しきい値内なら目的音と判定！",
+        math: "D^2 = Σ (embedding[i] - prototype[i])^2  (i = 0 .. 63)\n判定: D^2 <= max_squared_distance (500) ? PASS : REJECT",
+        showMatch: true
+      }
+    ];
+
+    function updateStageMeta() {
+      const meta = stepMeta[currentStep];
+      document.getElementById('stageHeading').textContent = meta.heading;
+      document.getElementById('stageBadge').textContent = meta.badge;
+      document.getElementById('stageExplanation').textContent = meta.desc;
+      document.getElementById('stageMath').textContent = meta.math;
+      document.getElementById('matchCard').style.display = meta.showMatch ? 'flex' : 'none';
+    }
+
+    // 波形データ生成
+    function generateRawPCM() {
+      const N = 400;
+      const data = new Float32Array(N);
+      const sound = soundSelect.value;
+      const vol = parseFloat(volumeSlider.value);
+      const noise = parseFloat(noiseSlider.value);
+
+      for (let n = 0; n < N; n++) {
+        let val = 0;
+        const t = n / 16000.0;
+
+        if (sound === 'whistle') {
+          // 3000 Hz 純音
+          val = Math.sin(2.0 * Math.PI * 3000.0 * t);
+        } else if (sound === 'motor') {
+          // 300 Hz + 600 Hz + 900 Hz
+          val = 0.6 * Math.sin(2.0 * Math.PI * 300.0 * t) +
+                0.3 * Math.sin(2.0 * Math.PI * 600.0 * t) +
+                0.1 * Math.sin(2.0 * Math.PI * 900.0 * t);
+        } else if (sound === 'impact') {
+          // インパルス減衰波
+          val = (n < 60) ? (1.0 - n / 60.0) * Math.sin(2.0 * Math.PI * 1200.0 * t) : 0.0;
+        } else if (sound === 'noise') {
+          val = (Math.random() * 2.0 - 1.0);
+        }
+
+        // ノイズ混入
+        val = val * (1.0 - noise) + (Math.random() * 2.0 - 1.0) * noise;
+        data[n] = Math.max(-1.0, Math.min(1.0, val * vol));
+      }
+      return data;
+    }
+
+    function drawCurrentStage() {
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      const raw = generateRawPCM();
+
+      if (currentStep === 0) {
+        // Step 1: 生PCM
+        drawWaveform(raw, '#38bdf8');
+      } else if (currentStep === 1) {
+        // Step 2: 窓関数適用
+        const windowed = new Float32Array(400);
+        for (let i = 0; i < 400; i++) {
+          const win = 0.5 - 0.5 * Math.cos((2.0 * Math.PI * i) / 400.0);
+          windowed[i] = raw[i] * win;
+        }
+        drawWaveform(windowed, '#10b981');
+      } else if (currentStep === 2) {
+        // Step 3: FFT パワースペクトル (257 bins 簡易シミュレーション)
+        drawSpectrum();
+      } else if (currentStep === 3) {
+        // Step 4: 32帯域 Mel
+        drawMelBars(false);
+      } else if (currentStep === 4) {
+        // Step 5: int8 量子化
+        drawMelBars(true);
+      } else if (currentStep === 5) {
+        // Step 6: 64次元照合
+        drawEmbeddingMatch();
+      }
+    }
+
+    function drawWaveform(data, color) {
+      const w = canvas.width;
+      const h = canvas.height;
+      const mid = h / 2;
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+      ctx.beginPath();
+      ctx.moveTo(0, mid);
+      ctx.lineTo(w, mid);
+      ctx.stroke();
+
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const step = w / data.length;
+      for (let i = 0; i < data.length; i++) {
+        const x = i * step;
+        const y = mid - data[i] * (h * 0.42);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+
+    function drawSpectrum() {
+      const w = canvas.width;
+      const h = canvas.height;
+      const sound = soundSelect.value;
+
+      ctx.fillStyle = '#818cf8';
+      const bins = 64; // 描画用に64本に間引き
+      const barW = (w / bins) - 2;
+
+      for (let i = 0; i < bins; i++) {
+        const freq = (i / bins) * 8000;
+        let mag = 0.05 + Math.random() * 0.05;
+
+        if (sound === 'whistle' && Math.abs(freq - 3000) < 400) {
+          mag = 0.9 - Math.abs(freq - 3000) / 500;
+        } else if (sound === 'motor' && freq < 1200) {
+          mag = 0.8 - (freq / 1200) * 0.6;
+        } else if (sound === 'impact') {
+          mag = 0.4 + Math.random() * 0.3;
+        }
+
+        const barH = mag * (h * 0.85);
+        ctx.fillRect(i * (barW + 2), h - barH, barW, barH);
+      }
+    }
+
+    function drawMelBars(isInt8) {
+      const w = canvas.width;
+      const h = canvas.height;
+      const sound = soundSelect.value;
+      const bars = 32;
+      const barW = (w / bars) - 3;
+
+      for (let m = 0; m < bars; m++) {
+        let val = 0;
+        if (sound === 'whistle') {
+          val = (m >= 18 && m <= 22) ? 6.0 - Math.abs(m - 20) * 1.5 : -2.0;
+        } else if (sound === 'motor') {
+          val = (m < 10) ? 5.0 - m * 0.4 : -3.0;
+        } else if (sound === 'impact') {
+          val = Math.sin(m * 0.3) * 2.0;
+        } else {
+          val = (Math.random() * 2.0 - 1.0) * 2.0;
+        }
+
+        if (isInt8) {
+          // int8丸め
+          val = Math.max(-128, Math.min(127, Math.round(val * 8.0))) / 8.0;
+        }
+
+        const normH = (val + 5.0) / 12.0; // 0..1
+        const barH = Math.max(4, Math.min(h * 0.85, normH * (h * 0.85)));
+
+        ctx.fillStyle = isInt8 ? '#f59e0b' : '#38bdf8';
+        ctx.fillRect(m * (barW + 3), h - barH, barW, barH);
+
+        // 数値ラベル
+        if (isInt8 && m % 2 === 0) {
+          ctx.fillStyle = '#fff';
+          ctx.font = '10px monospace';
+          ctx.fillText(Math.round(val * 8), m * (barW + 3), h - barH - 5);
+        }
+      }
+    }
+
+    function drawEmbeddingMatch() {
+      const w = canvas.width;
+      const h = canvas.height;
+      const sound = soundSelect.value;
+      const dim = 64;
+      const barW = (w / dim) - 2;
+
+      // 救助笛プロトタイプ（固定の指紋）
+      const proto = new Int8Array(dim);
+      for (let i = 0; i < dim; i++) {
+        proto[i] = Math.round(Math.sin(i * 0.25) * 40.0 + 10.0);
+      }
+
+      // 入力音源の埋め込み
+      const current = new Int8Array(dim);
+      let dist = 0;
+      for (let i = 0; i < dim; i++) {
+        if (sound === 'whistle') {
+          current[i] = proto[i] + Math.round((Math.random() - 0.5) * 4); // 近い！
+        } else {
+          current[i] = Math.round((Math.random() - 0.5) * 80); // 全然違う！
+        }
+        const diff = current[i] - proto[i];
+        dist += diff * diff;
+      }
+
+      // 描画: プロトタイプ（半透明グレー）と今回音（青）
+      for (let i = 0; i < dim; i++) {
+        const x = i * (barW + 2);
+        const pY = h / 2 - (proto[i] / 128.0) * (h * 0.4);
+        const cY = h / 2 - (current[i] / 128.0) * (h * 0.4);
+
+        // プロトタイプ点
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.fillRect(x, pY, barW, 4);
+
+        // 今回の入力埋め込みバー
+        ctx.fillStyle = (dist <= 500) ? '#10b981' : '#f43f5e';
+        ctx.fillRect(x, Math.min(h / 2, cY), barW, Math.abs(cY - h / 2) + 2);
+      }
+
+      // 結果表示更新
+      document.getElementById('distVal').textContent = dist;
+      const resEl = document.getElementById('resultStatus');
+      if (dist <= 500) {
+        resEl.textContent = 'MATCHED (救助笛と合致！)';
+        resEl.className = 'match-val match-pass';
+      } else {
+        resEl.textContent = 'REJECT (未知の音・雑音)';
+        resEl.className = 'match-val match-fail';
+      }
+    }
+
+    // テーマ切替
+    document.getElementById('themeBtn').addEventListener('click', () => {
+      const isLight = document.body.getAttribute('data-theme') === 'light';
+      document.body.setAttribute('data-theme', isLight ? 'dark' : 'light');
+      drawCurrentStage();
+    });
+
+    // 初期化
+    resizeCanvas();
+    updateStageMeta();
+  </script>
+</body>
+</html>

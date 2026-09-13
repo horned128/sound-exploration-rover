@@ -390,6 +390,7 @@
     </div>
     <div class="nav-links">
       <a href="#chapters" class="nav-link">教科書目次</a>
+      <a href="edgeai/README.md" class="nav-link" style="color: #38bdf8; font-weight: 700;">🎧 エッジAI特化編</a>
       <a href="#glossary" class="nav-link">用語集</a>
       <a href="interactive_system_architecture.html" class="btn btn-primary">⚡ アーキテクチャ図</a>
       <button id="themeToggle" class="btn">🌓</button>
@@ -407,16 +408,33 @@
     </p>
     <div class="hero-buttons">
       <a href="#chapters" class="btn btn-primary">📚 第1章から学習を始める</a>
+      <a href="edgeai/README.md" class="btn" style="border-color: #38bdf8; color: #38bdf8;">🎧 エッジAI特化教科書へ</a>
       <a href="interactive_system_architecture.html" class="btn">🗺️ インタラクティブ構造図を見る</a>
       <a href="README.md" class="btn">📖 教科書README</a>
     </div>
   </section>
 
-  <!-- インタラクティブバナー -->
+  <!-- インタラクティブバナー群 -->
+  <div class="banner-card" style="margin-bottom: 1.5rem;">
+    <div class="banner-inner" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(56, 189, 248, 0.08)); border-color: rgba(16, 185, 129, 0.4);">
+      <div class="banner-text">
+        <span style="font-size: 0.75rem; font-weight: 700; color: #10b981; text-transform: uppercase;">New 特化サブ教科書 新設</span>
+        <h3 style="color: #10b981;">🎧 エッジAI & 音響DSP 完全理解サブ教科書（全7章）</h3>
+        <p>
+          「AI周りが難しすぎる」という声に応え、音響DSPからLog-Mel抽出、int8量子化、TFLM推論、現場学習（プロトタイプ照合）までを初心者にも優しくステップバイステップで徹底解説する特化教科書を公開しました！
+        </p>
+      </div>
+      <div style="display: flex; gap: 0.8rem; flex-wrap: wrap;">
+        <a href="edgeai/README.md" class="btn btn-primary" style="background: #10b981; border-color: #10b981;">特化教科書を読む →</a>
+        <a href="edgeai/interactive_audio_pipeline.html" class="btn">波形シミュレータ体験 ⚡</a>
+      </div>
+    </div>
+  </div>
+
   <div class="banner-card">
     <div class="banner-inner">
       <div class="banner-text">
-        <h3>⚡ インタラクティブ・システムアーキテクチャ図 公開中</h3>
+        <h3>⚡ インタラクティブ・システムアーキテクチャ図</h3>
         <p>
           4つのプロセッサ（XVF3800, ESP32-S3, RA8P1 CPU0/CPU1）、センサ、アクチュエータ、通信バス（USB, IPC, I2C, PWM）の結線とデータフローを視覚的・対話的に探索できるWeb教材です。
         </p>
@@ -544,9 +562,12 @@
           <li>自車ノイズを排除する「停止聴取型」ステートマシン</li>
         </ul>
       </div>
-      <div class="chapter-footer">
+      <div class="chapter-footer" style="flex-wrap: wrap; gap: 0.5rem;">
         <span class="file-ref">06_acoustic_dsp_and_edge_ai.md</span>
-        <a href="06_acoustic_dsp_and_edge_ai.md" class="btn">読む →</a>
+        <div style="display: flex; gap: 0.4rem;">
+          <a href="edgeai/README.md" class="btn" style="border-color: #10b981; color: #10b981; font-size: 0.75rem;">🎧 特化編 (全7章) →</a>
+          <a href="06_acoustic_dsp_and_edge_ai.md" class="btn">読む →</a>
+        </div>
       </div>
     </div>
 

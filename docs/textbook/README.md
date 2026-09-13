@@ -24,11 +24,15 @@
   ├─ 08_software_ecosystem_and_sim.md      : rover-monitor、control-sim、acoustic-trainer
   ├─ 09_development_workflow_and_build.md  : e² studio / VS Code、FSP設定、macOSビルド運用
   └─ 10_testing_tuning_and_troubleshooting.md: 実機校正値（702 counts/rev）、Live Watch、障害対策
+
+【★特化サブ教科書: エッジAI & 音響DSP】
+  └─ edgeai/                              : 音響DSP・Log-Mel・int8量子化・TFLM・現場学習（全7章＋対話型Web教材）
 ```
 
 ### 🌐 インタラクティブWeb教材
 - [**教科書総合ポータル・ダッシュボード (`index.html`)**](index.html): 全体目次、章要約、重要用語集（Glossary）、クイックリファレンスを一覧できるポータルUI。
 - [**インタラクティブ・システムアーキテクチャ図 (`interactive_system_architecture.html`)**](interactive_system_architecture.html): 4プロセッサ、各種センサ、アクチュエータ、通信バス、電源系統を視覚的・対話的に探索できるSVGビジュアライザ。
+- [**音響AIパイプライン・シミュレータ (`edgeai/interactive_audio_pipeline.html`)**](edgeai/interactive_audio_pipeline.html): 音波からLog-Mel・int8・AI推論までの対話型Web教材。
 
 ---
 
