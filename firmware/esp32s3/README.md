@@ -14,10 +14,16 @@
 - 受信: CPU0の`ROVER_TELEMETRY`（250 ms周期、schema 2でToF/BMI270診断を含む）
 - Wi-Fi: station mode、自動再接続、指定PCへのUDP JSON Lines（250 ms周期）
 - フレーム: `firmware/common/acoustic_protocol.h` の共有バイナリプロトコル
+- log-mel診断: 起動時固定ベクトル自己テスト、生成fps、80-frameリング充填、256-sampleブロック処理時間、I2S overrun
 
 レベル値はI2S PCMから計算した `dBFS × 100` です。音圧レベル（dB SPL）ではなく、XVF3800のAGCや音響処理後の相対値なので、実機環境で走行開始閾値を調整してください。
 
 観測のI2S overrun/I2C error flagは現在の観測区間に対する一時値で、正常化すれば次の観測で解除します。I2Sの最新captureが100 ms以上更新されなければI2S staleを立て、level/peakを最小値へ落とします。`HEALTH.i2s_overrun_count`と`i2c_error_count`は起動後の累積値です。
+
+UDP JSONの`esp_audio`はCPU0接続状態に依存しないESP32S3ローカル診断です。
+`self_test_pass`、`feature_frames`、`feature_fps_x100`、`ring_frames`、
+`log_mel_block_last_us`、`log_mel_block_max_us`、`i2s_overruns`を記録します。
+自己テストはindex 137の固定インパルスをFFTからint8量子化まで通し、ホスト固定期待値と比較します。
 
 DoA/VADのI2CコマンドはSeeed Studio公式例にあるresource ID 20、read command `(19 | 0x80)`、4-byte payloadをそのまま実装しています。応答先頭のraw status byteは公式例に意味の定義がないため、成功値やbitを推測して判定に使いません。共有プロトコルの`xvf_status`はraw値ではなく、ESP32側で確認した通信・取得状態（STARTING/READY/ERROR）です。
 
@@ -84,7 +90,8 @@ EK-RA8P1からのVBUS給電を使う場合も、モーター電源や3S LiPoをU
 ## コード構成
 
 - `xvf3800_control`: 公式resource-based I2CコマンドによるDoA/VAD取得。I2S firmwareが`DOA_VALUE`を拒否した場合はAEC auto-selected beamへfallback
-- `audio_capture`: I2S連続取得、RMS/peak dBFS、DMA overrun計数
+- `audio_capture`: I2S連続取得、RMS/peak dBFS、DMA overrun計数、直近800 msのint8特徴量リング保持
+- `log_mel_extractor`: 400-sample窓、160-sample hop、32-bin log-melのストリーミング抽出
 - `usb_link`: TinyUSB単一CDCの列挙、マウント検出、双方向バイナリ転送
 - `acoustic_frontend`: 取得値の統合、共有プロトコルの周期送信
 - `wifi_telemetry`: Wi-Fi station、自動再接続、CPU0診断のUDP JSON変換

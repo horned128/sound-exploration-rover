@@ -2,11 +2,16 @@
 #include <stdio.h>
 
 #include "control/obstacle_avoidance_controller.h"
+#include "services/acoustic_identifier.h"
 
 int main(void)
 {
     (void) printf(
         "{"
+        "\"acoustic_identifier_prototype_t\":{\"size\":%zu,\"embedding\":%zu,"
+        "\"max_squared_distance\":%zu,\"class_id\":%zu,\"valid\":%zu},"
+        "\"acoustic_identifier_output_t\":{\"size\":%zu,\"squared_distance\":%zu,"
+        "\"prototype_index\":%zu,\"class_id\":%zu,\"matched\":%zu},"
         "\"sound_follow_input_t\":{\"size\":%zu,\"link_ready\":%zu,\"new_observation\":%zu,"
         "\"fault_active\":%zu,\"motion_allowed\":%zu,\"observation\":%zu},"
         "\"sound_follow_output_t\":{\"size\":%zu,\"state\":%zu,\"steering_deg\":%zu,"
@@ -22,7 +27,13 @@ int main(void)
         "\"obstacle_avoidance_output_t\":{\"size\":%zu,\"state\":%zu,\"rule\":%zu,"
         "\"steering_deg\":%zu,\"left_rpm\":%zu,\"right_rpm\":%zu,\"actuator_enable\":%zu,"
         "\"emergency_stop\":%zu}}\n",
-        sizeof(sound_follow_input_t), offsetof(sound_follow_input_t, link_ready),
+        sizeof(acoustic_identifier_prototype_t), offsetof(acoustic_identifier_prototype_t, embedding),
+        offsetof(acoustic_identifier_prototype_t, max_squared_distance),
+        offsetof(acoustic_identifier_prototype_t, class_id), offsetof(acoustic_identifier_prototype_t, valid),
+        sizeof(acoustic_identifier_output_t), offsetof(acoustic_identifier_output_t, squared_distance),
+        offsetof(acoustic_identifier_output_t, prototype_index), offsetof(acoustic_identifier_output_t, class_id),
+        offsetof(acoustic_identifier_output_t, matched), sizeof(sound_follow_input_t),
+        offsetof(sound_follow_input_t, link_ready),
         offsetof(sound_follow_input_t, new_observation), offsetof(sound_follow_input_t, fault_active),
         offsetof(sound_follow_input_t, motion_allowed), offsetof(sound_follow_input_t, observation),
         sizeof(sound_follow_output_t), offsetof(sound_follow_output_t, state),

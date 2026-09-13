@@ -6,6 +6,7 @@
 #define SEROV_CPU0_TASK_ACOUSTIC_LINK_H
 
 #include "../../../common/acoustic_protocol.h"              /* 音響通信の型、定数 */
+#include "services/acoustic_feature_assembler.h"           /* 再組立済み特徴量パッチ型 */
 #include "hal_data.h"                                       /* FSPエラー型 */
 #include "task_common.h"                                    /* CPU0タスク共通異常型 */
 #include <tk/tkernel.h>                                     /* μT-Kernel型 */
@@ -35,6 +36,8 @@ EXPORT app_fault_t task_acoustic_link_create(void);                  /* 音響�
 EXPORT app_fault_t task_acoustic_link_start(void);                   /* 音響リンクタスク開始 */
 EXPORT void task_acoustic_link_delete(void);                          /* 音響リンクタスク解放 */
 EXPORT ER task_acoustic_link_snapshot_get(task_acoustic_link_snapshot_t * p_snapshot); /* 最新音響状態取得 */
+/* 最新完成特徴量パッチ取得 */
+EXPORT ER task_acoustic_link_feature_get(acoustic_feature_patch_t * p_patch, UW * p_generation);
 
 IMPORT volatile BOOL g_task_acoustic_link_usb_configured;           /**< USB列挙状態（Live Watch用） */
 /**< CDC初期化段階（Live Watch用） */
@@ -48,6 +51,9 @@ IMPORT volatile UW g_task_acoustic_link_frame_count;          /**< 正常フレ�
 IMPORT volatile UW g_task_acoustic_link_crc_error_count;      /**< CRC異常数（Live Watch用） */
 IMPORT volatile UW g_task_acoustic_link_format_error_count;   /**< 形式異常数（Live Watch用） */
 IMPORT volatile UW g_task_acoustic_link_sequence_drop_count;  /**< 逆行sequence数（Live Watch用） */
+IMPORT volatile UW g_task_acoustic_link_feature_complete_count; /**< 特徴量イベント完成数（Live Watch用） */
+IMPORT volatile UW g_task_acoustic_link_feature_drop_count;  /**< 特徴量イベント破棄数（Live Watch用） */
+IMPORT volatile UW g_task_acoustic_link_feature_generation;  /**< 最新特徴量世代（Live Watch用） */
 IMPORT volatile UW g_task_acoustic_link_observation_age_ms;   /**< 観測経過時間（Live Watch用） */
 IMPORT volatile UW g_task_acoustic_link_telemetry_send_count; /**< 診断送信完了数（Live Watch用） */
 IMPORT volatile UW g_task_acoustic_link_telemetry_busy_count; /**< 診断送信BUSY数（Live Watch用） */

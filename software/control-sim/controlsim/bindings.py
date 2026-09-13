@@ -17,6 +17,7 @@ BOOL = ctypes.c_int32
 
 ACOUSTIC_XVF_STATUS_READY = 1
 CPU0_SENSOR_VALID_ALL = 0x0F
+CPU0_ACOUSTIC_EMBEDDING_DIMENSION = 64
 
 
 class AcousticObservation(ctypes.Structure):
@@ -91,6 +92,24 @@ class ObstacleAvoidanceOutput(ctypes.Structure):
     ]
 
 
+class AcousticIdentifierPrototype(ctypes.Structure):
+    _fields_ = [
+        ("embedding", ctypes.c_int8 * CPU0_ACOUSTIC_EMBEDDING_DIMENSION),
+        ("max_squared_distance", ctypes.c_uint32),
+        ("class_id", ctypes.c_uint8),
+        ("valid", BOOL),
+    ]
+
+
+class AcousticIdentifierOutput(ctypes.Structure):
+    _fields_ = [
+        ("squared_distance", ctypes.c_uint32),
+        ("prototype_index", ctypes.c_uint32),
+        ("class_id", ctypes.c_uint8),
+        ("matched", BOOL),
+    ]
+
+
 @lru_cache(maxsize=1)
 def library() -> ctypes.CDLL:
     completed = subprocess.run(
@@ -114,6 +133,18 @@ def library() -> ctypes.CDLL:
         ctypes.POINTER(ObstacleAvoidanceOutput),
     ]
     handle.obstacle_avoidance_controller_step.restype = None
+    handle.acoustic_identifier_squared_l2.argtypes = [
+        ctypes.POINTER(ctypes.c_int8),
+        ctypes.POINTER(ctypes.c_int8),
+    ]
+    handle.acoustic_identifier_squared_l2.restype = ctypes.c_uint32
+    handle.acoustic_identifier_classify.argtypes = [
+        ctypes.POINTER(ctypes.c_int8),
+        ctypes.POINTER(AcousticIdentifierPrototype),
+        ctypes.c_uint32,
+        ctypes.POINTER(AcousticIdentifierOutput),
+    ]
+    handle.acoustic_identifier_classify.restype = None
     return handle
 
 
@@ -146,4 +177,3 @@ def sound_output_values(output: SoundFollowOutput) -> tuple[int, int, int, int, 
         output.actuator_enable,
         output.emergency_stop,
     )
-

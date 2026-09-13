@@ -16,6 +16,7 @@ uv run python tests/verify_vendor.py
 uv run python tests/build_runtime.py
 uv run python tests/smoke_test.py
 uv run python tests/test_build_log.py
+uv run python tests/test_log_mel.py
 ```
 
 `build_runtime.py` はリポジトリ内のベンダソースと**実際のCPU0 Cラッパー**をコンパイルする。
@@ -35,6 +36,12 @@ TFLite参照カーネルとTFLMの11入力に対する出力を比較する（�
 
 `test_build_log.py` はe² studioのClean-only完了／別プロジェクト完了を
 本ビルド完了と誤認しないことを検証する。
+
+`features.py` は固定数値契約どおりのlog-melホスト参照実装である。
+ESP32S3と同じ単精度演算順を再現し、`test_log_mel.py` が無音、インパルス、
+純音、混合音、固定疑似雑音と、256 samplesを含む不均一な投入境界で
+最終32-bin int8出力のビット一致を検証する。倍精度FFTを正とせず、実機へ渡す
+学習入力と組み込み出力が同じ量子化値になることを契約とする。
 
 ## Phase 2への引継ぎ
 

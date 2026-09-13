@@ -18,6 +18,12 @@ BUILD_ROOT = CONTROL_SIM_ROOT / "build"
 CONTROLLER_SOURCES = (
     CPU0_SOURCE_ROOT / "control/sound_follow_controller.c",
     CPU0_SOURCE_ROOT / "control/obstacle_avoidance_controller.c",
+    CPU0_SOURCE_ROOT / "services/acoustic_identifier.c",
+)
+
+FEATURE_PROTOCOL_SOURCES = (
+    REPOSITORY_ROOT / "firmware/common/acoustic_protocol.c",
+    CPU0_SOURCE_ROOT / "services/acoustic_feature_assembler.c",
 )
 
 
@@ -90,17 +96,35 @@ def run_sanitized_smoke() -> None:
     run([str(executable)])
 
 
+def run_feature_protocol_test() -> None:
+    BUILD_ROOT.mkdir(exist_ok=True)
+    executable = BUILD_ROOT / "feature_protocol_test"
+    source = CONTROL_SIM_ROOT / "controlsim/feature_protocol_test.c"
+    run(
+        compile_command(
+            shared=False,
+            sanitized=True,
+            output=executable,
+            sources=(*FEATURE_PROTOCOL_SOURCES, source),
+        )
+    )
+    run([str(executable)])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--layout", action="store_true", help="build and run the C layout probe")
     mode.add_argument("--sanitized-smoke", action="store_true", help="run portable code under ASan and UBSan")
+    mode.add_argument("--feature-protocol", action="store_true", help="test feature protocol and reassembly")
     arguments = parser.parse_args()
 
     if arguments.layout:
         print(run_layout_probe(), end="")
     elif arguments.sanitized_smoke:
         run_sanitized_smoke()
+    elif arguments.feature_protocol:
+        run_feature_protocol_test()
     else:
         print(build_library())
 

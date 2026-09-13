@@ -7,6 +7,7 @@
 #include "config/task_config.h"                            /* USB受信周期、優先度、バッファ長 */
 #include "config/sensor_config.h"                          /* センサー安全判定値 */
 #include "ipc/actuator_ipc_client.h"                       /* CPU1実出力状態取得API */
+#include "services/acoustic_feature_assembler.h"           /* 特徴量イベント再組立 */
 #include "task_command.h"                                     /* 最新指令状態取得API */
 #include "task_sensor.h"                                      /* 最新I2Cセンサー状態取得API */
 #include "task_think.h"                                       /* 思考タスクへの異常通知 */
@@ -22,6 +23,7 @@ LOCAL void task_acoustic_link_entry(INT stacd, void * exinf);      /* 音響リ�
 LOCAL UW task_acoustic_link_monotonic_ms(void);              /* カーネル単調時刻取得 */
 LOCAL void task_acoustic_link_link_reset(void);                    /* 音響リンク状態初期化 */
 LOCAL void task_acoustic_link_observation_reset(void);             /* 旧音響観測無効化 */
+LOCAL void task_acoustic_link_feature_reset(void);                 /* 旧特徴量イベント無効化 */
 LOCAL fsp_err_t task_acoustic_link_control_start(void);            /* CDC class request開始 */
 LOCAL void task_acoustic_link_control_complete(const usb_event_info_t * p_event_info); /* CDC class request完了 */
 LOCAL fsp_err_t task_acoustic_link_read_start(void);               /* USB Bulk IN開始 */
@@ -73,6 +75,9 @@ LOCAL BOOL audio_actuator_status_sequence_valid;           /**< CPU1状態sequen
 LOCAL acoustic_protocol_parser_t audio_parser;             /**< CDCストリームパーサー */
 LOCAL acoustic_hello_t audio_hello;                        /**< 最新HELLO */
 LOCAL acoustic_health_t audio_health;                      /**< 最新HEALTH */
+LOCAL acoustic_feature_assembler_t audio_feature_assembler; /**< 特徴量再組立状態 */
+LOCAL acoustic_feature_patch_t audio_feature_patch;        /**< 最新完成特徴量パッチ */
+LOCAL BOOL audio_feature_ready;                            /**< 完成特徴量保持状態 */
 /**< CDC仮想UART設定 */
 LOCAL usb_hcdc_linecoding_t audio_line_coding = {
     .dwdte_rate = USB_HCDC_SPEED_115200,
@@ -97,6 +102,9 @@ EXPORT volatile UW g_task_acoustic_link_frame_count;                 /**< 正常
 EXPORT volatile UW g_task_acoustic_link_crc_error_count;             /**< CRC異常数 */
 EXPORT volatile UW g_task_acoustic_link_format_error_count;          /**< 形式異常数 */
 EXPORT volatile UW g_task_acoustic_link_sequence_drop_count;         /**< 逆行sequence数 */
+EXPORT volatile UW g_task_acoustic_link_feature_complete_count;      /**< 特徴量イベント完成数 */
+EXPORT volatile UW g_task_acoustic_link_feature_drop_count;          /**< 特徴量イベント破棄数 */
+EXPORT volatile UW g_task_acoustic_link_feature_generation;          /**< 最新特徴量世代 */
 EXPORT volatile UW g_task_acoustic_link_observation_age_ms;          /**< 観測経過時間 */
 EXPORT volatile UW g_task_acoustic_link_telemetry_send_count;        /**< 診断送信完了数 */
 EXPORT volatile UW g_task_acoustic_link_telemetry_busy_count;        /**< 診断送信BUSY数 */
@@ -140,6 +148,9 @@ EXPORT app_fault_t task_acoustic_link_create(void) {
     g_task_acoustic_link_crc_error_count = 0U;
     g_task_acoustic_link_format_error_count = 0U;
     g_task_acoustic_link_sequence_drop_count = 0U;
+    g_task_acoustic_link_feature_complete_count = 0U;
+    g_task_acoustic_link_feature_drop_count = 0U;
+    g_task_acoustic_link_feature_generation = 0U;
     g_task_acoustic_link_telemetry_send_count = 0U;
     g_task_acoustic_link_telemetry_busy_count = 0U;
     g_task_acoustic_link_last_error = FSP_SUCCESS;
@@ -212,6 +223,7 @@ LOCAL void task_acoustic_link_link_reset(void) {
     g_task_acoustic_link_device_address = 0U;
     g_task_acoustic_link_hello_received = FALSE;
     task_acoustic_link_observation_reset();
+    task_acoustic_link_feature_reset();
     memset(&audio_hello, 0, sizeof(audio_hello));
     audio_sequence_valid = FALSE;
     audio_boot_id_valid = FALSE;
@@ -338,6 +350,46 @@ EXPORT ER task_acoustic_link_snapshot_get(task_acoustic_link_snapshot_t * p_snap
     p_snapshot->health = audio_health;
     g_task_acoustic_link_observation_age_ms = p_snapshot->observation_age_ms;
 
+    err = tk_unl_mtx(acoustic_link_mutex_id);
+    return err;
+}
+
+/** =================================================================*
+ * @brief  旧特徴量イベント無効化
+ * @details USB切断またはfrontend再起動をまたぐ不完全・完成パッチを推論へ渡さない。
+ * ================================================================= */
+LOCAL void task_acoustic_link_feature_reset(void) {
+    audio_feature_ready = FALSE;
+    memset(&audio_feature_patch, 0, sizeof(audio_feature_patch));
+    acoustic_feature_assembler_init(&audio_feature_assembler);
+}
+
+/** =================================================================*
+ * @brief  最新完成特徴量パッチ取得
+ * @details mutex保持中はコピーだけを行い、推論処理は呼出側でmutex解放後に実行する。
+ * @param[out] p_patch 80フレーム×32 binの特徴量パッチ
+ * @param[out] p_generation 最新完成世代
+ * @return μT-Kernelエラーコード。完成パッチが無い場合はE_NOEXS
+ * ================================================================= */
+EXPORT ER task_acoustic_link_feature_get(acoustic_feature_patch_t * p_patch, UW * p_generation) {
+    if ((NULL == p_patch) || (NULL == p_generation)) {
+        return E_PAR;
+    }
+    if (acoustic_link_mutex_id <= 0) {
+        return E_NOEXS;
+    }
+
+    ER err = tk_loc_mtx(acoustic_link_mutex_id, TMO_POL);
+    if (E_OK != err) {
+        return err;
+    }
+    if (!audio_feature_ready) {
+        (void) tk_unl_mtx(acoustic_link_mutex_id);
+        return E_NOEXS;
+    }
+
+    memcpy(p_patch, &audio_feature_patch, sizeof(*p_patch));
+    *p_generation = g_task_acoustic_link_feature_generation;
     err = tk_unl_mtx(acoustic_link_mutex_id);
     return err;
 }
@@ -581,6 +633,7 @@ LOCAL void task_acoustic_link_frame_handle(const acoustic_frame_t * p_frame) {
             audio_sequence_valid = FALSE;
             g_task_acoustic_link_hello_received = FALSE;
             task_acoustic_link_observation_reset();
+            task_acoustic_link_feature_reset();
         }
         if (!task_acoustic_link_sequence_accept(p_frame->sequence)) {
             return;
@@ -607,6 +660,27 @@ LOCAL void task_acoustic_link_frame_handle(const acoustic_frame_t * p_frame) {
         }
     } else if (ACOUSTIC_MESSAGE_HEALTH == p_frame->type) {
         (void) acoustic_protocol_decode_health(p_frame, &audio_health);
+    } else if (ACOUSTIC_MESSAGE_FEATURE == p_frame->type) {
+        acoustic_feature_t feature;
+        if (!acoustic_protocol_decode_feature(p_frame, &feature)) {
+            g_task_acoustic_link_feature_drop_count++;
+            g_task_acoustic_link_format_error_count++;
+            return;
+        }
+
+        acoustic_feature_assembler_result_t const result =
+            acoustic_feature_assembler_push(&audio_feature_assembler, &feature);
+        if (CPU0_ACOUSTIC_FEATURE_COMPLETE == result) {
+            memcpy(&audio_feature_patch, &audio_feature_assembler.patch, sizeof(audio_feature_patch));
+            audio_feature_ready = TRUE;
+            g_task_acoustic_link_feature_generation++;
+            g_task_acoustic_link_feature_complete_count++;
+        } else if (CPU0_ACOUSTIC_FEATURE_RESTARTED == result) {
+            g_task_acoustic_link_feature_drop_count++;
+        } else if ((CPU0_ACOUSTIC_FEATURE_FORMAT_ERROR == result) ||
+                   (CPU0_ACOUSTIC_FEATURE_SEQUENCE_ERROR == result)) {
+            g_task_acoustic_link_feature_drop_count++;
+        }
     }
 }
 

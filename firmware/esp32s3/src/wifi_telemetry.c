@@ -6,6 +6,7 @@
 
 #include "acoustic_protocol.h"                              /* CPU0テレメトリー通信プロトコル */
 #include "app_config.h"                                     /* Wi-FiとUDP送信設定 */
+#include "audio_capture.h"                                  /* ESP32音声DSP診断値 */
 #include "esp_event.h"                                      /* ESP-IDFイベントAPI */
 #include "esp_netif.h"                                      /* ESP-IDFネットワークIF API */
 #include "esp_timer.h"                                      /* 単調時刻取得API */
@@ -23,7 +24,7 @@
 #include <string.h>                                         /* 文字列・メモリー操作API */
 
 #define WIFI_TELEMETRY_CONNECTED_BIT       (1U << 0)
-#define WIFI_TELEMETRY_JSON_CAPACITY       (1400U)
+#define WIFI_TELEMETRY_JSON_CAPACITY       (1600U)
 
 static EventGroupHandle_t s_wifi_event_group;               /**< Wi-Fi接続状態イベント */
 static struct sockaddr_in s_destination;                    /**< UDP送信先IPv4アドレス */
@@ -45,8 +46,13 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
                                       acoustic_frame_t const * frame,
                                       acoustic_actuator_telemetry_t const * actuator_telemetry,
                                       bool actuator_frame_valid, uint32_t received_at_ms,
-                                      uint32_t actuator_received_at_ms, int rssi_dbm);
-static int wifi_telemetry_format_heartbeat(char * json, size_t capacity, int rssi_dbm); /* 接続状態JSON整形 */
+                                      uint32_t actuator_received_at_ms, int rssi_dbm,
+                                      audio_capture_snapshot_t const * esp_audio,
+                                      uint32_t feature_fps_x100);
+/* 接続状態JSON整形 */
+static int wifi_telemetry_format_heartbeat(char * json, size_t capacity, int rssi_dbm,
+                                           audio_capture_snapshot_t const * esp_audio,
+                                           uint32_t feature_fps_x100);
 static void wifi_telemetry_task(void * argument);           /* USB受信・UDP送信タスク */
 
 /** =================================================================*
@@ -193,13 +199,17 @@ static esp_err_t wifi_telemetry_station_start(void) {
  * @param[in] received_at_ms ESP32での受信時刻[ms]
  * @param[in] actuator_received_at_ms 実出力フレーム受信時刻[ms]
  * @param[in] rssi_dbm Wi-Fi受信強度[dBm]
+ * @param[in] esp_audio ESP32S3の音声DSP診断値
+ * @param[in] feature_fps_x100 特徴量生成レート[fps x100]
  * @return 整形した文字数。容量不足時はcapacity以上
  * ================================================================= */
 static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rover_telemetry_t const * telemetry,
                                       acoustic_frame_t const * frame,
                                       acoustic_actuator_telemetry_t const * actuator_telemetry,
                                       bool actuator_frame_valid, uint32_t received_at_ms,
-                                      uint32_t actuator_received_at_ms, int rssi_dbm) {
+                                      uint32_t actuator_received_at_ms, int rssi_dbm,
+                                      audio_capture_snapshot_t const * esp_audio,
+                                      uint32_t feature_fps_x100) {
     uint32_t const now_ms = wifi_telemetry_uptime_ms();
     uint8_t const flags = telemetry->flags;
     bool const actuator_valid = actuator_frame_valid && (actuator_telemetry->status_valid != 0U);
@@ -214,6 +224,11 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         "\"cpu_age_ms\":%lu,\"wifi\":{\"connected\":1,"
         "\"rssi_dbm\":%d,\"reconnects\":%lu},"
         "\"udp\":{\"sent\":%lu,\"errors\":%lu},"
+        "\"esp_audio\":{\"valid\":%d,\"pcm_frames\":%lu,"
+        "\"feature_frames\":%lu,\"feature_fps_x100\":%lu,"
+        "\"ring_frames\":%u,\"self_test_pass\":%s,"
+        "\"log_mel_block_last_us\":%lu,\"log_mel_block_max_us\":%lu,"
+        "\"i2s_overruns\":%lu},"
         "\"usb\":{\"mounted\":%d,\"rx_drops\":%lu,"
         "\"cpu_ms\":%lu,\"cpu_seq\":%lu,\"state\":%u,"
         "\"configured\":%d,\"hello\":%d},"
@@ -241,6 +256,11 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         "\"right_encoder_rpm_x10\":%d}}\n",
         (unsigned long) now_ms, (unsigned long) (now_ms - received_at_ms), rssi_dbm,
         (unsigned long) s_wifi_reconnect_count, (unsigned long) s_udp_send_count, (unsigned long) s_udp_error_count,
+        esp_audio->valid ? 1 : 0, (unsigned long) esp_audio->frame_count,
+        (unsigned long) esp_audio->feature_frame_count, (unsigned long) feature_fps_x100,
+        (unsigned int) esp_audio->feature_ring_frames, esp_audio->log_mel_self_test_pass ? "true" : "false",
+        (unsigned long) esp_audio->log_mel_block_last_us, (unsigned long) esp_audio->log_mel_block_max_us,
+        (unsigned long) esp_audio->overrun_count,
         usb_link_is_mounted() ? 1 : 0, (unsigned long) usb_link_rx_drop_count(), (unsigned long) frame->uptime_ms,
         (unsigned long) frame->sequence, (unsigned int) telemetry->usb_state,
         wifi_telemetry_flag(flags, ACOUSTIC_TELEMETRY_FLAG_USB_CONFIGURED),
@@ -282,18 +302,32 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
  * @param[out] json JSON格納先
  * @param[in] capacity JSON格納先容量[byte]
  * @param[in] rssi_dbm Wi-Fi受信強度[dBm]
+ * @param[in] esp_audio ESP32S3の音声DSP診断値
+ * @param[in] feature_fps_x100 特徴量生成レート[fps x100]
  * @return 整形した文字数。容量不足時はcapacity以上
  * ================================================================= */
-static int wifi_telemetry_format_heartbeat(char * json, size_t capacity, int rssi_dbm) {
+static int wifi_telemetry_format_heartbeat(char * json, size_t capacity, int rssi_dbm,
+                                           audio_capture_snapshot_t const * esp_audio,
+                                           uint32_t feature_fps_x100) {
     return snprintf(json, capacity,
                     "{\"schema\":2,\"esp_ms\":%lu,\"cpu_valid\":false,"
                     "\"wifi\":{\"connected\":1,\"rssi_dbm\":%d,"
                     "\"reconnects\":%lu},\"udp\":{\"sent\":%lu,"
                     "\"errors\":%lu},\"usb\":{\"mounted\":%d,"
-                    "\"rx_drops\":%lu}}\n",
+                    "\"rx_drops\":%lu},"
+                    "\"esp_audio\":{\"valid\":%d,\"pcm_frames\":%lu,"
+                    "\"feature_frames\":%lu,\"feature_fps_x100\":%lu,"
+                    "\"ring_frames\":%u,\"self_test_pass\":%s,"
+                    "\"log_mel_block_last_us\":%lu,\"log_mel_block_max_us\":%lu,"
+                    "\"i2s_overruns\":%lu}}\n",
                     (unsigned long) wifi_telemetry_uptime_ms(), rssi_dbm, (unsigned long) s_wifi_reconnect_count,
                     (unsigned long) s_udp_send_count, (unsigned long) s_udp_error_count, usb_link_is_mounted() ? 1 : 0,
-                    (unsigned long) usb_link_rx_drop_count());
+                    (unsigned long) usb_link_rx_drop_count(), esp_audio->valid ? 1 : 0,
+                    (unsigned long) esp_audio->frame_count, (unsigned long) esp_audio->feature_frame_count,
+                    (unsigned long) feature_fps_x100, (unsigned int) esp_audio->feature_ring_frames,
+                    esp_audio->log_mel_self_test_pass ? "true" : "false",
+                    (unsigned long) esp_audio->log_mel_block_last_us,
+                    (unsigned long) esp_audio->log_mel_block_max_us, (unsigned long) esp_audio->overrun_count);
 }
 
 /** =================================================================*
@@ -311,6 +345,8 @@ static void wifi_telemetry_task(void * argument) {
     uint32_t received_at_ms = 0U;
     uint32_t actuator_received_at_ms = 0U;
     uint32_t last_send_ms = 0U;
+    uint32_t previous_feature_frame_count = 0U;
+    uint32_t previous_feature_sample_ms = 0U;
     bool telemetry_valid = false;
     bool actuator_frame_valid = false;
     int socket_fd = -1;
@@ -367,13 +403,25 @@ static void wifi_telemetry_task(void * argument) {
             rssi_dbm = access_point.rssi;
         }
 
+        audio_capture_snapshot_t esp_audio = {0};
+        audio_capture_get_snapshot(&esp_audio);
+        uint32_t feature_fps_x100 = 0U;
+        if ((previous_feature_sample_ms != 0U) && (now_ms != previous_feature_sample_ms)) {
+            uint32_t const elapsed_ms = now_ms - previous_feature_sample_ms;
+            uint32_t const generated_frames = esp_audio.feature_frame_count - previous_feature_frame_count;
+            feature_fps_x100 = (uint32_t) (((uint64_t) generated_frames * 100000ULL) / elapsed_ms);
+        }
+        previous_feature_frame_count = esp_audio.feature_frame_count;
+        previous_feature_sample_ms = now_ms;
+
         char json[WIFI_TELEMETRY_JSON_CAPACITY];
         int const json_length = telemetry_valid
                                     ? wifi_telemetry_format_json(
                                           json, sizeof(json), &latest_telemetry, &latest_frame,
                                           &latest_actuator_telemetry, actuator_frame_valid, received_at_ms,
-                                          actuator_received_at_ms, rssi_dbm)
-                                    : wifi_telemetry_format_heartbeat(json, sizeof(json), rssi_dbm);
+                                          actuator_received_at_ms, rssi_dbm, &esp_audio, feature_fps_x100)
+                                    : wifi_telemetry_format_heartbeat(json, sizeof(json), rssi_dbm, &esp_audio,
+                                                                      feature_fps_x100);
         if ((json_length <= 0) || ((size_t) json_length >= sizeof(json))) {
             s_udp_error_count++;
             continue;

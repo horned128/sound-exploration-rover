@@ -194,6 +194,19 @@
             </div>
 
             <div class="panel">
+                <h3 class="panel-title">Log-mel DSP</h3>
+                <div class="data-grid">
+                    <span class="data-label">Self Test</span><span class="data-value" id="val_dsp_self_test">-</span>
+                    <span class="data-label">Feature Rate</span><span class="data-value" id="val_dsp_fps">-</span>
+                    <span class="data-label">Ring Frames</span><span class="data-value" id="val_dsp_ring">-</span>
+                    <span class="data-label">Feature Frames</span><span class="data-value" id="val_dsp_frames">-</span>
+                    <span class="data-label">Last Block</span><span class="data-value" id="val_dsp_last_us">-</span>
+                    <span class="data-label">Max Block</span><span class="data-value" id="val_dsp_max_us">-</span>
+                    <span class="data-label">I2S Overruns</span><span class="data-value" id="val_dsp_overruns">-</span>
+                </div>
+            </div>
+
+            <div class="panel">
                 <h3 class="panel-title">Actuator Health</h3>
                 <div class="data-grid">
                     <span class="data-label">Status</span><span class="data-value" id="val_act_valid">-</span>
@@ -705,6 +718,22 @@
 
             setVal('val_vad', d.audio?.vad ? 'DETECTED' : 'NONE', d.audio?.vad ? 'val-ok' : '');
             setVal('val_aud_crc', d.audio?.crc_errors, d.audio?.crc_errors > 0 ? 'val-error' : '');
+
+            const espAudio = d.esp_audio || {};
+            const featureFps = Number(espAudio.feature_fps_x100 || 0) / 100.0;
+            const featureRateOk = featureFps >= 90.0 && featureFps <= 110.0;
+            const selfTestAvailable = espAudio.self_test_pass !== undefined;
+            setVal('val_dsp_self_test', selfTestAvailable ? (espAudio.self_test_pass ? 'PASS' : 'FAIL') : '-',
+                selfTestAvailable ? (espAudio.self_test_pass ? 'val-ok' : 'val-error') : '');
+            setVal('val_dsp_fps', `${featureFps.toFixed(2)} fps`, featureRateOk ? 'val-ok' : 'val-warn');
+            setVal('val_dsp_ring', `${espAudio.ring_frames ?? 0} / 80`,
+                espAudio.ring_frames === 80 ? 'val-ok' : 'val-warn');
+            setVal('val_dsp_frames', espAudio.feature_frames ?? 0);
+            setVal('val_dsp_last_us', `${espAudio.log_mel_block_last_us ?? 0} us`);
+            setVal('val_dsp_max_us', `${espAudio.log_mel_block_max_us ?? 0} us`,
+                espAudio.log_mel_block_max_us < 16000 ? 'val-ok' : 'val-error');
+            setVal('val_dsp_overruns', espAudio.i2s_overruns ?? 0,
+                espAudio.i2s_overruns === 0 ? 'val-ok' : 'val-error');
 
             latestSensors = d.sensors || null;
             latestSteer = d.think?.steering_deg || 0;

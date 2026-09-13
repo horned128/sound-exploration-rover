@@ -33,5 +33,27 @@ uv run main.py
 - ToF LEFT / CENTER / RIGHTの距離、センサー有効フラグ、エラー、現在の走行ルール
 - BMI270の加速度と角速度
 - 車体を原点とする局所障害物マップ
+- ESP32S3 log-melの起動時自己テスト、特徴量生成fps、80フレームリング、
+  256-sampleブロックの直近／最大処理時間、I2S overrun
 
 局所障害物マップは、前方を上としてLEFT / CENTER / RIGHTのToF測距値を描画します。自己位置や向きの推定は含まれないため、これはSLAMの地図ではなく、現在の車体周囲を確認するための表示です。
+
+## log-mel実機確認
+
+ESP32S3を書き込んでRover Monitorを30秒以上動かし、`rover-monitor.log`を保存します。
+CPU0が未接続で`cpu_valid:false`の場合も、`esp_audio`診断は記録されます。
+
+| 項目 | 合格条件 |
+|---|---|
+| `esp_audio.self_test_pass` | 常に`true` |
+| `esp_audio.feature_fps_x100` | 起動直後を除き概ね`9000..11000` |
+| `esp_audio.ring_frames` | 約800 ms後に`80` |
+| `esp_audio.log_mel_block_max_us` | I2Sの16 ms読出し周期より短い`16000`未満 |
+| `esp_audio.i2s_overruns` | 計測中に増加しない |
+
+画面の`Log-mel DSP`欄で同じ値を確認できます。詳細解析用にはログファイルをそのまま渡してください。
+ローカルで自動判定する場合は、Rover Monitorを停止してから次を実行します。
+
+```powershell
+uv run python check_log_mel.py rover-monitor.log
+```

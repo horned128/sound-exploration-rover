@@ -48,6 +48,11 @@ PlatformIOの初回ビルドで`No module named 'intelhex'`が表示された場
 
 RA8P1の完全ビルドは、インストール済みe² studioをヘッドレスで呼び出します。これにより既存の`.project`、`.cproject`、FSP Solutionと生成順を維持します。e² studioのGUIを同時に開いている場合は、設定ファイルやワークスペースのロックを避けるため、完全ビルド前にGUIを閉じてください。
 
+macOS版のビルドスクリプトは、e² studio同梱JavaからEquinoxのヘッドレスビルダーを
+直接起動します。ネイティブ`Contents/MacOS/e2studio`はヘッドレス指定でもAppKitを初期化し、
+サンドボックスやCIからの起動時に`RegisterApplication`でSIGABRTするため、完全ビルド用途では
+直接実行しません。VS Codeタスクまたは`.vscode/scripts/Invoke-RaBuild.sh`を使用してください。
+
 `Fast Build`は、最後の完全ビルド以降に新しいソースファイルやFSPモジュールを追加していない場合だけ使います。makefileがない、または新しいソースが列挙されていない場合は`Generate + Clean Build`を実行します。
 
 標準のインストール場所と異なる場合は、VS Codeを起動する前に次を環境変数へ設定します。

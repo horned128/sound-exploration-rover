@@ -207,6 +207,35 @@ size_t acoustic_protocol_encode_health(uint32_t sequence, uint32_t uptime_ms, co
 }
 
 /** =================================================================*
+ * @brief  log-mel特徴量符号化
+ * @details メタデータ8 byteと2フレーム分のint8 melを固定72 byteで送る。
+ * @param[in] sequence 送信シーケンス
+ * @param[in] uptime_ms ESP32起動後時間
+ * @param[in] p_feature log-mel特徴量
+ * @param[out] p_output フレーム出力先
+ * @param[in] output_capacity 出力先容量
+ * @return 符号化長。引数不正時は0
+ * ================================================================= */
+size_t acoustic_protocol_encode_feature(uint32_t sequence, uint32_t uptime_ms,
+                                        const acoustic_feature_t * p_feature, uint8_t * p_output,
+                                        size_t output_capacity) {
+    if (NULL == p_feature) {
+        return 0U;
+    }
+
+    uint8_t payload[ACOUSTIC_FEATURE_PAYLOAD_SIZE];
+    acoustic_write_u16_le(&payload[0], p_feature->event_id);
+    acoustic_write_u16_le(&payload[2], p_feature->frame_index);
+    acoustic_write_u16_le(&payload[4], p_feature->frame_count);
+    payload[6] = p_feature->n_bins;
+    payload[7] = p_feature->flags;
+    memcpy(&payload[ACOUSTIC_FEATURE_META_SIZE], p_feature->mel, ACOUSTIC_FEATURE_DATA_SIZE);
+
+    return acoustic_protocol_encode(ACOUSTIC_MESSAGE_FEATURE, sequence, uptime_ms, payload,
+                                    (uint16_t) sizeof(payload), p_output, output_capacity);
+}
+
+/** =================================================================*
  * @brief  ローバ診断情報符号化
  * @param[in] sequence 送信シーケンス
  * @param[in] uptime_ms CPU0起動後時間
@@ -462,6 +491,27 @@ bool acoustic_protocol_decode_health(const acoustic_frame_t * p_frame, acoustic_
     p_health->wifi_connected = p_frame->payload[3];
     p_health->i2c_error_count = acoustic_read_u32_le(&p_frame->payload[4]);
     p_health->i2s_overrun_count = acoustic_read_u32_le(&p_frame->payload[8]);
+    return true;
+}
+
+/** =================================================================*
+ * @brief  log-mel特徴量復号
+ * @param[in] p_frame 受信フレーム
+ * @param[out] p_feature log-mel特徴量
+ * @return フレームが正しい特徴量メッセージならtrue
+ * ================================================================= */
+bool acoustic_protocol_decode_feature(const acoustic_frame_t * p_frame, acoustic_feature_t * p_feature) {
+    if ((NULL == p_frame) || (NULL == p_feature) || (ACOUSTIC_MESSAGE_FEATURE != p_frame->type) ||
+        (ACOUSTIC_FEATURE_PAYLOAD_SIZE != p_frame->payload_length)) {
+        return false;
+    }
+
+    p_feature->event_id = acoustic_read_u16_le(&p_frame->payload[0]);
+    p_feature->frame_index = acoustic_read_u16_le(&p_frame->payload[2]);
+    p_feature->frame_count = acoustic_read_u16_le(&p_frame->payload[4]);
+    p_feature->n_bins = p_frame->payload[6];
+    p_feature->flags = p_frame->payload[7];
+    memcpy(p_feature->mel, &p_frame->payload[ACOUSTIC_FEATURE_META_SIZE], ACOUSTIC_FEATURE_DATA_SIZE);
     return true;
 }
 

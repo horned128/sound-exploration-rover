@@ -21,6 +21,13 @@
 #define ACOUSTIC_OBSERVATION_PAYLOAD_SIZE     (14U)
 #define ACOUSTIC_HELLO_PAYLOAD_SIZE           (12U)
 #define ACOUSTIC_HEALTH_PAYLOAD_SIZE          (12U)
+#define ACOUSTIC_FEATURE_BIN_COUNT             (32U)
+#define ACOUSTIC_FEATURE_FRAMES_PER_PACKET     (2U)
+#define ACOUSTIC_FEATURE_EVENT_FRAME_COUNT     (80U)
+#define ACOUSTIC_FEATURE_META_SIZE             (8U)
+#define ACOUSTIC_FEATURE_DATA_SIZE             \
+    (ACOUSTIC_FEATURE_BIN_COUNT * ACOUSTIC_FEATURE_FRAMES_PER_PACKET)
+#define ACOUSTIC_FEATURE_PAYLOAD_SIZE          (ACOUSTIC_FEATURE_META_SIZE + ACOUSTIC_FEATURE_DATA_SIZE)
 #define ACOUSTIC_ROVER_TELEMETRY_PAYLOAD_SIZE (96U)
 #define ACOUSTIC_ACTUATOR_TELEMETRY_PAYLOAD_SIZE (24U)
 
@@ -48,10 +55,13 @@ typedef enum e_acoustic_message_type {
     ACOUSTIC_MESSAGE_HELLO = 0x01U,
     ACOUSTIC_MESSAGE_OBSERVATION = 0x02U,
     ACOUSTIC_MESSAGE_HEALTH = 0x03U,
+    ACOUSTIC_MESSAGE_FEATURE = 0x04U,
+    ACOUSTIC_MESSAGE_PROTOTYPE_DATA = 0x05U,
     ACOUSTIC_MESSAGE_SET_CONFIG = 0x10U,
     ACOUSTIC_MESSAGE_ACK = 0x11U,
     ACOUSTIC_MESSAGE_ROVER_TELEMETRY = 0x20U,
     ACOUSTIC_MESSAGE_ACTUATOR_TELEMETRY = 0x21U,
+    ACOUSTIC_MESSAGE_POSE_TELEMETRY = 0x22U,
     ACOUSTIC_MESSAGE_LOG = 0x7FU,
 } acoustic_message_type_t;
 
@@ -89,6 +99,15 @@ typedef struct st_acoustic_health {
     uint32_t i2c_error_count;
     uint32_t i2s_overrun_count;
 } acoustic_health_t;
+
+typedef struct st_acoustic_feature {
+    uint16_t event_id;
+    uint16_t frame_index;
+    uint16_t frame_count;
+    uint8_t n_bins;
+    uint8_t flags;
+    int8_t mel[ACOUSTIC_FEATURE_DATA_SIZE];
+} acoustic_feature_t;
 
 typedef struct st_acoustic_rover_telemetry {
     uint8_t schema_version;
@@ -177,6 +196,9 @@ size_t acoustic_protocol_encode_hello(uint32_t sequence, uint32_t uptime_ms, con
 size_t acoustic_protocol_encode_health(uint32_t sequence, uint32_t uptime_ms, const acoustic_health_t * p_health,
                                                             /* 健全性情報符号化 */
                                        uint8_t * p_output, size_t output_capacity);
+size_t acoustic_protocol_encode_feature(uint32_t sequence, uint32_t uptime_ms,
+                                        const acoustic_feature_t * p_feature, uint8_t * p_output,
+                                        size_t output_capacity); /* log-mel特徴量符号化 */
 size_t acoustic_protocol_encode_rover_telemetry(uint32_t sequence, uint32_t uptime_ms,
                                                 const acoustic_rover_telemetry_t * p_telemetry, uint8_t * p_output,
                                                             /* ローバ診断符号化 */
@@ -195,6 +217,8 @@ bool acoustic_protocol_decode_hello(const acoustic_frame_t * p_frame, acoustic_h
 bool acoustic_protocol_decode_health(const acoustic_frame_t * p_frame,
                                                             /* 健全性情報復号 */
                                      acoustic_health_t * p_health);
+bool acoustic_protocol_decode_feature(const acoustic_frame_t * p_frame,
+                                      acoustic_feature_t * p_feature); /* log-mel特徴量復号 */
 bool acoustic_protocol_decode_rover_telemetry(const acoustic_frame_t * p_frame,
                                                             /* ローバ診断復号 */
                                               acoustic_rover_telemetry_t * p_telemetry);

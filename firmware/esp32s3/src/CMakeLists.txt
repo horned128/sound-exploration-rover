@@ -3,6 +3,7 @@ idf_component_register(
         "app_main.c"
         "acoustic_frontend.c"
         "audio_capture.c"
+        "log_mel_extractor.c"
         "usb_link.c"
         "wifi_telemetry.c"
         "xvf3800_control.c"
@@ -20,3 +21,4 @@ idf_component_register(
 )
 
 target_link_libraries(${COMPONENT_LIB} PRIVATE m)
+target_compile_options(${COMPONENT_LIB} PRIVATE -ffp-contract=off)

@@ -8,6 +8,8 @@ import subprocess
 import sys
 
 from .bindings import (
+    AcousticIdentifierOutput,
+    AcousticIdentifierPrototype,
     AcousticObservation,
     ObstacleAvoidanceOutput,
     SensorDiagnostics,
@@ -19,6 +21,8 @@ from .bindings import BUILD_SCRIPT
 
 
 STRUCTURES = {
+    "acoustic_identifier_prototype_t": AcousticIdentifierPrototype,
+    "acoustic_identifier_output_t": AcousticIdentifierOutput,
     "sound_follow_input_t": SoundFollowInput,
     "sound_follow_output_t": SoundFollowOutput,
     "acoustic_observation_t": AcousticObservation,
@@ -46,4 +50,3 @@ def assert_layout_matches() -> None:
     native = native_layout()
     expected = {name: python_layout(structure) for name, structure in STRUCTURES.items()}
     assert native == expected
-

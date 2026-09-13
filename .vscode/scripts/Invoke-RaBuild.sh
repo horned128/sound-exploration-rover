@@ -159,6 +159,38 @@ find_arm_gcc_bin() {
     return 1
 }
 
+find_e2studio_java() {
+    local e2_exec="$1"
+    local app_bundle eclipse_root candidate
+
+    app_bundle="${e2_exec%/Contents/MacOS/e2studio}"
+    eclipse_root="$app_bundle/Contents/eclipse"
+    candidate="$(find "$eclipse_root/plugins" -maxdepth 4 -type f -path '*/jre/bin/java' -perm -111 2>/dev/null | sort -r | head -n 1 || true)"
+    if [[ -n "$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+
+    echo "Bundled e2 studio Java runtime was not found below $eclipse_root/plugins." >&2
+    return 1
+}
+
+find_equinox_launcher() {
+    local e2_exec="$1"
+    local app_bundle eclipse_root candidate
+
+    app_bundle="${e2_exec%/Contents/MacOS/e2studio}"
+    eclipse_root="$app_bundle/Contents/eclipse"
+    candidate="$(find "$eclipse_root/plugins" -maxdepth 1 -type f -name 'org.eclipse.equinox.launcher_*.jar' | sort -r | head -n 1 || true)"
+    if [[ -n "$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+
+    echo "Equinox launcher JAR was not found below $eclipse_root/plugins." >&2
+    return 1
+}
+
 find_gnu_make() {
     local e2_exec="$1"
     local app_bundle candidate
@@ -230,9 +262,11 @@ invoke_managed_build() {
     local project_file="$project_dir/.project"
     local headless_root="$REPOSITORY_ROOT/.vscode/.e2studio-headless"
     local workspace="$headless_root/workspace-$project_name"
+    local configuration="$headless_root/configuration-$project_name"
     local stdout_log="$headless_root/$project_name.stdout.log"
     local stderr_log="$headless_root/$project_name.stderr.log"
     local operation="-build"
+    local java_executable launcher_jar
     local pid exit_code=0 build_finished=0
     local deadline wait_index
 
@@ -260,11 +294,11 @@ invoke_managed_build() {
         return 1
     fi
 
-    # A failed Eclipse import can leave stale workspace metadata that points at a
-    # project whose .project descriptor can no longer be resolved. Regenerate
-    # always starts from a clean, project-specific headless workspace.
-    rm -rf "$workspace"
-    mkdir -p "$headless_root" "$workspace"
+    # A failed Eclipse import can leave stale workspace or OSGi metadata that
+    # points at a project whose descriptor can no longer be resolved.
+    # Regenerate always starts from clean, project-specific headless state.
+    rm -rf "$workspace" "$configuration"
+    mkdir -p "$headless_root" "$workspace" "$configuration"
     : > "$stdout_log"
     : > "$stderr_log"
 
@@ -272,11 +306,22 @@ invoke_managed_build() {
         operation="-cleanBuild"
     fi
 
-    echo "Generating and building $project_name with e2 studio..."
-    "$e2_exec" \
+    java_executable="$(find_e2studio_java "$e2_exec")"
+    launcher_jar="$(find_equinox_launcher "$e2_exec")"
+
+    # The native macOS Eclipse launcher initializes AppKit even for a headless
+    # application. It aborts in sandboxed/CI sessions at RegisterApplication.
+    # Direct Equinox startup bypasses that Cocoa launcher and remains headless.
+    echo "Generating and building $project_name with e2 studio Equinox..."
+    "$java_executable" \
+        -Xms512m \
+        -Xmx3g \
+        --add-modules=ALL-SYSTEM \
+        -Djava.security.manager=allow \
+        -jar "$launcher_jar" \
         -nosplash \
-        --launcher.suppressErrors \
         -consoleLog \
+        -configuration "$configuration" \
         -application org.eclipse.cdt.managedbuilder.core.headlessbuild \
         -data "$workspace" \
         -importAll "$RA_ROOT" \
@@ -309,7 +354,7 @@ invoke_managed_build() {
             fi
         done
         if kill -0 "$pid" 2>/dev/null; then
-            echo "Warning: $project_name build finished, but e2 studio did not exit. Stopping only headless process $pid." >&2
+            echo "$project_name build finished; stopping the lingering headless Equinox process $pid."
             kill "$pid" 2>/dev/null || true
         fi
     fi
