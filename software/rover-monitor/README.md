@@ -32,6 +32,7 @@ uv run main.py
 - 左右モーターRPMおよびPWM Duty比（All / RPM / Duty モード切替対応）、操舵角と音源方向の円形方位図、音量の時系列
 - ToF LEFT / CENTER / RIGHTの距離、センサー有効フラグ、エラー、現在の走行ルール
 - BMI270の加速度と角速度
+- 学習モード、MRAM保存データ有無、直近の保存結果
 - 車体を原点とする局所障害物マップ
 - ESP32S3 log-melの起動時自己テスト、特徴量生成fps、80フレームリング、
   256-sampleブロックの直近／最大処理時間、I2S overrun
@@ -57,3 +58,15 @@ CPU0が未接続で`cpu_valid:false`の場合も、`esp_audio`診断は記録さ
 ```powershell
 uv run python check_log_mel.py rover-monitor.log
 ```
+
+## MRAM学習結果の実機確認
+
+CPU0とESP32S3を書き込んだ後、EK-RA8P1のSW1を2秒間長押しすると学習を開始する。対象音を1〜5回取り込み、再度SW1を2秒間長押しすると平均プロトタイプをCode MRAMへ保存する。`rover-monitor.log`の`learning`を確認する。
+
+| 項目 | 合格条件 |
+|---|---|
+| `learning.active` | 学習中は`1`、保存後は`0` |
+| `learning.storage_valid` | 保存後と再起動後に`1` |
+| `learning.storage_result` | 保存後と再起動後に`0` |
+
+`storage_result`は、`0`: 成功、`1`: 有効データなし、`2`: 未初期化、`3`: 引数、`4`: 領域、`5`: ドライバ開始、`6`: CPU1停止、`7`: blank処理、`8`: 書込み、`9`: 読戻し検証の各結果を表す。初回起動直後の`1`は正常で、保存後または保存済み状態での再起動後に`0`となる。

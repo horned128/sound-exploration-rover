@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdio.h>
+#include "ai/tflm_runtime.h"
 #include "tasks/task_think.h"
 #include "tasks/task_sensor.h"
 #include "tasks/task_command.h"
@@ -16,9 +17,28 @@ static UW count, loops, stage, publications, freeze_publications;
 static int mode, failures, recovery_loops;
 static rover_motion_target_t target;
 bsp_leds_t g_bsp_leds={0,NULL};
+volatile UW g_task_acoustic_link_feature_generation;
+static fsp_err_t pin_read(void *ctrl,bsp_io_port_pin_t pin,bsp_io_level_t *level) {
+    (void)ctrl;(void)pin;*level=BSP_IO_LEVEL_HIGH;return FSP_SUCCESS;
+}
+static const ioport_api_t io_api={.pinRead=pin_read};
+const ioport_instance_t g_ioport={NULL,&io_api};
 void R_BSP_PinAccessEnable(void) {}
 void R_BSP_PinAccessDisable(void) {}
 void R_BSP_PinWrite(bsp_io_port_pin_t pin,bsp_io_level_t level) { (void)pin;(void)level; }
+prototype_storage_result_t prototype_storage_init(void) { return CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED; }
+prototype_storage_result_t prototype_storage_load(prototype_storage_data_t *data) {
+    (void)data;return CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
+}
+prototype_storage_result_t prototype_storage_save(prototype_storage_data_t *data) {
+    (void)data;return CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
+}
+ER task_acoustic_link_feature_get(acoustic_feature_patch_t *patch,UW *generation) {
+    (void)patch;(void)generation;return E_NOEXS;
+}
+INT tflm_runtime_invoke(B const *input,UW input_bytes,B *output,UW output_bytes) {
+    (void)input;(void)input_bytes;(void)output;(void)output_bytes;return TFLM_RUNTIME_NOT_READY;
+}
 ID tk_cre_tsk(const T_CTSK *c) { entry=c->task;return 1; }
 ID tk_cre_flg(const T_CFLG *c) { (void)c;return 2; }
 ER tk_sta_tsk(ID id,INT code) { (void)id;(void)code;return 0; }

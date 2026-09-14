@@ -2,10 +2,12 @@
  * @file   task_command.c
  * @brief  CPU0指令タスク実装
  * ================================================================= */
-#include "task_command.h"                                     /* CPU0指令タスクAPI */
-#include "config/task_config.h"                            /* 指令周期、優先度、タイムアウト */
+#include "task_command.h"                                   /* CPU0指令タスクAPI */
+#include "config/task_config.h"                             /* 指令周期、優先度、タイムアウト */
 #include "ipc/actuator_ipc_client.h"                        /* CPU1へのIPC送信API */
-#include "task_think.h"                                       /* 思考タスクへの異常通知 */
+#include "task_think.h"                                     /* 思考タスクへの異常通知 */
+
+#define CPU0_COMMAND_IPC_RECOVERY_STATUS_COUNT (2U)
 
 /**< 最新アクチュエータ目標を保護するμT-Kernel mutex設定 */
 LOCAL T_CMTX const command_mutex_config = {
@@ -13,8 +15,10 @@ LOCAL T_CMTX const command_mutex_config = {
     .ceilpri = 0,
 };
 
-LOCAL void task_command_entry(INT stacd, void * exinf);    /* 指令タスク本体 */
-LOCAL void task_command_send_latest(void);                 /* 最新指令スナップショット送信 */
+LOCAL void task_command_entry(INT stacd, void * exinf);                     /* 指令タスク本体 */
+LOCAL void task_command_send_latest(void);                                  /* 最新指令スナップショット送信 */
+LOCAL BOOL task_command_sequence_reached(UW actual, UW reference);          /* 24 bit sequence到達判定 */
+LOCAL void task_command_recovery_check(const actuator_status_t * p_status); /* IPC回復確認 */
 
 /**< CPU1へIPC指令を送信するタスク設定 */
 LOCAL T_CTSK const command_task_config = {
@@ -34,6 +38,11 @@ LOCAL BOOL command_emergency_reset_pending;                /**< CPU1 estopラッ
 LOCAL BOOL command_timeout_reported;                       /**< 目標期限切れ通知済み状態 */
 LOCAL BOOL command_target_valid;                           /**< 思考タスクの目標受信済み状態 */
 LOCAL UW command_target_age_ms;                            /**< 最新目標の経過時間 */
+LOCAL BOOL command_ipc_fault_active;                        /**< IPC送信異常からの回復待ち */
+LOCAL BOOL command_recovery_safe_sequence_valid;            /**< 回復用安全指令を送信済み */
+LOCAL UW command_recovery_safe_sequence;                    /**< 最初に正常送信した安全指令sequence */
+LOCAL UW command_recovery_status_sequence;                  /**< 最後に評価したCPU1状態sequence */
+LOCAL UB command_recovery_status_count;                     /**< 正常なCPU1応答の連続確認数 */
 
 /**< 思考タスクが更新する最新アクチュエータ目標 */
 LOCAL rover_motion_target_t command_target = {
@@ -69,6 +78,11 @@ EXPORT app_fault_t task_command_create(void) {
     command_timeout_reported = FALSE;
     command_target_valid = FALSE;
     command_target_age_ms = CPU0_COMMAND_TARGET_TIMEOUT_MS;
+    command_ipc_fault_active = FALSE;
+    command_recovery_safe_sequence_valid = FALSE;
+    command_recovery_safe_sequence = 0U;
+    command_recovery_status_sequence = 0U;
+    command_recovery_status_count = 0U;
     command_target = (rover_motion_target_t){
         .left_target_rpm = 0,
         .right_target_rpm = 0,
@@ -201,6 +215,46 @@ EXPORT ER task_command_snapshot_get(task_command_snapshot_t * p_snapshot) {
 }
 
 /** =================================================================*
+ * @brief  周回する24 bit sequenceが基準へ到達済みか判定
+ * @details 差が半周未満ならactualはreferenceと同じか、それより新しい。
+ * ================================================================= */
+LOCAL BOOL task_command_sequence_reached(UW actual, UW reference) {
+    UW const distance = (actual - reference) & ACTUATOR_IPC_SEQUENCE_MASK;
+    return distance <= (ACTUATOR_IPC_SEQUENCE_MASK >> 1U);
+}
+
+/** =================================================================*
+ * @brief  IPC送信異常後の双方向回復確認
+ * @details 新しいCPU1状態フレームで、安全指令の適用と永続異常なしを
+ *          連続確認してからAPP_FAULT_IPC_SENDだけを解除する。
+ * ================================================================= */
+LOCAL void task_command_recovery_check(const actuator_status_t * p_status) {
+    if (!command_ipc_fault_active || !command_recovery_safe_sequence_valid || (NULL == p_status) ||
+        (p_status->sequence_number == command_recovery_status_sequence)) {
+        return;
+    }
+    command_recovery_status_sequence = p_status->sequence_number;
+
+    UH const unexpected_faults =
+        p_status->fault_flags & (UH) ~ACTUATOR_FAULT_EMERGENCY_STOP_ACTIVE;
+    if ((0U == unexpected_faults) &&
+        task_command_sequence_reached(p_status->applied_command_sequence, command_recovery_safe_sequence)) {
+        if (command_recovery_status_count < CPU0_COMMAND_IPC_RECOVERY_STATUS_COUNT) {
+            command_recovery_status_count++;
+        }
+    } else {
+        command_recovery_status_count = 0U;
+    }
+
+    if ((command_recovery_status_count >= CPU0_COMMAND_IPC_RECOVERY_STATUS_COUNT) &&
+        (E_OK == task_think_clear_fault(APP_FAULT_IPC_SEND))) {
+        command_ipc_fault_active = FALSE;
+        command_recovery_safe_sequence_valid = FALSE;
+        command_recovery_status_count = 0U;
+    }
+}
+
+/** =================================================================*
  * @brief  最新指令スナップショット送信
  * @details 4サーボと左右モーターを1つのIPCフレームとして同時commitする。
  * ================================================================= */
@@ -246,6 +300,18 @@ LOCAL void task_command_send_latest(void) {
         return;
     }
     g_task_command_peer_ready = TRUE;
+    task_command_recovery_check(&peer_status);
+
+    /* IPC復旧中は思考タスクの反映周期に依存せず、CPU1へ安全停止を送り続ける。 */
+    if (command_ipc_fault_active) {
+        target.left_target_rpm = 0;
+        target.right_target_rpm = 0;
+        target.actuator_enable = FALSE;
+        target.emergency_stop = TRUE;
+        for (UW i = 0U; i < ACTUATOR_SERVO_COUNT; i++) {
+            target.servo_target_deg[i] = 0;
+        }
+    }
 
     BOOL const clear_emergency_latch = command_emergency_reset_pending && !target_stale && !target.emergency_stop;
 
@@ -262,9 +328,17 @@ LOCAL void task_command_send_latest(void) {
     g_task_command_last_error = actuator_ipc_client_send(&command);
     if (FSP_SUCCESS != g_task_command_last_error) {
         (void) actuator_ipc_client_emergency_stop(++g_task_command_sequence);
+        command_ipc_fault_active = TRUE;
+        command_recovery_safe_sequence_valid = FALSE;
+        command_recovery_status_sequence = peer_status.sequence_number;
+        command_recovery_status_count = 0U;
         (void) task_think_report_fault(APP_FAULT_IPC_SEND);
     } else {
         g_task_command_send_count++;
+        if (command_ipc_fault_active && !command_recovery_safe_sequence_valid) {
+            command_recovery_safe_sequence = command.sequence_number & ACTUATOR_IPC_SEQUENCE_MASK;
+            command_recovery_safe_sequence_valid = TRUE;
+        }
         ER const sent_lock_err = tk_loc_mtx(command_mutex_id, TMO_FEVR);
         if (E_OK == sent_lock_err) {
             command_last_sent_target.left_target_rpm = command.left_target_rpm;

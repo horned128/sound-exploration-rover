@@ -194,6 +194,15 @@
             </div>
 
             <div class="panel">
+                <h3 class="panel-title">Learning & MRAM</h3>
+                <div class="data-grid">
+                    <span class="data-label">Learning</span><span class="data-value" id="val_learning_active">-</span>
+                    <span class="data-label">Stored Data</span><span class="data-value" id="val_storage_valid">-</span>
+                    <span class="data-label">Last Result</span><span class="data-value" id="val_storage_result">-</span>
+                </div>
+            </div>
+
+            <div class="panel">
                 <h3 class="panel-title">Log-mel DSP</h3>
                 <div class="data-grid">
                     <span class="data-label">Self Test</span><span class="data-value" id="val_dsp_self_test">-</span>
@@ -295,9 +304,36 @@
             });
         });
 
-        const THINK_STATES = { 0: "WAIT_LINK", 1: "LISTEN", 2: "STEER_PREP", 3: "MOVE_STEP", 4: "SETTLE", 5: "COOLDOWN", 6: "FAULT" };
+        const THINK_STATES = {
+            0: "WAIT_LINK", 1: "LISTEN", 2: "STEER_PREP", 3: "MOVE_STEP", 4: "SETTLE", 5: "COOLDOWN",
+            6: "SENSOR_SAFE_STOP", 7: "SENSOR_FORWARD", 8: "SENSOR_CAUTION_FORWARD",
+            9: "SENSOR_TURN_LEFT", 10: "SENSOR_TURN_RIGHT", 11: "SENSOR_BLOCKED_STOP",
+            12: "SENSOR_IMU_STOP", 13: "FAULT"
+        };
+        const CPU0_FAULTS = {
+            1: "TASK_CREATE", 2: "TASK_START", 4: "IPC_INIT", 8: "IPC_SEND",
+            16: "COMMAND_TARGET_TIMEOUT", 32: "TARGET_UPDATE", 64: "USB_INIT"
+        };
+        const MRAM_RESULTS = {
+            0: "OK", 1: "EMPTY", 2: "NOT_INITIALIZED", 3: "ARGUMENT_ERROR", 4: "LAYOUT_ERROR",
+            5: "OPEN_ERROR", 6: "CORE_STALL_ERROR", 7: "BLANK_ERROR", 8: "WRITE_ERROR", 9: "VERIFY_ERROR"
+        };
         function getThinkStateClass(c) {
-            switch(c) { case 0: case 5: return 'val-warn'; case 1: return 'val-blue'; case 2: case 3: case 4: return 'val-ok'; case 6: return 'val-error'; default: return ''; }
+            switch(c) {
+                case 0: case 5: case 6: case 8: case 11: return 'val-warn';
+                case 1: return 'val-blue';
+                case 2: case 3: case 4: case 7: case 9: case 10: return 'val-ok';
+                case 12: case 13: return 'val-error';
+                default: return '';
+            }
+        }
+        function formatCpu0Faults(value) {
+            const flags = Number(value) || 0;
+            if(flags === 0) return 'NONE (0)';
+            const names = Object.entries(CPU0_FAULTS)
+                .filter(([bit]) => (flags & Number(bit)) !== 0)
+                .map(([, name]) => name);
+            return `${names.length ? names.join(' | ') : 'UNKNOWN'} (${flags})`;
         }
 
         Chart.defaults.color = '#888';
@@ -711,10 +747,22 @@
             setVal('val_estop', d.command?.emergency_stop ? 'ACTIVE' : 'SAFE', d.command?.emergency_stop ? 'val-error' : 'val-ok');
             setVal('val_enable', d.command?.enable ? 'ON' : 'OFF', d.command?.enable ? 'val-ok' : 'val-warn');
             const stateCode = d.think?.state;
-            setVal('val_think_state', THINK_STATES[stateCode] ?? `UNKNOWN (${stateCode})`, getThinkStateClass(stateCode));
+            setVal('val_think_state', d.think?.name || THINK_STATES[stateCode] || `UNKNOWN (${stateCode})`, getThinkStateClass(stateCode));
 
             setVal('val_link_ready', d.think?.link_ready ? 'YES' : 'NO', d.think?.link_ready ? 'val-ok' : 'val-warn');
-            setVal('val_faults', d.think?.faults, d.think?.faults > 0 ? 'val-error' : '');
+            setVal('val_faults', formatCpu0Faults(d.think?.faults), d.think?.faults > 0 ? 'val-error' : 'val-ok');
+
+            const learningAvailable = d.learning !== undefined;
+            const learning = d.learning || {};
+            const storageResult = Number(learning.storage_result);
+            const storageResultAvailable = learningAvailable && Number.isInteger(storageResult);
+            setVal('val_learning_active', learningAvailable ? (learning.active ? 'ACTIVE' : 'IDLE') : '-',
+                learningAvailable ? (learning.active ? 'val-warn' : 'val-ok') : '');
+            setVal('val_storage_valid', learningAvailable ? (learning.storage_valid ? 'VALID' : 'EMPTY') : '-',
+                learningAvailable ? (learning.storage_valid ? 'val-ok' : 'val-warn') : '');
+            setVal('val_storage_result', storageResultAvailable
+                ? `${MRAM_RESULTS[storageResult] ?? 'UNKNOWN'} (${storageResult})` : '-',
+                storageResultAvailable ? (storageResult === 0 ? 'val-ok' : storageResult === 1 ? 'val-warn' : 'val-error') : '');
 
             setVal('val_vad', d.audio?.vad ? 'DETECTED' : 'NONE', d.audio?.vad ? 'val-ok' : '');
             setVal('val_aud_crc', d.audio?.crc_errors, d.audio?.crc_errors > 0 ? 'val-error' : '');

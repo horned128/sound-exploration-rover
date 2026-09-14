@@ -611,3 +611,11 @@ e² studioではCPU0/CPU1 projectをRefreshし、Generate Project Content、Clea
 | サーボPWMピン | Solution Pins、CPU1 GPT instance | CPU0 `pin_data.c`、配線、SW4 |
 | モーターPWM・enable | Solution Pins、CPU1 GPT/GPIO | `drive_service.c / bts7960.c`、BTS7960配線 |
 | encoder確認・RPM換算 | CPU1 IRQ・Solution Pins・`config/{task,actuator,drive,servo,pin}_config.h` | 4入力の配線、信号電圧、実測counts/rev |
+
+## 14. MRAMを用いたプロトタイプ保存
+
+RA8P1のCode MRAMは全体で1 MiB（`0x02000000`〜`0x020FFFFF`）で、CPU0とCPU1へ512 KiBずつ割り当てる。CPU0は自身の割当末尾4 KiB（`0x0207F000`〜`0x0207FFFF`）をリンカで予約し、64次元int8音響プロトタイプの永続化に使用する。リンカASSERTにより、CPU0イメージが予約領域へ達した場合はビルドを失敗させる。
+
+書込みはFSP `r_mram`を使用し、直接ポインタへ代入しない。96 byte（32 byteプログラミング単位×3）のA/Bスロットへ、世代番号、形式バージョン、CRC-32、commit markerを付けて交互に保存する。更新対象を`0xFF`へ上書きしてから新レコードを書き、読戻しとCRCを検証するため、更新中に電源が失われても直前の有効スロットを選択できる。
+
+Code MRAMのプログラム中はCPU0割込みを禁止し、`CPU1WAITCR`でCPU1をquiescent状態へ移して、両コアからの命令フェッチを止める。保存処理の結果、有効データ有無、学習中状態は既存テレメトリの`sensor_reserved`へ格納し、rover-monitorには`learning.storage_result`、`learning.storage_valid`、`learning.active`として記録する。

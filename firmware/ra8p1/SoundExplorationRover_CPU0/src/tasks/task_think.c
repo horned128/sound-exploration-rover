@@ -1,29 +1,49 @@
 /** =================================================================*
  * @file   task_think.c
- * @brief  CPU0音源追従思考タスク
+ * @brief  CPU0自律走行・現場学習タスク
  * ================================================================= */
-#include "task_think.h"                                       /* CPU0思考タスクAPI */
-#include "config/control_config.h"                         /* 思考モードと走行値 */
-#include "config/pin_config.h"                             /* LEDの役割設定 */
-#include "config/sensor_config.h"                          /* センサー安全判定値 */
-#include "config/task_config.h"                            /* 思考周期と優先度 */
-#include "control/obstacle_avoidance_controller.h"         /* ToF・IMU走行判断 */
-#include "control/sensor_liveness.h"                       /* 取得タスクと独立した更新監視 */
+#include "task_think.h"                                     /* CPU0思考タスクAPI */
+#include "ai/tflm_runtime.h"                                /* int8埋め込み推論 */
+#include "config/control_config.h"                          /* 思考モードと走行値 */
+#include "config/pin_config.h"                              /* LEDの役割設定 */
+#include "config/sensor_config.h"                           /* センサー安全判定値 */
+#include "config/task_config.h"                             /* 思考周期と優先度 */
+#include "control/obstacle_avoidance_controller.h"          /* ToF・IMU走行判断 */
+#include "control/sensor_liveness.h"                        /* 取得タスクと独立した更新監視 */
 #include "control/sound_follow_controller.h"                /* 音源追従状態機械 */
 #include "hal_data.h"                                       /* BSP LED情報、ピンAPI */
-#include "task_acoustic_link.h"                                       /* 最新音響状態取得API */
-#include "task_command.h"                                     /* 最新アクチュエータ目標更新API */
-#include "task_sensor.h"                                      /* 最新I2Cセンサー状態取得API */
+#include "services/prototype_storage.h"                     /* Code MRAMプロトタイプ保存 */
+#include "task_acoustic_link.h"                             /* 最新音響状態取得API */
+#include "task_command.h"                                   /* 最新アクチュエータ目標更新API */
+#include "task_sensor.h"                                    /* 最新I2Cセンサー状態取得API */
+#include <string.h>                                         /* 学習バッファ初期化 */
+
+#define CPU0_THINK_EVENT_CLEAR_IPC_SEND    (1UL << 31)
+#define CPU0_THINK_EVENT_MASK              ((UINT) (APP_FAULT_ALL_MASK | CPU0_THINK_EVENT_CLEAR_IPC_SEND))
 
 IMPORT bsp_leds_t g_bsp_leds;                               /**< BSPのLED構成情報 */
 
 LOCAL void task_think_entry(INT stacd, void * exinf);      /* 思考タスク本体 */
+#if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SOUND_FOLLOW)
 LOCAL ER task_think_publish_target(const sound_follow_output_t * p_output); /* 追従指令の4輪展開 */
+#endif
 LOCAL ER task_think_publish_motion(H steering_deg, H left_rpm, H right_rpm, BOOL actuator_enable,
                                    BOOL emergency_stop); /* 共通走行指令の4輪展開 */
-LOCAL BOOL task_think_sound_motion_allowed(const sensor_snapshot_t * p_snapshot); /* 音源追従の近接安全判定 */
+#if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SOUND_FOLLOW)
+/* 音源追従の近接安全判定 */
+LOCAL BOOL task_think_sound_motion_allowed(const sensor_snapshot_t * p_snapshot);
+#endif
 LOCAL void task_think_led_write(BOOL blue_on, BOOL green_on); /* 2LED一括更新 */
-LOCAL UW task_think_fault_code(UW fault_flags);/* LED表示用異常番号 */
+LOCAL void task_think_learning_capture(void);               /* 新規特徴量パッチの学習 */
+
+LOCAL UW learning_button_press_ms;                          /**< SW1継続押下時間[ms] */
+LOCAL BOOL learning_button_handled;                         /**< 同一押下の多重切替防止 */
+LOCAL UW learning_last_feature_generation;                  /**< 最後に収集した特徴量世代 */
+LOCAL W learning_accum[CPU0_PROTOTYPE_STORAGE_BYTES];       /**< 埋め込み平均用累積値 */
+LOCAL acoustic_feature_patch_t learning_feature_patch;      /**< タスクスタック外の特徴量コピー先 */
+LOCAL B learning_embedding[CPU0_PROTOTYPE_STORAGE_BYTES];   /**< タスクスタック外の推論出力 */
+LOCAL prototype_storage_data_t storage_data;                /**< 読込済みまたは保存対象プロトタイプ */
+LOCAL UW task_think_fault_code(UW fault_flags);             /* LED表示用異常番号 */
 /* 状態LED更新 */
 LOCAL void task_think_led_update(UW state_elapsed_ms, UW heartbeat_elapsed_ms, UW fault_elapsed_ms);
 
@@ -33,7 +53,7 @@ LOCAL T_CFLG const think_fault_flag_config = {
     .iflgptn = 0U,
 };
 
-/**< 音源追従判断を行う思考タスク設定 */
+/**< 自律走行判断を行う思考タスク設定 */
 LOCAL T_CTSK const think_task_config = {
     .exinf = NULL,
     .tskatr = TA_HLNG | TA_RNG3,
@@ -82,7 +102,12 @@ EXPORT volatile BOOL g_task_think_actuator_enable;                 /**< 出力�
 EXPORT volatile BOOL g_task_think_emergency_stop;                  /**< 非常停止判断 */
 EXPORT volatile obstacle_avoidance_rule_t g_task_think_sensor_rule;       /**< 選択センサー走行ルール */
 EXPORT volatile UW g_task_think_fault_flags;                       /**< CPU0異常ラッチ */
+EXPORT volatile BOOL g_task_think_learning_mode;            /**< 現場学習モード */
+EXPORT volatile UB g_task_think_learning_samples;           /**< 収集済み埋め込み数 */
+EXPORT volatile BOOL g_task_think_storage_valid;            /**< 有効なMRAMプロトタイプ有無 */
+EXPORT volatile prototype_storage_result_t g_task_think_storage_result; /**< 直近MRAM処理結果 */
 
+#if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SOUND_FOLLOW)
 /** =================================================================*
  * @brief  音源追従で前進してよいToF状態か判定
  * @details センサー取得失敗、更新期限超過、ToF無効、またはいずれかの測距が
@@ -106,6 +131,7 @@ LOCAL BOOL task_think_sound_motion_allowed(const sensor_snapshot_t * p_snapshot)
     }
     return TRUE;
 }
+#endif
 
 /** =================================================================*
  * @brief  思考タスクと異常イベント生成
@@ -132,6 +158,10 @@ EXPORT app_fault_t task_think_create(void) {
     g_task_think_emergency_stop = TRUE;
     g_task_think_sensor_rule = CPU0_SENSOR_RULE_SAFE_STOP;
     g_task_think_fault_flags = APP_FAULT_NONE;
+    g_task_think_learning_mode = FALSE;
+    g_task_think_learning_samples = 0U;
+    g_task_think_storage_valid = FALSE;
+    g_task_think_storage_result = CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
     sound_follow_controller_init();
 #if (CPU0_SENSOR_I2C_ENABLED != 0U)
     obstacle_avoidance_controller_init();
@@ -206,6 +236,55 @@ EXPORT ER task_think_report_fault(app_fault_t fault) {
 }
 
 /** =================================================================*
+ * @brief  最新の完成特徴量パッチを1回だけ学習に取り込む
+ * @details 音響観測の更新ではなく特徴量世代で重複を判定するため、
+ *          SENSOR_RULEとSOUND_FOLLOWのどちらでも同じ条件で動作する。
+ * ================================================================= */
+LOCAL void task_think_learning_capture(void) {
+    if (!g_task_think_learning_mode || (g_task_think_learning_samples >= 5U)) {
+        return;
+    }
+
+    UW generation = 0U;
+    if ((E_OK != task_acoustic_link_feature_get(&learning_feature_patch, &generation)) ||
+        (generation == learning_last_feature_generation)) {
+        return;
+    }
+    learning_last_feature_generation = generation;
+
+    memset(learning_embedding, 0, sizeof(learning_embedding));
+    if (TFLM_RUNTIME_OK !=
+        tflm_runtime_invoke((const B *) learning_feature_patch.frames, (UW) sizeof(learning_feature_patch.frames),
+                            learning_embedding, (UW) sizeof(learning_embedding))) {
+        return;
+    }
+
+    for (UW index = 0U; index < CPU0_PROTOTYPE_STORAGE_BYTES; index++) {
+        learning_accum[index] += learning_embedding[index];
+    }
+    g_task_think_learning_samples++;
+}
+
+/** =================================================================*
+ * @brief  回復を確認した一過性異常の解除通知
+ * @details 現在はCPU1との双方向IPCおよび安全指令反映を確認できる
+ *          APP_FAULT_IPC_SENDだけを解除対象とする。
+ * @param[in] fault 解除するCPU0異常ビット
+ * @return μT-Kernelエラーコード
+ * ================================================================= */
+EXPORT ER task_think_clear_fault(app_fault_t fault) {
+    if (APP_FAULT_IPC_SEND != fault) {
+        return E_PAR;
+    }
+    if (think_fault_flag_id <= 0) {
+        return E_NOEXS;
+    }
+
+    return tk_set_flg(think_fault_flag_id, (UINT) CPU0_THINK_EVENT_CLEAR_IPC_SEND);
+}
+
+#if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SOUND_FOLLOW)
+/** =================================================================*
  * @brief  追従指令の4輪展開
  * @details 前後輪を逆相操舵し、左右DCモーターを同じ更新で指令する。
  * @param[in] p_output 音源追従状態機械の出力
@@ -219,6 +298,7 @@ LOCAL ER task_think_publish_target(const sound_follow_output_t * p_output) {
     return task_think_publish_motion(p_output->steering_deg, p_output->left_rpm, p_output->right_rpm,
                                      p_output->actuator_enable, p_output->emergency_stop);
 }
+#endif
 
 /** =================================================================*
  * @brief  共通走行指令を4輪操舵・左右DCモーターの目標へ展開
@@ -364,6 +444,16 @@ LOCAL void task_think_led_update(UW state_elapsed_ms, UW heartbeat_elapsed_ms, U
         }
     }
 
+    if (g_task_think_learning_mode) {
+        blue_on = 0U == ((state_elapsed_ms / 100U) & 1U);
+        green_on = !blue_on;
+        if (g_task_think_learning_samples > 0U) {
+            if (state_elapsed_ms % 500U < 100U) {
+                blue_on = TRUE;
+                green_on = TRUE;
+            }
+        }
+    }
     task_think_led_write(blue_on, green_on);
 }
 
@@ -371,6 +461,12 @@ LOCAL void task_think_led_update(UW state_elapsed_ms, UW heartbeat_elapsed_ms, U
  * @brief  思考タスク本体
  * ================================================================= */
 LOCAL void task_think_entry(INT stacd, void * exinf) {
+    g_task_think_storage_result = prototype_storage_init();
+    if (CPU0_PROTOTYPE_STORAGE_OK == g_task_think_storage_result) {
+        g_task_think_storage_result = prototype_storage_load(&storage_data);
+        g_task_think_storage_valid = CPU0_PROTOTYPE_STORAGE_OK == g_task_think_storage_result;
+    }
+
     (void) stacd;
     (void) exinf;
 
@@ -385,11 +481,48 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
     while (1) {
         UINT fault_pattern = 0U;
         ER const flag_err =
-            tk_wai_flg(think_fault_flag_id, APP_FAULT_ALL_MASK, TWF_ORW | TWF_BITCLR, &fault_pattern, TMO_POL);
+            tk_wai_flg(think_fault_flag_id, CPU0_THINK_EVENT_MASK, TWF_ORW | TWF_BITCLR, &fault_pattern, TMO_POL);
         if (E_OK == flag_err) {
-            g_task_think_fault_flags |= fault_pattern;
+            UW const reported_faults = (UW) fault_pattern & APP_FAULT_ALL_MASK;
+            g_task_think_fault_flags |= reported_faults;
+            if ((0U != ((UW) fault_pattern & CPU0_THINK_EVENT_CLEAR_IPC_SEND)) &&
+                (0U == (reported_faults & APP_FAULT_IPC_SEND))) {
+                g_task_think_fault_flags &= ~((UW) APP_FAULT_IPC_SEND);
+                fault_elapsed_ms = 0U;
+            }
         }
 
+        bsp_io_level_t sw1_level = BSP_IO_LEVEL_HIGH;
+        (void) g_ioport.p_api->pinRead(g_ioport.p_ctrl, BSP_IO_PORT_00_PIN_09, &sw1_level);
+        if (BSP_IO_LEVEL_LOW == sw1_level) {
+            if (!learning_button_handled) {
+                learning_button_press_ms += CPU0_THINK_PERIOD_MS;
+                if (learning_button_press_ms >= 2000U) {
+                    g_task_think_learning_mode = !g_task_think_learning_mode;
+                    learning_button_handled = TRUE;
+                    if (!g_task_think_learning_mode) {
+                        if (g_task_think_learning_samples > 0U) {
+                            for (UW index = 0U; index < CPU0_PROTOTYPE_STORAGE_BYTES; index++) {
+                                storage_data.prototype[index] =
+                                    (B) (learning_accum[index] / (W) g_task_think_learning_samples);
+                            }
+                            storage_data.prototype_count = 1U;
+                            g_task_think_storage_result = prototype_storage_save(&storage_data);
+                            if (CPU0_PROTOTYPE_STORAGE_OK == g_task_think_storage_result) {
+                                g_task_think_storage_valid = TRUE;
+                            }
+                        }
+                    } else {
+                        g_task_think_learning_samples = 0U;
+                        learning_last_feature_generation = g_task_acoustic_link_feature_generation;
+                        memset(learning_accum, 0, sizeof(learning_accum));
+                    }
+                }
+            }
+        } else {
+            learning_button_press_ms = 0U;
+            learning_button_handled = FALSE;
+        }
 #if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SENSOR_RULE)
         sensor_snapshot_t sensor_snapshot = {0};
         ER const sensor_snapshot_err = task_sensor_snapshot_get(&sensor_snapshot);
@@ -403,6 +536,14 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             state_elapsed_ms = 0U;
         }
 
+        if (g_task_think_learning_mode) {
+            output.emergency_stop = TRUE;
+            output.actuator_enable = FALSE;
+            output.steering_deg = 0;
+            output.left_rpm = 0;
+            output.right_rpm = 0;
+            task_think_learning_capture();
+        }
         if (E_OK != task_think_publish_motion(output.steering_deg, output.left_rpm, output.right_rpm,
                                                output.actuator_enable, output.emergency_stop)) {
             g_task_think_fault_flags |= APP_FAULT_TARGET_UPDATE;
@@ -470,6 +611,14 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             state_elapsed_ms = 0U;
         }
 
+        if (g_task_think_learning_mode) {
+            output.emergency_stop = TRUE;
+            output.actuator_enable = FALSE;
+            output.steering_deg = 0;
+            output.left_rpm = 0;
+            output.right_rpm = 0;
+            task_think_learning_capture();
+        }
         if (E_OK != task_think_publish_target(&output)) {
             g_task_think_fault_flags |= APP_FAULT_TARGET_UPDATE;
             input.fault_active = TRUE;

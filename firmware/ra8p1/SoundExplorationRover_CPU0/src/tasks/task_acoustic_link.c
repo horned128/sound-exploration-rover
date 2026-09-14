@@ -558,6 +558,10 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
         .autonomy_mode = (UB) CPU0_AUTONOMY_MODE,
         .sensor_rule = (UB) g_task_think_sensor_rule,
         .sensor_valid_flags = sensor_snapshot.valid_flags,
+        .sensor_reserved =
+            ((UB) g_task_think_storage_result & ACOUSTIC_TELEMETRY_STORAGE_RESULT_MASK) |
+            (g_task_think_storage_valid ? ACOUSTIC_TELEMETRY_STORAGE_VALID : 0U) |
+            (g_task_think_learning_mode ? ACOUSTIC_TELEMETRY_LEARNING_MODE : 0U),
         .tof_distance_mm = {
             sensor_snapshot.tof_distance_mm[0],
             sensor_snapshot.tof_distance_mm[1],

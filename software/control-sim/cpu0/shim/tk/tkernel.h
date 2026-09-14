@@ -14,15 +14,18 @@
 #define E_TMOUT (-50)
 #define TMO_POL 0
 #define TA_WSGL 0U
+#define TA_INHERIT 0U
 typedef void (*FP)(INT, void *);
 typedef unsigned int UINT;
 typedef struct { W hi; UW lo; } SYSTIM;
 typedef struct { void *exinf; UW tskatr; void (*task)(INT, void *); INT itskpri; UW stksz; void *bufptr; } T_CTSK;
 typedef struct { void *exinf; UW flgatr; UW iflgptn; } T_CFLG;
 typedef struct { void *exinf; UW cycatr; void (*cychdr)(void *); UW cyctim; UW cycphs; } T_CCYC;
+typedef struct { UW mtxatr; INT ceilpri; } T_CMTX;
 ID tk_cre_tsk(const T_CTSK *);
 ID tk_cre_cyc(const T_CCYC *);
 ID tk_cre_flg(const T_CFLG *);
+ID tk_cre_mtx(const T_CMTX *);
 ER tk_sta_tsk(ID, INT);
 ER tk_sta_cyc(ID);
 ER tk_stp_cyc(ID);
@@ -30,6 +33,9 @@ ER tk_del_cyc(ID);
 ER tk_ter_tsk(ID);
 ER tk_del_tsk(ID);
 ER tk_del_flg(ID);
+ER tk_del_mtx(ID);
+ER tk_loc_mtx(ID, INT);
+ER tk_unl_mtx(ID);
 ER tk_set_flg(ID, UINT);
 ER tk_wai_flg(ID, UINT, UINT, UINT *, INT);
 ER tk_get_otm(SYSTIM *);

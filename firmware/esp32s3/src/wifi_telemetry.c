@@ -249,6 +249,7 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         "\"sensors\":{\"mode\":%u,\"mode_name\":\"%s\",\"rule\":%u,\"rule_name\":\"%s\"," 
         "\"valid_flags\":%u,\"tof_mm\":[%u,%u,%u],\"accel_mg\":[%d,%d,%d],"
         "\"gyro_dps_x10\":[%d,%d,%d],\"error_flags\":%u,\"last_error\":%ld,\"age_ms\":%lu},"
+        "\"learning\":{\"active\":%d,\"storage_valid\":%d,\"storage_result\":%u},"
         "\"actuator\":{\"valid\":%u,\"age_ms\":%lu,"
         "\"status_sequence\":%lu,\"applied_command_sequence\":%lu,"
         "\"faults\":%u,\"left_duty_permille\":%d,"
@@ -289,6 +290,9 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         telemetry->accel_mg[0], telemetry->accel_mg[1], telemetry->accel_mg[2], telemetry->gyro_dps_x10[0],
         telemetry->gyro_dps_x10[1], telemetry->gyro_dps_x10[2], (unsigned int) telemetry->sensor_error_flags,
         (long) telemetry->sensor_last_error, (unsigned long) telemetry->sensor_age_ms,
+        wifi_telemetry_flag(telemetry->sensor_reserved, ACOUSTIC_TELEMETRY_LEARNING_MODE),
+        wifi_telemetry_flag(telemetry->sensor_reserved, ACOUSTIC_TELEMETRY_STORAGE_VALID),
+        (unsigned int) (telemetry->sensor_reserved & ACOUSTIC_TELEMETRY_STORAGE_RESULT_MASK),
         actuator_valid ? 1U : 0U, (unsigned long) actuator_age_ms,
         (unsigned long) actuator_telemetry->actuator_status_sequence,
         (unsigned long) actuator_telemetry->actuator_applied_command_sequence,
