@@ -33,8 +33,8 @@ IMPORT volatile BOOL g_task_think_emergency_stop;           /**< 非常停止判
 IMPORT volatile obstacle_avoidance_rule_t g_task_think_sensor_rule;
 IMPORT volatile UW g_task_think_fault_flags;                /**< CPU0異常ラッチ（Live Watch用） */
 IMPORT volatile BOOL g_task_think_learning_mode;            /**< 現場学習モード */
-IMPORT volatile UB g_task_think_learning_samples;           /**< 収集済み埋め込み数 */
-IMPORT volatile BOOL g_task_think_storage_valid;            /**< 有効なMRAMプロトタイプ有無 */
+IMPORT volatile UB g_task_think_learning_samples;           /**< 収集済み96次元見本数 */
+IMPORT volatile BOOL g_task_think_storage_valid;            /**< 有効なMRAM背景モデル・見本有無 */
 IMPORT volatile prototype_storage_result_t g_task_think_storage_result; /**< 直近MRAM処理結果 */
 
 IMPORT volatile UW g_task_think_sensor_watchdog_ms;         /**< センサー更新停止時間[ms] */

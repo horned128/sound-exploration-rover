@@ -26,6 +26,10 @@ static log_mel_extractor_t s_log_mel_extractor;             /**< log-mel係数�
 static int8_t s_feature_ring[ACOUSTIC_FEATURE_EVENT_FRAME_COUNT][ACOUSTIC_FEATURE_BIN_COUNT];
 static size_t s_feature_write_index;                        /**< 次回特徴量書込位置 */
 static uint32_t s_generated_feature_frame_count;            /**< 累積特徴量フレーム数 */
+static audio_capture_feature_event_t s_feature_event;       /**< 送信待ちまたは収集中の特徴量イベント */
+static uint16_t s_feature_event_frame_count;                /**< イベントに退避済みのフレーム数 */
+static bool s_feature_event_active;                         /**< 後続500 msを収集中 */
+static bool s_feature_event_ready;                          /**< 80フレーム揃い、送信側が取得可能 */
 /**< 音声状態を保護する排他ロック */
 static portMUX_TYPE s_snapshot_lock = portMUX_INITIALIZER_UNLOCKED;
 /**< 音声タスクと参照元で共有する最新状態 */
@@ -71,9 +75,19 @@ static int16_t amplitude_to_dbfs_x100(double amplitude) {
 static void audio_capture_feature_callback(int8_t const frame[LOG_MEL_BIN_COUNT], void * context) {
     (void) context;
 
+    portENTER_CRITICAL(&s_snapshot_lock);
     memcpy(s_feature_ring[s_feature_write_index], frame, sizeof(s_feature_ring[0]));
     s_feature_write_index = (s_feature_write_index + 1U) % ACOUSTIC_FEATURE_EVENT_FRAME_COUNT;
     s_generated_feature_frame_count++;
+    if (s_feature_event_active) {
+        memcpy(s_feature_event.frames[s_feature_event_frame_count], frame, sizeof(s_feature_event.frames[0]));
+        s_feature_event_frame_count++;
+        if (ACOUSTIC_FEATURE_EVENT_FRAME_COUNT == s_feature_event_frame_count) {
+            s_feature_event_active = false;
+            s_feature_event_ready = true;
+        }
+    }
+    portEXIT_CRITICAL(&s_snapshot_lock);
 }
 
 /** =================================================================*
@@ -176,12 +190,84 @@ static void audio_capture_task(void * context) {
 }
 
 /** =================================================================*
+ * @brief  特徴量イベント収集を開始
+ * @param[in] event_id フロントエンドが採番したイベントID
+ * @return 開始結果。300 msの履歴不足または前イベント未消費時は失敗
+ * @details 収集開始時の最新30フレームを退避し、残る50フレームはI2Sタスクの
+ *          log-melコールバックで収集する。リングの上書きに依存しない。
+ * ================================================================= */
+esp_err_t audio_capture_feature_event_start(uint16_t event_id) {
+    uint32_t const pre_trigger_frames = APP_FEATURE_PRE_TRIGGER_FRAMES;
+
+    portENTER_CRITICAL(&s_snapshot_lock);
+    if (s_feature_event_active || s_feature_event_ready) {
+        portEXIT_CRITICAL(&s_snapshot_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_generated_feature_frame_count < pre_trigger_frames) {
+        portEXIT_CRITICAL(&s_snapshot_lock);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    uint32_t const first_frame = s_generated_feature_frame_count - pre_trigger_frames;
+    for (uint32_t frame_index = 0U; frame_index < pre_trigger_frames; frame_index++) {
+        size_t const ring_index =
+            (size_t) ((first_frame + frame_index) % ACOUSTIC_FEATURE_EVENT_FRAME_COUNT);
+        memcpy(s_feature_event.frames[frame_index], s_feature_ring[ring_index], sizeof(s_feature_event.frames[0]));
+    }
+    s_feature_event.event_id = event_id;
+    s_feature_event_frame_count = (uint16_t) pre_trigger_frames;
+    s_feature_event_active = true;
+    portEXIT_CRITICAL(&s_snapshot_lock);
+    return ESP_OK;
+}
+
+/** =================================================================*
+ * @brief  完成した特徴量イベントを取得
+ * @param[out] event 取得先
+ * @return 完成済みイベントを取得できた場合true
+ * @details ready状態では音声タスクがイベント領域へ書き込まないため、状態だけを
+ *          ロックで確保してから大きなコピーを行う。
+ * ================================================================= */
+bool audio_capture_feature_event_take(audio_capture_feature_event_t * event) {
+    if (event == NULL) {
+        return false;
+    }
+
+    portENTER_CRITICAL(&s_snapshot_lock);
+    if (!s_feature_event_ready) {
+        portEXIT_CRITICAL(&s_snapshot_lock);
+        return false;
+    }
+    s_feature_event_ready = false;
+    portEXIT_CRITICAL(&s_snapshot_lock);
+
+    memcpy(event, &s_feature_event, sizeof(*event));
+    return true;
+}
+
+/** =================================================================*
+ * @brief  特徴量イベントを破棄
+ * @details USB再接続後に古いセッションのイベントを送らないために使う。
+ * ================================================================= */
+void audio_capture_feature_event_discard(void) {
+    portENTER_CRITICAL(&s_snapshot_lock);
+    s_feature_event_frame_count = 0U;
+    s_feature_event_active = false;
+    s_feature_event_ready = false;
+    portEXIT_CRITICAL(&s_snapshot_lock);
+}
+
+/** =================================================================*
  * @brief  音声キャプチャ開始
  * @return I2S初期化またはタスク生成結果
  * ================================================================= */
 esp_err_t audio_capture_start(void) {
     _Static_assert(LOG_MEL_SAMPLE_RATE_HZ == APP_AUDIO_SAMPLE_RATE_HZ, "log-mel sample rate mismatch");
     _Static_assert(LOG_MEL_BIN_COUNT == ACOUSTIC_FEATURE_BIN_COUNT, "log-mel bin count mismatch");
+    _Static_assert((APP_FEATURE_PRE_TRIGGER_FRAMES + APP_FEATURE_POST_TRIGGER_FRAMES) ==
+                       ACOUSTIC_FEATURE_EVENT_FRAME_COUNT,
+                   "feature event duration mismatch");
 
     log_mel_extractor_init(&s_log_mel_extractor);
     s_snapshot.log_mel_self_test_pass = log_mel_extractor_self_test(&s_log_mel_extractor);

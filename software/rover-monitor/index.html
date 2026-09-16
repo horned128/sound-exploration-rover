@@ -66,8 +66,41 @@
         .panel { background-color: var(--panel-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
         .panel-title { margin: 0 0 8px 0; font-size: 12px; color: var(--text-muted); text-transform: uppercase; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
         .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; font-size: 12px; }
-        .data-label { color: var(--text-muted); }
+        .data-label { color: var(--text-muted); display: flex; align-items: center; gap: 4px; min-width: 0; }
         .data-value { font-family: monospace; text-align: right; font-weight: bold; }
+
+        .help-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 15px;
+            height: 15px;
+            flex: 0 0 15px;
+            padding: 0;
+            border: 1px solid #666;
+            border-radius: 50%;
+            background: transparent;
+            color: #bdbdbd;
+            font: 700 10px/1 sans-serif;
+            cursor: help;
+        }
+        .help-icon:hover, .help-icon:focus-visible { color: #fff; border-color: var(--accent); outline: none; }
+        .help-popover {
+            position: fixed;
+            z-index: 100;
+            width: min(290px, calc(100vw - 24px));
+            padding: 8px 10px;
+            box-sizing: border-box;
+            border: 1px solid #5a5a5a;
+            border-radius: 5px;
+            background: #2a2a2a;
+            color: var(--text-main);
+            box-shadow: 0 5px 16px rgba(0, 0, 0, 0.45);
+            font-size: 12px;
+            line-height: 1.45;
+            pointer-events: none;
+        }
+        .help-popover[hidden] { display: none; }
 
         .val-ok { color: var(--ok); }
         .val-warn { color: var(--warn); }
@@ -163,64 +196,64 @@
             <div class="panel">
                 <h3 class="panel-title">System & Link</h3>
                 <div class="data-grid">
-                    <span class="data-label">ESP Time</span><span class="data-value" id="val_esp_ms">0 ms</span>
-                    <span class="data-label">CPU Valid</span><span class="data-value" id="val_cpu_valid">-</span>
-                    <span class="data-label">CPU Age</span><span class="data-value" id="val_cpu_age">0 ms</span>
-                    <span class="data-label">Wi-Fi</span><span class="data-value" id="val_wifi_conn">-</span>
-                    <span class="data-label">RSSI</span><span class="data-value" id="val_wifi_rssi">0 dBm</span>
-                    <span class="data-label">USB Mounted</span><span class="data-value" id="val_usb_mounted">-</span>
+                    <span class="data-label" data-help="ESP32S3が起動してからの経過時間です。値が増え続ければESP32S3が動作しています。">ESP Time</span><span class="data-value" id="val_esp_ms">0 ms</span>
+                    <span class="data-label" data-help="CPU0から受け取ったテレメトリが正しい形式かを示します。通常はTRUEです。">CPU Valid</span><span class="data-value" id="val_cpu_valid">-</span>
+                    <span class="data-label" data-help="最後にCPU0テレメトリを受信してからの時間です。小さい値で更新され続けることを確認します。増え続ける場合はCPU0またはUSB通信が停止しています。">CPU Age</span><span class="data-value" id="val_cpu_age">0 ms</span>
+                    <span class="data-label" data-help="Rover Monitorへ送信するESP32S3のWi-Fi接続状態です。UPならネットワーク経路は利用できます。">Wi-Fi</span><span class="data-value" id="val_wifi_conn">-</span>
+                    <span class="data-label" data-help="Wi-Fi電波強度です。0 dBmに近いほど強く、-80 dBm以下では通信が不安定になりやすくなります。">RSSI</span><span class="data-value" id="val_wifi_rssi">0 dBm</span>
+                    <span class="data-label" data-help="ESP32S3とCPU0間のUSB通信が接続済みかを示します。YESが通常状態です。">USB Mounted</span><span class="data-value" id="val_usb_mounted">-</span>
                 </div>
             </div>
 
             <div class="panel">
                 <h3 class="panel-title">State & Command</h3>
                 <div class="data-grid">
-                    <span class="data-label">Think State</span><span class="data-value" id="val_think_state">UNKNOWN</span>
-                    <span class="data-label">E-Stop</span><span class="data-value" id="val_estop">-</span>
-                    <span class="data-label">Enable</span><span class="data-value" id="val_enable">-</span>
-                    <span class="data-label">Link Ready</span><span class="data-value" id="val_link_ready">-</span>
-                    <span class="data-label">Faults</span><span class="data-value" id="val_faults">0</span>
+                    <span class="data-label" data-help="CPU0の自律制御状態です。WAIT_LINKは音響リンク待ち、SENSOR_*は障害物回避、FAULTは異常停止を表します。">Think State</span><span class="data-value" id="val_think_state">UNKNOWN</span>
+                    <span class="data-label" data-help="非常停止要求です。ACTIVEなら安全側としてモーター出力を止めます。学習中はACTIVEが正常です。">E-Stop</span><span class="data-value" id="val_estop">-</span>
+                    <span class="data-label" data-help="モーター駆動の許可状態です。ONでのみ目標回転数を出力できます。">Enable</span><span class="data-value" id="val_enable">-</span>
+                    <span class="data-label" data-help="CPU0が音響リンクを走行判断に使える状態かを示します。YESなら有効な音響観測を受信しています。">Link Ready</span><span class="data-value" id="val_link_ready">-</span>
+                    <span class="data-label" data-help="CPU0が検出している異常フラグです。NONE (0) が通常状態です。表示される名前で異常種別を確認できます。">Faults</span><span class="data-value" id="val_faults">0</span>
                 </div>
             </div>
 
             <div class="panel">
                 <h3 class="panel-title">Sensor Diagnostics</h3>
                 <div class="data-grid">
-                    <span class="data-label">Valid Flags</span><span class="data-value" id="val_sensor_valid">-</span>
-                    <span class="data-label">Sensor Error</span><span class="data-value" id="val_sensor_error">-</span>
-                    <span class="data-label">Audio CRC Err</span><span class="data-value" id="val_aud_crc">0</span>
-                    <span class="data-label">VAD Status</span><span class="data-value" id="val_vad">-</span>
+                    <span class="data-label" data-help="ToF・IMUなどのセンサーデータが有効かを示すビット列です。0x0Fは現在想定する全センサーが有効である状態です。">Valid Flags</span><span class="data-value" id="val_sensor_valid">-</span>
+                    <span class="data-label" data-help="センサー初期化・I2C通信・各デバイス・鮮度の異常を示します。0x00が通常状態で、括弧内に該当センサー名を表示します。">Sensor Error</span><span class="data-value" id="val_sensor_error">-</span>
+                    <span class="data-label" data-help="ESP32S3から受け取った音響フレームのCRC異常件数です。増え続ける場合はUSB通信品質を確認します。">Audio CRC Err</span><span class="data-value" id="val_aud_crc">0</span>
+                    <span class="data-label" data-help="音声活動検出（Voice Activity Detection）の状態です。DETECTEDは現在の入力に音・発話成分があることを示します。">VAD Status</span><span class="data-value" id="val_vad">-</span>
                 </div>
             </div>
 
             <div class="panel">
                 <h3 class="panel-title">Learning & MRAM</h3>
                 <div class="data-grid">
-                    <span class="data-label">Learning</span><span class="data-value" id="val_learning_active">-</span>
-                    <span class="data-label">Stored Data</span><span class="data-value" id="val_storage_valid">-</span>
-                    <span class="data-label">Last Result</span><span class="data-value" id="val_storage_result">-</span>
+                    <span class="data-label" data-help="現場音の見本を収集する学習モードです。ACTIVE中は安全のため非常停止が有効になります。">Learning</span><span class="data-value" id="val_learning_active">-</span>
+                    <span class="data-label" data-help="MRAMに、有効な背景モデルと音の見本が保存されているかを示します。VALIDなら次回起動後にも利用できます。">Stored Data</span><span class="data-value" id="val_storage_valid">-</span>
+                    <span class="data-label" data-help="直近のMRAM操作結果です。OK (0) は成功、EMPTY (1) は未学習で正常、その他は初期化・保存の異常です。">Last Result</span><span class="data-value" id="val_storage_result">-</span>
                 </div>
             </div>
 
             <div class="panel">
                 <h3 class="panel-title">Log-mel DSP</h3>
                 <div class="data-grid">
-                    <span class="data-label">Self Test</span><span class="data-value" id="val_dsp_self_test">-</span>
-                    <span class="data-label">Feature Rate</span><span class="data-value" id="val_dsp_fps">-</span>
-                    <span class="data-label">Ring Frames</span><span class="data-value" id="val_dsp_ring">-</span>
-                    <span class="data-label">Feature Frames</span><span class="data-value" id="val_dsp_frames">-</span>
-                    <span class="data-label">Last Block</span><span class="data-value" id="val_dsp_last_us">-</span>
-                    <span class="data-label">Max Block</span><span class="data-value" id="val_dsp_max_us">-</span>
-                    <span class="data-label">I2S Overruns</span><span class="data-value" id="val_dsp_overruns">-</span>
+                    <span class="data-label" data-help="ESP32S3のlog-mel特徴量計算の自己診断です。PASSが通常状態です。">Self Test</span><span class="data-value" id="val_dsp_self_test">-</span>
+                    <span class="data-label" data-help="1秒あたりのlog-mel特徴量フレーム数です。通常は約100 fpsです。">Feature Rate</span><span class="data-value" id="val_dsp_fps">-</span>
+                    <span class="data-label" data-help="直近の音響イベントとして保持している特徴量フレーム数です。80 / 80で1つの完成イベントになります。">Ring Frames</span><span class="data-value" id="val_dsp_ring">-</span>
+                    <span class="data-label" data-help="起動後に生成されたlog-mel特徴量フレームの累計です。音声DSPが継続動作していれば増え続けます。">Feature Frames</span><span class="data-value" id="val_dsp_frames">-</span>
+                    <span class="data-label" data-help="最後のlog-mel特徴量計算にかかった時間です。単位はマイクロ秒です。">Last Block</span><span class="data-value" id="val_dsp_last_us">-</span>
+                    <span class="data-label" data-help="起動後のlog-mel特徴量計算時間の最大値です。16,000 us未満なら、100 fps処理の周期内に収まっています。">Max Block</span><span class="data-value" id="val_dsp_max_us">-</span>
+                    <span class="data-label" data-help="I2S音声入力の取りこぼし回数です。0を維持することが正常です。">I2S Overruns</span><span class="data-value" id="val_dsp_overruns">-</span>
                 </div>
             </div>
 
             <div class="panel">
                 <h3 class="panel-title">Actuator Health</h3>
                 <div class="data-grid">
-                    <span class="data-label">Status</span><span class="data-value" id="val_act_valid">-</span>
-                    <span class="data-label">Age</span><span class="data-value" id="val_act_age">-</span>
-                    <span class="data-label">Faults</span><span class="data-value" id="val_act_faults">-</span>
+                    <span class="data-label" data-help="CPU1からのアクチュエータ状態が受信できているかを示します。VALIDが通常状態です。">Status</span><span class="data-value" id="val_act_valid">-</span>
+                    <span class="data-label" data-help="最後にCPU1のアクチュエータ状態を受信してからの時間です。小さい値で更新され続けることを確認します。">Age</span><span class="data-value" id="val_act_age">-</span>
+                    <span class="data-label" data-help="CPU1のアクチュエータ異常フラグです。非常停止が有効な間は安全停止のフラグが表示されることがあります。">Faults</span><span class="data-value" id="val_act_faults">-</span>
                 </div>
             </div>
         </div>
@@ -293,7 +326,70 @@
         </div>
     </div>
 
+    <div id="help-popover" class="help-popover" role="tooltip" hidden></div>
+
     <script>
+        const helpPopover = document.getElementById('help-popover');
+        let openHelpButton = null;
+
+        function closeHelp() {
+            if (openHelpButton) {
+                openHelpButton.setAttribute('aria-expanded', 'false');
+            }
+            openHelpButton = null;
+            helpPopover.hidden = true;
+        }
+
+        function openHelp(button) {
+            const text = button.dataset.help;
+            if (!text) return;
+
+            if (openHelpButton && openHelpButton !== button) {
+                openHelpButton.setAttribute('aria-expanded', 'false');
+            }
+            openHelpButton = button;
+            button.setAttribute('aria-expanded', 'true');
+            helpPopover.textContent = text;
+            helpPopover.hidden = false;
+
+            const rect = button.getBoundingClientRect();
+            const margin = 12;
+            const popoverWidth = helpPopover.getBoundingClientRect().width;
+            const left = Math.max(margin, Math.min(rect.right + 8, window.innerWidth - popoverWidth - margin));
+            const top = Math.max(margin, Math.min(rect.top - 4, window.innerHeight - helpPopover.offsetHeight - margin));
+            helpPopover.style.left = `${left}px`;
+            helpPopover.style.top = `${top}px`;
+        }
+
+        document.querySelectorAll('.data-label[data-help]').forEach(label => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'help-icon';
+            button.textContent = '?';
+            button.dataset.help = label.dataset.help;
+            button.setAttribute('aria-label', `${label.textContent} の説明`);
+            button.setAttribute('aria-describedby', 'help-popover');
+            button.setAttribute('aria-expanded', 'false');
+            label.appendChild(button);
+
+            button.addEventListener('mouseenter', () => openHelp(button));
+            button.addEventListener('mouseleave', () => {
+                if (document.activeElement !== button) closeHelp();
+            });
+            button.addEventListener('focus', () => openHelp(button));
+            button.addEventListener('blur', () => window.setTimeout(closeHelp, 0));
+            button.addEventListener('click', event => {
+                event.stopPropagation();
+                openHelp(button);
+            });
+        });
+
+        document.addEventListener('click', closeHelp);
+        document.addEventListener('keydown', event => {
+            if ('Escape' === event.key) closeHelp();
+        });
+        window.addEventListener('resize', closeHelp);
+
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));

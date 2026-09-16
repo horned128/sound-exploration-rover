@@ -19,6 +19,7 @@ CONTROLLER_SOURCES = (
     CPU0_SOURCE_ROOT / "control/sound_follow_controller.c",
     CPU0_SOURCE_ROOT / "control/obstacle_avoidance_controller.c",
     CPU0_SOURCE_ROOT / "services/acoustic_identifier.c",
+    CPU0_SOURCE_ROOT / "services/background_model.c",
 )
 
 FEATURE_PROTOCOL_SOURCES = (
@@ -49,7 +50,7 @@ def compile_command(*, shared: bool, sanitized: bool, output: Path, sources: tup
     if sanitized:
         command.append("-fsanitize=address,undefined")
     command.extend(str(source) for source in sources)
-    command.extend(["-o", str(output)])
+    command.extend(["-lm", "-o", str(output)])
     return command
 
 

@@ -4,8 +4,8 @@
 
 INCLUDE memory_regions.ld
 
-/* CPU0 Code MRAM末尾4 KiBを学習プロトタイプ保存専用にする。 */
-PROVIDE(__prototype_storage_start = ORIGIN(FLASH) + LENGTH(FLASH) - 0x1000);
+/* CPU0 Code MRAM末尾32 KiBを背景モデルと現場見本の保存専用にする。 */
+PROVIDE(__prototype_storage_start = ORIGIN(FLASH) + LENGTH(FLASH) - 0x8000);
 PROVIDE(__prototype_storage_end = ORIGIN(FLASH) + LENGTH(FLASH));
 
 INCLUDE fsp_gen.ld

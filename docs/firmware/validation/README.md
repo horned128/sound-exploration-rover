@@ -4,7 +4,7 @@
 
 ## 基盤・校正作業の状況
 
-最終更新: 2026-09-13
+最終更新: 2026-09-16
 
 この文書は、音響AI実装へ進む前に確認した基盤、テスト環境、実機校正の
 状態をまとめた独立した検証記録です。作業順を定める資料ではありません。
@@ -16,10 +16,11 @@
 | 項目 | 状態 | 根拠 |
 |---|---|---|
 | インターフェース契約 | 固定値を文書化済み | [エッジAI設計](../edgeai/README.md) |
-| control-sim | 完了 | `uv run pytest -q`: 12 passed。レイアウト検査とASan/UBSan smokeも成功 |
+| control-sim | 完了 | `uv run pytest -q`: 108 passed（2026-09-16）。レイアウト検査とASan/UBSan smokeも成功 |
 | TFLMベンダリング | 完了 | ベンダ485ファイルとライセンスのSHA-256検証に成功 |
 | TFLMホスト検証 | 完了 | Cラッパー、完全int8モデル、11入力、最大0 LSB差、境界・reset試験に成功 |
-| CPU0 TFLM組込み | ビルド成功 | CPU0 ELFにC++17、ランタイムAPI、96 KiBアリーナが入り、現ビルドはtext 135432 / data 320 / bss 123896 bytes |
+| CPU0 TFLM組込み | ビルド成功 | CPU0 ELFにC++17、ランタイムAPI、96 KiBアリーナが入る。背景AE追加後のGenerate + Clean Buildはtext 142408 / data 0 / bss 133208 bytes、0 errors / 171 warnings |
+| 音響現場学習ホスト参照 | 完了 | `uv run python tests/test_acoustic_learning.py`: 9 passed。RLS、能動ゲート、96次元要約、cosine、leave-one-out、判定不能を回帰 |
 | CPU1実時間更新 | ソース・ホスト・実機確認済み | 駆動周期約1 ms、RPM窓約100 ms、`last_error=0`、静止時RPM=0、timeout復帰を確認 |
 | センサー更新停止監視 | 実機ゲート完了 | 更新停止中の車輪停止、解除後の`sensor_fresh`と`update_count`復帰をユーザー確認 |
 | エンコーダ極性 | 実機確認済み | 左前進負、右前進正 |
@@ -63,9 +64,14 @@
 
 ## 次に必要な作業の境界
 
-TFLMランタイムは固定int8モデルを呼び出す基盤までです。音響特徴量生成、
-`ACOUSTIC_FEATURE`等の送受信、埋め込み最近傍と現場学習、推論タスク、走行経路への
-接続は未実装です。特徴量・通信・状態語の固定値は、作業順ではなく
+`ACOUSTIC_FEATURE`のイベントトリガ送信とCPU0の優先度11の`task_infer`は実装済みです。
+タスクは音響リンクのmutex下で完成パッチだけをコピーし、計算はロック外で行います。
+方式変更後の背景AE、能動フレームの96次元要約、個別見本へのcosine照合はCPU0の純Cサービスとして
+実装済みで、`task_infer`へ接続済みです。32 KiBのMRAM A/B保存と5回学習UIも実装し、control-sim
+108件、acoustic-trainer 17件、CPU0 Generate + Clean Build 0 errorsで回帰しています。
+
+次は実機でのUSBバースト受信、処理時間、5回学習からMRAM復元、実録音によるしきい値決定を確認します。
+音響用のCNN学習・tflite変換は行いません。特徴量・通信・状態語の固定値は、作業順ではなく
 [エッジAI設計](../edgeai/README.md)を参照します。
 
 ## CPU1タイミング是正（第1・第2段）

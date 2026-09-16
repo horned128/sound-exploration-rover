@@ -10,7 +10,7 @@
 - XVF3800 I2S: WS GPIO7、BCLK GPIO8、DIN GPIO43、DOUT GPIO44
 - I2S形式: XIAO master、16 kHz、stereo、32 bit、Philips I2S
 - USB: XIAO側USB-CをTinyUSBのCDC-ACM deviceとして使用
-- 送信: `HELLO`（接続時と1 s周期）、`ACOUSTIC_OBSERVATION`（50 ms周期）、`HEALTH`（1 s周期）
+- 送信: `HELLO`（接続時と1 s周期）、`ACOUSTIC_OBSERVATION`（50 ms周期）、`HEALTH`（1 s周期）、`ACOUSTIC_FEATURE`（音量イベント時）
 - 受信: CPU0の`ROVER_TELEMETRY`（250 ms周期、schema 2でToF/BMI270診断を含む）
 - Wi-Fi: station mode、自動再接続、指定PCへのUDP JSON Lines（250 ms周期）
 - フレーム: `firmware/common/acoustic_protocol.h` の共有バイナリプロトコル
@@ -24,6 +24,15 @@ UDP JSONの`esp_audio`はCPU0接続状態に依存しないESP32S3ローカル�
 `self_test_pass`、`feature_frames`、`feature_fps_x100`、`ring_frames`、
 `log_mel_block_last_us`、`log_mel_block_max_us`、`i2s_overruns`を記録します。
 自己テストはindex 137の固定インパルスをFFTからint8量子化まで通し、ホスト固定期待値と比較します。
+
+`ACOUSTIC_FEATURE` は、I2Sレベルが`APP_FEATURE_TRIGGER_LEVEL_DBFS_X100`以上になった
+立ち上がりで収集します。拍手・打音など音声以外も学習対象にできるよう、XVF3800のVADは
+イベント収集の条件に使用しません。直近300 msを
+直ちに退避し、その後の500 msは音声キャプチャタスクが連続して収集するため、800 msリングの
+上書きにより先頭フレームが失われません。完成後は`acoustic_frontend`タスクだけが、2フレーム
+（72 B payload）のパケットを20 ms間隔でUSB CDCへ送ります。送信失敗時はそのイベントの残りを
+送らず、次のイベントの`frame_index=0`でCPU0側の再組立を再同期させます。音量が下がるまで
+再トリガしないため、連続音でイベントを連発しません。
 
 DoA/VADのI2CコマンドはSeeed Studio公式例にあるresource ID 20、read command `(19 | 0x80)`、4-byte payloadをそのまま実装しています。応答先頭のraw status byteは公式例に意味の定義がないため、成功値やbitを推測して判定に使いません。共有プロトコルの`xvf_status`はraw値ではなく、ESP32側で確認した通信・取得状態（STARTING/READY/ERROR）です。
 

@@ -28,6 +28,12 @@
 #define APP_XVF_I2C_TIMEOUT_MS             (100U)
 #define APP_USB_TX_TIMEOUT_MS              (20U)
 
+/* log-melイベント。CPU0の音源追従開始しきい値と同じdBFS基準を用いる。 */
+#define APP_FEATURE_TRIGGER_LEVEL_DBFS_X100 (-4500)
+#define APP_FEATURE_PRE_TRIGGER_FRAMES     (30U)
+#define APP_FEATURE_POST_TRIGGER_FRAMES    (50U)
+#define APP_FEATURE_PACKET_PERIOD_MS       (20U)
+
 /* 接続先PCと同じLANの値を設定する。空文字の間はWi-Fiを開始しない。 */
 #define APP_WIFI_SSID                      "Fight Club"
 #define APP_WIFI_PASSWORD                  "soap1999"

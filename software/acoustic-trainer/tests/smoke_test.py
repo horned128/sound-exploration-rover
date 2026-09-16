@@ -1,7 +1,4 @@
-"""Train/quantize a synthetic CNN and compare the real C wrapper with TFLite.
-
-This model only verifies the Phase1 toolchain; it is not an acoustic classifier.
-"""
+"""Quantize a small control MLP and compare the real C wrapper with TFLite."""
 import ctypes as ct
 import json
 import os
@@ -9,10 +6,6 @@ from pathlib import Path
 import platform
 
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
-os.environ.setdefault("MPLCONFIGDIR", str(Path(__file__).resolve().parents[1] / "build/matplotlib"))
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 
@@ -38,16 +31,13 @@ def main():
     tf.keras.utils.set_random_seed(20260911)
     rng = np.random.default_rng(20260911)
     model = tf.keras.Sequential([
-        tf.keras.layers.Input(batch_shape=(1, 80, 32, 1)),
-        tf.keras.layers.Conv2D(4, 3, strides=2, activation="relu"),
-        tf.keras.layers.DepthwiseConv2D(3, strides=2, activation="relu"),
-        tf.keras.layers.AveragePooling2D(2),
-        tf.keras.layers.Flatten(),
-        tf.keras.layers.Dense(64),
+        tf.keras.layers.Input(batch_shape=(1, 10)),
+        tf.keras.layers.Dense(16, activation="relu"),
+        tf.keras.layers.Dense(2),
     ])
     model.compile(optimizer="sgd", loss="mse")
-    calibration = rng.uniform(-1, 1, (20, 80, 32, 1)).astype(np.float32)
-    loss = float(model.train_on_batch(calibration[:1], np.zeros((1, 64), np.float32)))
+    calibration = rng.uniform(-1, 1, (20, 10)).astype(np.float32)
+    loss = float(model.train_on_batch(calibration[:1], np.zeros((1, 2), np.float32)))
     assert np.isfinite(loss)
     converter = tf.lite.TFLiteConverter.from_keras_model(model)
     converter.optimizations = [tf.lite.Optimize.DEFAULT]
@@ -85,16 +75,16 @@ def main():
     assert lib.tflm_runtime_init(address, len(data) // 2) == -2
     float_storage, float_address = aligned_buffer(float_data)
     assert lib.tflm_runtime_init(float_address, len(float_data)) == -2
-    # Both 64 KiB input and 64 KiB output must coexist, exceeding the static arena.
+    # A 128 KiB output tensor must exceed the static 96 KiB arena.
     large = tf.keras.Sequential([
-        tf.keras.layers.Input(batch_shape=(1, 256, 256, 1)),
-        tf.keras.layers.Conv2D(1, 1, use_bias=False),
+        tf.keras.layers.Input(batch_shape=(1, 1)),
+        tf.keras.layers.Dense(131072, use_bias=False),
     ])
-    large.set_weights([np.full((1, 1, 1, 1), 0.5, np.float32)])
+    large.set_weights([np.full((1, 131072), 0.5, np.float32)])
     large_converter = tf.lite.TFLiteConverter.from_keras_model(large)
     large_converter.optimizations = [tf.lite.Optimize.DEFAULT]
     large_converter.representative_dataset = lambda: (
-        [np.full((1, 256, 256, 1), value, np.float32)] for value in (-1, 1))
+        [np.full((1, 1), value, np.float32)] for value in (-1, 1))
     large_converter.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
     large_converter.inference_input_type = tf.int8
     large_converter.inference_output_type = tf.int8
@@ -104,17 +94,17 @@ def main():
     assert lib.tflm_runtime_invoke(None, 0, None, 0) == -4
     assert lib.tflm_runtime_init(address, len(data)) == 0
     assert lib.tflm_runtime_get_info(ct.byref(info)) == 0
-    assert (info.input_bytes, info.output_bytes) == (2560, 64)
+    assert (info.input_bytes, info.output_bytes) == (10, 2)
     assert 0 < info.arena_used_bytes <= 96 * 1024
     assert (info.input_scale, info.input_zero_point) == inp["quantization"]
     assert (info.output_scale, info.output_zero_point) == out["quantization"]
-    output = np.full((1, 64), 42, dtype=np.int8)
-    assert lib.tflm_runtime_invoke(None, 2560, output.ctypes.data, 64) == -1
-    assert lib.tflm_runtime_invoke(address, 2559, output.ctypes.data, 64) == -1
-    assert lib.tflm_runtime_invoke(address, 2560, output.ctypes.data, 63) == -1
+    output = np.full((1, 2), 42, dtype=np.int8)
+    assert lib.tflm_runtime_invoke(None, 10, output.ctypes.data, 2) == -1
+    assert lib.tflm_runtime_invoke(address, 9, output.ctypes.data, 2) == -1
+    assert lib.tflm_runtime_invoke(address, 10, output.ctypes.data, 1) == -1
     assert np.all(output == 42)
-    cases = [np.full((1, 80, 32, 1), value, np.int8) for value in (-128, 0, 127)]
-    cases += [rng.integers(-128, 128, (1, 80, 32, 1), dtype=np.int8) for _ in range(8)]
+    cases = [np.full((1, 10), value, np.int8) for value in (-128, 0, 127)]
+    cases += [rng.integers(-128, 128, (1, 10), dtype=np.int8) for _ in range(8)]
     max_error = 0
     for sample in cases:
         reference.set_tensor(inp["index"], sample)
@@ -126,22 +116,16 @@ def main():
         assert error <= 1, (error, output, expected)
     # Failed replacement invalidates the old model, then repeated init/reset must recover.
     assert lib.tflm_runtime_init(bad, 32) == -2
-    assert lib.tflm_runtime_invoke(cases[0].ctypes.data, 2560, output.ctypes.data, 64) == -4
+    assert lib.tflm_runtime_invoke(cases[0].ctypes.data, 10, output.ctypes.data, 2) == -4
     for _ in range(3):
         assert lib.tflm_runtime_init(address, len(data)) == 0
-        assert lib.tflm_runtime_invoke(cases[0].ctypes.data, 2560, output.ctypes.data, 64) == 0
+        assert lib.tflm_runtime_invoke(cases[0].ctypes.data, 10, output.ctypes.data, 2) == 0
         lib.tflm_runtime_reset()
     assert lib.tflm_runtime_get_info(ct.byref(Info())) == -4
-    fig, ax = plt.subplots(figsize=(6, 3))
-    ax.plot(output[0], label="TFLM int8 output")
-    ax.set(xlabel="Embedding index", ylabel="Quantized value", title="Synthetic toolchain smoke test")
-    fig.tight_layout()
-    fig.savefig(BUILD / "smoke_embedding.png")
-    plt.close(fig)
-    report = {"tensorflow": tf.__version__, "numpy": np.__version__, "matplotlib": matplotlib.__version__,
+    report = {"tensorflow": tf.__version__, "numpy": np.__version__,
               "training_loss": loss, "model_bytes": len(data), "arena_used_bytes_host": info.arena_used_bytes,
               "cases": len(cases), "max_int8_error": max_error,
-              "checks": "training, full int8 conversion, C ABI inference, invalid model/size/state, arena exhaustion, reset, plot"}
+              "checks": "training, full int8 conversion, C ABI inference, invalid model/size/state, arena exhaustion, reset"}
     (BUILD / "smoke_report.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
 

@@ -1,116 +1,100 @@
 from __future__ import annotations
 
 import ctypes
-import random
-
 from controlsim.bindings import (
-    CPU0_ACOUSTIC_EMBEDDING_DIMENSION,
-    AcousticIdentifierOutput,
-    AcousticIdentifierPrototype,
+    CPU0_ACOUSTIC_FEATURE_BIN_COUNT,
+    CPU0_ACOUSTIC_SUMMARY_DIMENSION,
+    AcousticIdentifierSummaryOutput,
     library,
 )
 
 
-UINT32_MAX = 0xFFFFFFFF
+SUMMARY_INDETERMINATE = 1
+SUMMARY_NOT_READY = 2
+SUMMARY_NOT_TARGET = 3
+SUMMARY_TARGET = 4
 
 
-def embedding(values: list[int]) -> ctypes.Array[ctypes.c_int8]:
-    assert len(values) == CPU0_ACOUSTIC_EMBEDDING_DIMENSION
-    return (ctypes.c_int8 * CPU0_ACOUSTIC_EMBEDDING_DIMENSION)(*values)
+def feature_frame(offset: int = 0) -> ctypes.Array[ctypes.c_int8]:
+    values = [max(-128, min(127, value + offset)) for value in range(-32, 32, 2)]
+    assert len(values) == CPU0_ACOUSTIC_FEATURE_BIN_COUNT
+    return (ctypes.c_int8 * CPU0_ACOUSTIC_FEATURE_BIN_COUNT)(*values)
 
 
-def prototype(
-    values: list[int], *, class_id: int, threshold: int, valid: bool = True
-) -> AcousticIdentifierPrototype:
-    result = AcousticIdentifierPrototype()
-    result.embedding[:] = values
-    result.max_squared_distance = threshold
-    result.class_id = class_id
-    result.valid = valid
-    return result
+def feature_patch(active_count: int, offset: int = 0) -> ctypes.Array[ctypes.c_int8]:
+    values: list[int] = []
+    for index in range(80):
+        if index < active_count:
+            values.extend(feature_frame(offset + (index % 3)))
+        else:
+            values.extend([0] * CPU0_ACOUSTIC_FEATURE_BIN_COUNT)
+    return (ctypes.c_int8 * len(values))(*values)
 
 
-def classify(
-    query: ctypes.Array[ctypes.c_int8], prototypes: list[AcousticIdentifierPrototype]
-) -> AcousticIdentifierOutput:
-    prototype_array = (AcousticIdentifierPrototype * len(prototypes))(*prototypes)
-    output = AcousticIdentifierOutput()
-    library().acoustic_identifier_classify(query, prototype_array, len(prototypes), ctypes.byref(output))
-    return output
+def summary_from_patch(active_count: int, offset: int = 0) -> tuple[ctypes.Array[ctypes.c_int8], int, int]:
+    patch = feature_patch(active_count, offset)
+    summary = (ctypes.c_int8 * CPU0_ACOUSTIC_SUMMARY_DIMENSION)()
+    active = ctypes.c_uint8()
+    valid = library().acoustic_identifier_summary_create(patch, 80, summary, ctypes.byref(active))
+    return summary, int(active.value), int(valid)
 
 
-def test_squared_l2_matches_integer_reference_for_full_int8_range() -> None:
-    rng = random.Random(20260913)
+def test_active_frame_uses_strict_population_stddev_threshold() -> None:
     handle = library()
-
-    cases = [([-128] * 64, [127] * 64), ([127] * 64, [-128] * 64)]
-    cases.extend(
-        (
-            [rng.randint(-128, 127) for _ in range(64)],
-            [rng.randint(-128, 127) for _ in range(64)],
-        )
-        for _ in range(250)
-    )
-
-    for left_values, right_values in cases:
-        expected = sum((left - right) ** 2 for left, right in zip(left_values, right_values, strict=True))
-        actual = handle.acoustic_identifier_squared_l2(embedding(left_values), embedding(right_values))
-        assert actual == expected
+    boundary = (ctypes.c_int8 * CPU0_ACOUSTIC_FEATURE_BIN_COUNT)(-48, 48, *([0] * 30))
+    assert handle.acoustic_identifier_frame_is_active(boundary) == 0
+    assert handle.acoustic_identifier_frame_is_active(feature_frame()) == 1
 
 
-def test_classify_ignores_invalid_entries_and_applies_nearest_threshold() -> None:
-    query = embedding([0] * 64)
-    prototypes = [
-        prototype([0] * 64, class_id=1, threshold=0, valid=False),
-        prototype([1] * 64, class_id=7, threshold=64),
-        prototype([2] * 64, class_id=9, threshold=1024),
-    ]
+def test_summary_has_mean_std_max_layout_and_rejects_insufficient_active_frames() -> None:
+    summary, active_count, valid = summary_from_patch(10)
+    assert (active_count, valid) == (10, 1)
+    assert list(summary[:CPU0_ACOUSTIC_FEATURE_BIN_COUNT]) == [value + 1 for value in range(-32, 32, 2)]
+    assert list(summary[CPU0_ACOUSTIC_FEATURE_BIN_COUNT : 2 * CPU0_ACOUSTIC_FEATURE_BIN_COUNT]) == [1] * 32
+    assert list(summary[2 * CPU0_ACOUSTIC_FEATURE_BIN_COUNT :]) == [value + 2 for value in range(-32, 32, 2)]
 
-    output = classify(query, prototypes)
-
-    assert output.prototype_index == 1
-    assert output.class_id == 7
-    assert output.squared_distance == 64
-    assert output.matched == 1
+    rejected, active_count, valid = summary_from_patch(9)
+    assert (active_count, valid) == (9, 0)
+    assert list(rejected) == [0] * CPU0_ACOUSTIC_SUMMARY_DIMENSION
 
 
-def test_classify_rejects_distance_above_threshold_but_keeps_nearest_diagnostics() -> None:
-    query = embedding([0] * 64)
-    output = classify(query, [prototype([1] * 64, class_id=3, threshold=63)])
-
-    assert output.prototype_index == 0
-    assert output.class_id == 3
-    assert output.squared_distance == 64
-    assert output.matched == 0
-
-
-def test_classify_uses_first_prototype_for_equal_distance() -> None:
-    query = embedding([0] * 64)
-    prototypes = [
-        prototype([1] * 64, class_id=4, threshold=64),
-        prototype([-1] * 64, class_id=5, threshold=64),
-    ]
-
-    output = classify(query, prototypes)
-
-    assert output.prototype_index == 0
-    assert output.class_id == 4
-    assert output.matched == 1
-
-
-def test_classify_returns_explicit_no_match_when_no_prototype_is_valid() -> None:
-    query = embedding([0] * 64)
-    output = classify(query, [prototype([0] * 64, class_id=1, threshold=0, valid=False)])
-
-    assert output.prototype_index == UINT32_MAX
-    assert output.class_id == 0xFF
-    assert output.squared_distance == UINT32_MAX
-    assert output.matched == 0
-
-
-def test_null_distance_inputs_fail_closed() -> None:
+def test_cosine_and_leave_one_out_are_individual_sample_metrics() -> None:
     handle = library()
-    vector = embedding([0] * 64)
+    summary, _, valid = summary_from_patch(10)
+    assert valid == 1
+    distance = ctypes.c_float()
+    assert handle.acoustic_identifier_cosine_distance(summary, summary, ctypes.byref(distance)) == 1
+    assert distance.value == 0.0
+    zero = (ctypes.c_int8 * CPU0_ACOUSTIC_SUMMARY_DIMENSION)()
+    assert handle.acoustic_identifier_cosine_distance(zero, summary, ctypes.byref(distance)) == 0
 
-    assert handle.acoustic_identifier_squared_l2(None, vector) == UINT32_MAX
-    assert handle.acoustic_identifier_squared_l2(vector, None) == UINT32_MAX
+    samples = (ctypes.c_int8 * (5 * CPU0_ACOUSTIC_SUMMARY_DIMENSION))(*list(summary) * 5)
+    threshold = ctypes.c_float()
+    assert handle.acoustic_identifier_leave_one_out_threshold(samples, 5, ctypes.byref(threshold)) == 1
+    assert threshold.value == 0.0
+    assert handle.acoustic_identifier_leave_one_out_threshold(samples, 1, ctypes.byref(threshold)) == 0
+
+
+def test_summary_classification_keeps_indeterminate_and_not_ready_distinct_from_non_target() -> None:
+    handle = library()
+    reference, active_count, valid = summary_from_patch(10)
+    samples = (ctypes.c_int8 * (5 * CPU0_ACOUSTIC_SUMMARY_DIMENSION))(*list(reference) * 5)
+    threshold = ctypes.c_float()
+    assert handle.acoustic_identifier_leave_one_out_threshold(samples, 5, ctypes.byref(threshold)) == 1
+
+    output = AcousticIdentifierSummaryOutput()
+    handle.acoustic_identifier_summary_classify(reference, valid, active_count, samples, 5, threshold.value, ctypes.byref(output))
+    assert output.status == SUMMARY_TARGET
+    assert output.minimum_cosine_distance == 0.0
+
+    insufficient, short_active, short_valid = summary_from_patch(9)
+    handle.acoustic_identifier_summary_classify(insufficient, short_valid, short_active, samples, 5, threshold.value, ctypes.byref(output))
+    assert output.status == SUMMARY_INDETERMINATE
+
+    handle.acoustic_identifier_summary_classify(reference, valid, active_count, samples, 1, threshold.value, ctypes.byref(output))
+    assert output.status == SUMMARY_NOT_READY
+
+    other, other_active, other_valid = summary_from_patch(10, offset=50)
+    handle.acoustic_identifier_summary_classify(other, other_valid, other_active, samples, 5, threshold.value, ctypes.byref(output))
+    assert output.status == SUMMARY_NOT_TARGET
+    assert output.minimum_cosine_distance > 0.0

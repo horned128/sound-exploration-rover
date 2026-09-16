@@ -3,7 +3,6 @@
  * @brief  CPU0自律走行・現場学習タスク
  * ================================================================= */
 #include "task_think.h"                                     /* CPU0思考タスクAPI */
-#include "ai/tflm_runtime.h"                                /* int8埋め込み推論 */
 #include "config/control_config.h"                          /* 思考モードと走行値 */
 #include "config/pin_config.h"                              /* LEDの役割設定 */
 #include "config/sensor_config.h"                           /* センサー安全判定値 */
@@ -12,14 +11,17 @@
 #include "control/sensor_liveness.h"                        /* 取得タスクと独立した更新監視 */
 #include "control/sound_follow_controller.h"                /* 音源追従状態機械 */
 #include "hal_data.h"                                       /* BSP LED情報、ピンAPI */
+#include "services/acoustic_identifier.h"                   /* 見本leave-one-outしきい値算出 */
 #include "services/prototype_storage.h"                     /* Code MRAMプロトタイプ保存 */
 #include "task_acoustic_link.h"                             /* 最新音響状態取得API */
 #include "task_command.h"                                   /* 最新アクチュエータ目標更新API */
+#include "task_infer.h"                                     /* 音響判定結果取得と保存データ更新 */
 #include "task_sensor.h"                                    /* 最新I2Cセンサー状態取得API */
 #include <string.h>                                         /* 学習バッファ初期化 */
 
 #define CPU0_THINK_EVENT_CLEAR_IPC_SEND    (1UL << 31)
 #define CPU0_THINK_EVENT_MASK              ((UINT) (APP_FAULT_ALL_MASK | CPU0_THINK_EVENT_CLEAR_IPC_SEND))
+#define CPU0_THINK_LEARNING_SAMPLE_COUNT   (5U)
 
 IMPORT bsp_leds_t g_bsp_leds;                               /**< BSPのLED構成情報 */
 
@@ -39,10 +41,8 @@ LOCAL void task_think_learning_capture(void);               /* 新規特徴量�
 LOCAL UW learning_button_press_ms;                          /**< SW1継続押下時間[ms] */
 LOCAL BOOL learning_button_handled;                         /**< 同一押下の多重切替防止 */
 LOCAL UW learning_last_feature_generation;                  /**< 最後に収集した特徴量世代 */
-LOCAL W learning_accum[CPU0_PROTOTYPE_STORAGE_BYTES];       /**< 埋め込み平均用累積値 */
-LOCAL acoustic_feature_patch_t learning_feature_patch;      /**< タスクスタック外の特徴量コピー先 */
-LOCAL B learning_embedding[CPU0_PROTOTYPE_STORAGE_BYTES];   /**< タスクスタック外の推論出力 */
 LOCAL prototype_storage_data_t storage_data;                /**< 読込済みまたは保存対象プロトタイプ */
+LOCAL prototype_storage_data_t storage_candidate;           /**< 保存時だけ使う作業コピー。思考タスクのスタックを消費しない。 */
 LOCAL UW task_think_fault_code(UW fault_flags);             /* LED表示用異常番号 */
 /* 状態LED更新 */
 LOCAL void task_think_led_update(UW state_elapsed_ms, UW heartbeat_elapsed_ms, UW fault_elapsed_ms);
@@ -105,7 +105,7 @@ EXPORT volatile BOOL g_task_think_emergency_stop;                  /**< 非常�
 EXPORT volatile obstacle_avoidance_rule_t g_task_think_sensor_rule;       /**< 選択センサー走行ルール */
 EXPORT volatile UW g_task_think_fault_flags;                       /**< CPU0異常ラッチ */
 EXPORT volatile BOOL g_task_think_learning_mode;            /**< 現場学習モード */
-EXPORT volatile UB g_task_think_learning_samples;           /**< 収集済み埋め込み数 */
+EXPORT volatile UB g_task_think_learning_samples;           /**< 収集済み音響見本数 */
 EXPORT volatile BOOL g_task_think_storage_valid;            /**< 有効なMRAMプロトタイプ有無 */
 EXPORT volatile prototype_storage_result_t g_task_think_storage_result; /**< 直近MRAM処理結果 */
 
@@ -238,38 +238,27 @@ EXPORT ER task_think_report_fault(app_fault_t fault) {
 }
 
 /** =================================================================*
- * @brief  最新の完成特徴量パッチを1回だけ学習に取り込む
- * @details 音響観測の更新ではなく特徴量世代で重複を判定するため、
- *          SENSOR_RULEとSOUND_FOLLOWのどちらでも同じ条件で動作する。
+ * @brief  最新の96次元要約を1回だけ現場見本として取り込む
+ * @details 能動フレーム不足は判定不能なので、零ベクトルを見本として保存しない。
  * ================================================================= */
 LOCAL void task_think_learning_capture(void) {
-    if (!g_task_think_learning_mode || (g_task_think_learning_samples >= 5U)) {
+    if (!g_task_think_learning_mode ||
+        (g_task_think_learning_samples >= CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT)) {
         return;
     }
 
-    UW generation = 0U;
-    if ((E_OK != task_acoustic_link_feature_get(&learning_feature_patch, &generation)) ||
-        (generation == learning_last_feature_generation)) {
+    task_infer_result_t result;
+    if ((E_OK != task_infer_result_get(&result)) || (result.feature_generation == learning_last_feature_generation)) {
         return;
     }
-    learning_last_feature_generation = generation;
-
-    memset(learning_embedding, 0, sizeof(learning_embedding));
-    if (TFLM_RUNTIME_OK !=
-        tflm_runtime_invoke((const B *) learning_feature_patch.frames, (UW) sizeof(learning_feature_patch.frames),
-                            learning_embedding, (UW) sizeof(learning_embedding))) {
-        // [WORKAROUND] TFLMモデルがまだ実装されていないフェーズのため、
-        // 生の特徴量の一部をそのままダミーのEmbeddingとして使用し、
-        // 現場学習・MRAM保存機能のパイプラインをバイパスして動作させる。
-        for (UW i = 0U; i < (UW) sizeof(learning_embedding); i++) {
-            learning_embedding[i] = ((const B *)learning_feature_patch.frames)[i];
-        }
+    learning_last_feature_generation = result.feature_generation;
+    if (!result.summary_valid) {
+        return;
     }
-
-    for (UW index = 0U; index < CPU0_PROTOTYPE_STORAGE_BYTES; index++) {
-        learning_accum[index] += learning_embedding[index];
-    }
+    memcpy(storage_data.samples[g_task_think_learning_samples], result.summary,
+           sizeof(storage_data.samples[g_task_think_learning_samples]));
     g_task_think_learning_samples++;
+    storage_data.sample_count = g_task_think_learning_samples;
 }
 
 /** =================================================================*
@@ -473,6 +462,7 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         g_task_think_storage_result = prototype_storage_load(&storage_data);
         g_task_think_storage_valid = CPU0_PROTOTYPE_STORAGE_OK == g_task_think_storage_result;
     }
+    (void) task_infer_prototype_set(&storage_data, g_task_think_storage_valid);
 
     (void) stacd;
     (void) exinf;
@@ -508,21 +498,26 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
                     g_task_think_learning_mode = !g_task_think_learning_mode;
                     learning_button_handled = TRUE;
                     if (!g_task_think_learning_mode) {
-                        if (g_task_think_learning_samples > 0U) {
-                            for (UW index = 0U; index < CPU0_PROTOTYPE_STORAGE_BYTES; index++) {
-                                storage_data.prototype[index] =
-                                    (B) (learning_accum[index] / (W) g_task_think_learning_samples);
-                            }
-                            storage_data.prototype_count = 1U;
-                            g_task_think_storage_result = prototype_storage_save(&storage_data);
-                            if (CPU0_PROTOTYPE_STORAGE_OK == g_task_think_storage_result) {
-                                g_task_think_storage_valid = TRUE;
+                        if (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT == g_task_think_learning_samples) {
+                            storage_candidate = storage_data;
+                            float threshold = 0.0F;
+                            if (acoustic_identifier_leave_one_out_threshold((const B *) storage_candidate.samples,
+                                                                            storage_candidate.sample_count, &threshold) &&
+                                (E_OK == task_infer_background_export(&storage_candidate))) {
+                                storage_candidate.identifier_threshold = threshold;
+                                g_task_think_storage_result = prototype_storage_save(&storage_candidate);
+                                if (CPU0_PROTOTYPE_STORAGE_OK == g_task_think_storage_result) {
+                                    storage_data = storage_candidate;
+                                    g_task_think_storage_valid = TRUE;
+                                    (void) task_infer_prototype_set(&storage_data, TRUE);
+                                }
                             }
                         }
                     } else {
                         g_task_think_learning_samples = 0U;
-                        learning_last_feature_generation = g_task_acoustic_link_feature_generation;
-                        memset(learning_accum, 0, sizeof(learning_accum));
+                        learning_last_feature_generation = g_task_infer_feature_generation;
+                        storage_data.sample_count = 0U;
+                        memset(storage_data.samples, 0, sizeof(storage_data.samples));
                     }
                 }
             }

@@ -26,9 +26,11 @@
 #define CPU0_AUDIO_TASK_PRIORITY           (8)
 #define CPU0_SENSOR_TASK_PRIORITY          (9)
 #define CPU0_THINK_TASK_PRIORITY           (10)
+#define CPU0_INFER_TASK_PRIORITY           (11)
 #define CPU0_COMMAND_TASK_STACK_SIZE       (1024U)
 #define CPU0_AUDIO_TASK_STACK_SIZE         (2048U)
 #define CPU0_SENSOR_TASK_STACK_SIZE        (2048U)
 #define CPU0_THINK_TASK_STACK_SIZE         (1024U)
+#define CPU0_INFER_TASK_STACK_SIZE         (2048U)
 
 #endif /* SEROV_CPU0_CONFIG_TASK_H */

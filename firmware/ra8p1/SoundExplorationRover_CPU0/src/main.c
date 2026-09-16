@@ -5,6 +5,7 @@
  * @date   2026-08
  * ================================================================= */
 #include "hal_data.h"                                       /* FSP生成のHAL/BSPインスタンス、周辺機器設定、型定義 */
+#include "tasks/task_infer.h"                               /* 非致命の音響推論タスク起動API */
 #include "tasks/task_registry.h"                            /* CPU0独立タスクの初期化API */
 #include "tasks/task_think.h"                               /* CPU0起動異常のLED表示API */
 #include <tk/tkernel.h>                                     /* μT-Kernelのタスク休止API、型定義、共通定義 */
@@ -22,9 +23,13 @@ EXPORT INT usermain(void) {
     R_BSP_SecondaryCoreStart();
 #endif
 
+    /* 推論資源の不足で、既存の安全・走行タスク群を止めない。 */
+    task_infer_start_optional();
+
     /* CPU0独立タスクの起動結果 */
     app_fault_t const fault = task_registry_init();
     if (APP_FAULT_NONE != fault) {
+        task_infer_stop();
         task_think_halt(fault);
     }
 

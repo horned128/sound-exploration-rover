@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdio.h>
-#include "ai/tflm_runtime.h"
+#include "tasks/task_infer.h"
 #include "tasks/task_think.h"
 #include "tasks/task_sensor.h"
 #include "tasks/task_command.h"
@@ -18,6 +18,7 @@ static int mode, failures, recovery_loops;
 static rover_motion_target_t target;
 bsp_leds_t g_bsp_leds={0,NULL};
 volatile UW g_task_acoustic_link_feature_generation;
+volatile UW g_task_infer_feature_generation;
 static fsp_err_t pin_read(void *ctrl,bsp_io_port_pin_t pin,bsp_io_level_t *level) {
     (void)ctrl;(void)pin;*level=BSP_IO_LEVEL_HIGH;return FSP_SUCCESS;
 }
@@ -36,9 +37,27 @@ prototype_storage_result_t prototype_storage_save(prototype_storage_data_t *data
 ER task_acoustic_link_feature_get(acoustic_feature_patch_t *patch,UW *generation) {
     (void)patch;(void)generation;return E_NOEXS;
 }
-INT tflm_runtime_invoke(B const *input,UW input_bytes,B *output,UW output_bytes) {
-    (void)input;(void)input_bytes;(void)output;(void)output_bytes;return TFLM_RUNTIME_NOT_READY;
+ER task_infer_result_get(task_infer_result_t *result) {
+    (void)result;return E_NOEXS;
 }
+ER task_infer_prototype_set(const prototype_storage_data_t *data,BOOL storage_valid) {
+    (void)data;(void)storage_valid;return E_NOEXS;
+}
+ER task_infer_background_export(prototype_storage_data_t *data) {
+    (void)data;return E_NOEXS;
+}
+
+BOOL acoustic_identifier_leave_one_out_threshold(const B *samples,
+                                                 UW sample_count,
+                                                 float *threshold) {
+    (void)samples;
+    (void)sample_count;
+    if (threshold != NULL) {
+        *threshold=0.0F;
+    }
+    return FALSE;
+}
+
 ID tk_cre_tsk(const T_CTSK *c) { entry=c->task;return 1; }
 ID tk_cre_flg(const T_CFLG *c) { (void)c;return 2; }
 ER tk_sta_tsk(ID id,INT code) { (void)id;(void)code;return 0; }

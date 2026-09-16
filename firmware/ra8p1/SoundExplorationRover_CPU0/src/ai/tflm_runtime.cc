@@ -12,7 +12,7 @@
 #include "tensorflow/lite/micro/micro_mutable_op_resolver.h" /* 使用演算の明示登録 */
 #include "tensorflow/lite/schema/schema_generated.h"       /* TFLiteモデル形式 */
 
-using RuntimeResolver = tflite::MicroMutableOpResolver<8>;
+using RuntimeResolver = tflite::MicroMutableOpResolver<1>;
 alignas(16) LOCAL UB s_arena[TFLM_RUNTIME_ARENA_BYTES];       /**< CPU0専有アリーナ */
 /**< インタプリタの静的構築領域 */
 alignas(tflite::MicroInterpreter) LOCAL UB s_interpreter_storage[sizeof(tflite::MicroInterpreter)];
@@ -74,10 +74,7 @@ EXPORT INT tflm_runtime_init(UB const * model_data, UW model_bytes) {
         return TFLM_RUNTIME_MODEL_ERROR;
     }
     s_resolver = new (s_resolver_storage) RuntimeResolver();
-    if (s_resolver->AddConv2D() != kTfLiteOk || s_resolver->AddDepthwiseConv2D() != kTfLiteOk ||
-        s_resolver->AddFullyConnected() != kTfLiteOk || s_resolver->AddAveragePool2D() != kTfLiteOk ||
-        s_resolver->AddMaxPool2D() != kTfLiteOk || s_resolver->AddReshape() != kTfLiteOk ||
-        s_resolver->AddSoftmax() != kTfLiteOk || s_resolver->AddMean() != kTfLiteOk) {
+    if (s_resolver->AddFullyConnected() != kTfLiteOk) {
         tflm_runtime_reset();
         return TFLM_RUNTIME_MODEL_ERROR;
     }

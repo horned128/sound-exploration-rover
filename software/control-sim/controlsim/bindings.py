@@ -17,7 +17,10 @@ BOOL = ctypes.c_int32
 
 ACOUSTIC_XVF_STATUS_READY = 1
 CPU0_SENSOR_VALID_ALL = 0x0F
-CPU0_ACOUSTIC_EMBEDDING_DIMENSION = 64
+CPU0_ACOUSTIC_FEATURE_BIN_COUNT = 32
+CPU0_ACOUSTIC_SUMMARY_DIMENSION = 96
+CPU0_BACKGROUND_MODEL_INPUT_DIMENSION = 32
+CPU0_BACKGROUND_MODEL_HIDDEN_DIMENSION = 16
 
 
 class AcousticObservation(ctypes.Structure):
@@ -92,21 +95,24 @@ class ObstacleAvoidanceOutput(ctypes.Structure):
     ]
 
 
-class AcousticIdentifierPrototype(ctypes.Structure):
+class AcousticIdentifierSummaryOutput(ctypes.Structure):
     _fields_ = [
-        ("embedding", ctypes.c_int8 * CPU0_ACOUSTIC_EMBEDDING_DIMENSION),
-        ("max_squared_distance", ctypes.c_uint32),
-        ("class_id", ctypes.c_uint8),
-        ("valid", BOOL),
+        ("active_frame_count", ctypes.c_uint8),
+        ("sample_index", ctypes.c_uint32),
+        ("minimum_cosine_distance", ctypes.c_float),
+        ("threshold", ctypes.c_float),
+        ("status", ctypes.c_int32),
     ]
 
 
-class AcousticIdentifierOutput(ctypes.Structure):
+class BackgroundModelState(ctypes.Structure):
     _fields_ = [
-        ("squared_distance", ctypes.c_uint32),
-        ("prototype_index", ctypes.c_uint32),
-        ("class_id", ctypes.c_uint8),
-        ("matched", BOOL),
+        ("decoder", ctypes.c_float * (CPU0_BACKGROUND_MODEL_INPUT_DIMENSION * CPU0_BACKGROUND_MODEL_HIDDEN_DIMENSION)),
+        ("inverse_correlation", ctypes.c_float * (CPU0_BACKGROUND_MODEL_HIDDEN_DIMENSION * CPU0_BACKGROUND_MODEL_HIDDEN_DIMENSION)),
+        ("encoder_seed", ctypes.c_uint32),
+        ("mse_count", ctypes.c_uint32),
+        ("mse_mean", ctypes.c_float),
+        ("mse_m2", ctypes.c_float),
     ]
 
 
@@ -134,18 +140,39 @@ def library() -> ctypes.CDLL:
         ctypes.POINTER(ObstacleAvoidanceOutput),
     ]
     handle.obstacle_avoidance_controller_step.restype = None
-    handle.acoustic_identifier_squared_l2.argtypes = [
-        ctypes.POINTER(ctypes.c_int8),
-        ctypes.POINTER(ctypes.c_int8),
+    handle.acoustic_identifier_frame_is_active.argtypes = [ctypes.POINTER(ctypes.c_int8)]
+    handle.acoustic_identifier_frame_is_active.restype = BOOL
+    handle.acoustic_identifier_summary_create.argtypes = [
+        ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32, ctypes.POINTER(ctypes.c_int8), ctypes.POINTER(ctypes.c_uint8),
     ]
-    handle.acoustic_identifier_squared_l2.restype = ctypes.c_uint32
-    handle.acoustic_identifier_classify.argtypes = [
-        ctypes.POINTER(ctypes.c_int8),
-        ctypes.POINTER(AcousticIdentifierPrototype),
-        ctypes.c_uint32,
-        ctypes.POINTER(AcousticIdentifierOutput),
+    handle.acoustic_identifier_summary_create.restype = BOOL
+    handle.acoustic_identifier_cosine_distance.argtypes = [
+        ctypes.POINTER(ctypes.c_int8), ctypes.POINTER(ctypes.c_int8), ctypes.POINTER(ctypes.c_float),
     ]
-    handle.acoustic_identifier_classify.restype = None
+    handle.acoustic_identifier_cosine_distance.restype = BOOL
+    handle.acoustic_identifier_leave_one_out_threshold.argtypes = [
+        ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32, ctypes.POINTER(ctypes.c_float),
+    ]
+    handle.acoustic_identifier_leave_one_out_threshold.restype = BOOL
+    handle.acoustic_identifier_summary_classify.argtypes = [
+        ctypes.POINTER(ctypes.c_int8), BOOL, ctypes.c_uint8, ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32,
+        ctypes.c_float, ctypes.POINTER(AcousticIdentifierSummaryOutput),
+    ]
+    handle.acoustic_identifier_summary_classify.restype = None
+    handle.background_model_init.argtypes = [ctypes.POINTER(BackgroundModelState), ctypes.c_uint32]
+    handle.background_model_init.restype = None
+    handle.background_model_mse.argtypes = [
+        ctypes.POINTER(BackgroundModelState), ctypes.POINTER(ctypes.c_int8), ctypes.POINTER(ctypes.c_float),
+    ]
+    handle.background_model_mse.restype = BOOL
+    handle.background_model_observe.argtypes = [
+        ctypes.POINTER(BackgroundModelState), ctypes.POINTER(ctypes.c_int8), BOOL, ctypes.POINTER(ctypes.c_float),
+    ]
+    handle.background_model_observe.restype = BOOL
+    handle.background_model_mse_threshold.argtypes = [ctypes.POINTER(BackgroundModelState), ctypes.POINTER(ctypes.c_float)]
+    handle.background_model_mse_threshold.restype = BOOL
+    handle.background_model_reset_inverse_correlation.argtypes = [ctypes.POINTER(BackgroundModelState)]
+    handle.background_model_reset_inverse_correlation.restype = None
     return handle
 
 

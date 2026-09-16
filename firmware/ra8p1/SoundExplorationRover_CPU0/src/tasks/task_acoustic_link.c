@@ -9,6 +9,7 @@
 #include "ipc/actuator_ipc_client.h"                       /* CPU1実出力状態取得API */
 #include "services/acoustic_feature_assembler.h"           /* 特徴量イベント再組立 */
 #include "task_command.h"                                     /* 最新指令状態取得API */
+#include "task_infer.h"                                       /* 完成特徴量を推論タスクへ通知 */
 #include "task_sensor.h"                                      /* 最新I2Cセンサー状態取得API */
 #include "task_think.h"                                       /* 思考タスクへの異常通知 */
 #include <string.h>                                         /* memset */
@@ -679,6 +680,7 @@ LOCAL void task_acoustic_link_frame_handle(const acoustic_frame_t * p_frame) {
             audio_feature_ready = TRUE;
             g_task_acoustic_link_feature_generation++;
             g_task_acoustic_link_feature_complete_count++;
+            (void) task_infer_notify_feature_ready();
         } else if (CPU0_ACOUSTIC_FEATURE_RESTARTED == result) {
             g_task_acoustic_link_feature_drop_count++;
         } else if ((CPU0_ACOUSTIC_FEATURE_FORMAT_ERROR == result) ||
