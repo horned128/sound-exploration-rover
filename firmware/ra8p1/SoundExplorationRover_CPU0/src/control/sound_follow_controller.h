@@ -23,6 +23,9 @@ typedef enum e_sound_follow_state {
     CPU0_THINK_STATE_SENSOR_BLOCKED_STOP,
     CPU0_THINK_STATE_SENSOR_IMU_STOP,
     CPU0_THINK_STATE_FAULT,
+    CPU0_THINK_STATE_SENSOR_PIVOT_LEFT,
+    CPU0_THINK_STATE_SENSOR_PIVOT_RIGHT,
+    CPU0_THINK_STATE_SENSOR_BACKUP,
 } sound_follow_state_t;
 
 typedef struct st_sound_follow_input {

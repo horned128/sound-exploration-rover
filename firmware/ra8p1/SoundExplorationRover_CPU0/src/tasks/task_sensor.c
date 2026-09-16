@@ -121,9 +121,30 @@ LOCAL void task_sensor_snapshot_mark_unavailable(fsp_err_t error) {
     }
     sensor_snapshot.initialized = FALSE;
     sensor_snapshot.valid_flags = 0U;
-    sensor_snapshot.error_flags = CPU0_SENSOR_ERROR_I2C_INIT;
-    sensor_snapshot.last_error = (W) error;
     sensor_hub_diagnostics_get(&sensor_snapshot.diagnostics);
+
+    UW error_flags = CPU0_SENSOR_ERROR_I2C_INIT;
+    switch (sensor_snapshot.diagnostics.failure_device) {
+    case CPU0_SENSOR_FAILURE_DEVICE_TCA9548A:
+        error_flags |= CPU0_SENSOR_ERROR_TCA9548A;
+        break;
+    case CPU0_SENSOR_FAILURE_DEVICE_TOF_LEFT:
+        error_flags |= CPU0_SENSOR_ERROR_TOF_LEFT;
+        break;
+    case CPU0_SENSOR_FAILURE_DEVICE_TOF_CENTER:
+        error_flags |= CPU0_SENSOR_ERROR_TOF_CENTER;
+        break;
+    case CPU0_SENSOR_FAILURE_DEVICE_TOF_RIGHT:
+        error_flags |= CPU0_SENSOR_ERROR_TOF_RIGHT;
+        break;
+    case CPU0_SENSOR_FAILURE_DEVICE_BMI270:
+        error_flags |= CPU0_SENSOR_ERROR_BMI270;
+        break;
+    default:
+        break;
+    }
+    sensor_snapshot.error_flags = error_flags;
+    sensor_snapshot.last_error = (W) error;
     task_sensor_snapshot_publish(&sensor_snapshot);
 }
 

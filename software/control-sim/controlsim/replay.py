@@ -10,10 +10,11 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .bindings import SensorSnapshot, obstacle_avoidance_step
+from .bindings import SensorSnapshot, obstacle_avoidance_trace
 
 
 JSONValue = Any
@@ -124,9 +125,35 @@ def telemetry_to_sensor_snapshot(payload: Mapping[str, JSONValue]) -> SensorSnap
 def replay_obstacle_avoidance(
     source: TelemetrySource, *, fault_active: bool = False, strict: bool = True
 ) -> list[Any]:
-    """Run every decoded sensor snapshot through the actual C controller."""
+    """Replay at recorded time intervals, without treating 250 ms logs as 100 ms ticks.
 
-    return [
-        obstacle_avoidance_step(telemetry_to_sensor_snapshot(record.payload), fault_active=fault_active)
-        for record in iter_telemetry_records(source, strict=strict)
-    ]
+    Old schema-2 logs lack sensor generations; cpu_seq then identifies repeated
+    CPU telemetry. Sparse log replay checks decisions, not the trajectory that
+    changed commands would have produced on the robot.
+    """
+    snapshots = []
+    times = []
+    for index, record in enumerate(iter_telemetry_records(source, strict=strict)):
+        payload = record.payload
+        snapshot = telemetry_to_sensor_snapshot(payload)
+        usb_value = payload.get("usb")
+        sensor_value = payload.get("sensors")
+        usb = usb_value if isinstance(usb_value, Mapping) else {}
+        sensors = sensor_value if isinstance(sensor_value, Mapping) else {}
+        if "update_count" not in sensors:
+            snapshot.update_count = _bounded_int(
+                usb.get("cpu_seq", index + 1), minimum=0, maximum=0xFFFFFFFF, default=index + 1,
+            )
+        if payload.get("cpu_valid") is False:
+            snapshot.valid_flags = 0
+        if "cpu_ms" in usb:
+            now_ms = int(usb["cpu_ms"])
+        elif "esp_ms" in payload:
+            now_ms = int(payload["esp_ms"])
+        elif record.timestamp:
+            now_ms = int(datetime.strptime(record.timestamp, "%Y-%m-%d %H:%M:%S,%f").timestamp() * 1000)
+        else:
+            now_ms = index * 100
+        snapshots.append(snapshot)
+        times.append(now_ms & 0xFFFFFFFF)
+    return obstacle_avoidance_trace(snapshots, fault_active=fault_active, timestamps_ms=times)

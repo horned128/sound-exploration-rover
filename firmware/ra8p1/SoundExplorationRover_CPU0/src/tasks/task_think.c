@@ -64,6 +64,7 @@ LOCAL T_CTSK const think_task_config = {
 };
 
 LOCAL sensor_liveness_t sensor_liveness;                  /**< 思考側のセンサー更新監視 */
+LOCAL UW sensor_now_ms;                                    /**< センサー鮮度判定と共通の実時刻[ms] */
 EXPORT volatile UW g_task_think_sensor_watchdog_ms;         /**< 更新進行を観測してからの時間[ms] */
 EXPORT volatile BOOL g_task_think_sensor_fresh;             /**< 更新期限内か */
 EXPORT volatile ER g_task_think_sensor_clock_error;         /**< 実時間取得の異常 */
@@ -78,6 +79,7 @@ LOCAL BOOL task_think_sensor_fresh(const sensor_snapshot_t * p_snapshot, ER snap
     SYSTIM now;
     ER const err = tk_get_otm(&now);
     UD const now_ms = (E_OK == err) ? (((UD) (UW) now.hi << 32U) | now.lo) : 0U;
+    sensor_now_ms = (UW) now_ms;
     g_task_think_sensor_clock_error = err;
     g_task_think_sensor_fresh = sensor_liveness_update(&sensor_liveness, p_snapshot->update_count, now_ms,
         (E_OK == err) && (E_OK == snapshot_error) && p_snapshot->initialized, CPU0_SENSOR_STALE_TIMEOUT_MS);
@@ -256,7 +258,12 @@ LOCAL void task_think_learning_capture(void) {
     if (TFLM_RUNTIME_OK !=
         tflm_runtime_invoke((const B *) learning_feature_patch.frames, (UW) sizeof(learning_feature_patch.frames),
                             learning_embedding, (UW) sizeof(learning_embedding))) {
-        return;
+        // [WORKAROUND] TFLMモデルがまだ実装されていないフェーズのため、
+        // 生の特徴量の一部をそのままダミーのEmbeddingとして使用し、
+        // 現場学習・MRAM保存機能のパイプラインをバイパスして動作させる。
+        for (UW i = 0U; i < (UW) sizeof(learning_embedding); i++) {
+            learning_embedding[i] = ((const B *)learning_feature_patch.frames)[i];
+        }
     }
 
     for (UW index = 0U; index < CPU0_PROTOTYPE_STORAGE_BYTES; index++) {
@@ -530,7 +537,8 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         obstacle_avoidance_output_t output;
         sound_follow_state_t const previous_state = g_task_think_state;
         obstacle_avoidance_controller_step(sensor_fresh ? &sensor_snapshot : NULL,
-                                           APP_FAULT_NONE != g_task_think_fault_flags, &output);
+                                           (APP_FAULT_NONE != g_task_think_fault_flags) || g_task_think_learning_mode,
+                                           sensor_now_ms, &output);
         g_task_think_state = output.state;
         if (previous_state != g_task_think_state) {
             state_elapsed_ms = 0U;
@@ -547,7 +555,7 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         if (E_OK != task_think_publish_motion(output.steering_deg, output.left_rpm, output.right_rpm,
                                                output.actuator_enable, output.emergency_stop)) {
             g_task_think_fault_flags |= APP_FAULT_TARGET_UPDATE;
-            obstacle_avoidance_controller_step(NULL, TRUE, &output);
+            obstacle_avoidance_controller_step(NULL, TRUE, sensor_now_ms, &output);
             g_task_think_state = output.state;
             (void) task_think_publish_motion(output.steering_deg, output.left_rpm, output.right_rpm,
                                               output.actuator_enable, output.emergency_stop);

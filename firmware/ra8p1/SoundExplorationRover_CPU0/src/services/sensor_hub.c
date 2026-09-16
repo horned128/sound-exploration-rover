@@ -248,10 +248,10 @@ EXPORT fsp_err_t sensor_hub_init(void) {
             return err;
         }
 
-        vl53l1x_result_t init_result = SENSOR_TOF_RESULT_TRANSPORT_ERROR;
+        vl53l1x_result_t init_result = VL53L1X_RESULT_TRANSPORT_ERROR;
         err = vl53l1x_init(&init_result);
         if (FSP_SUCCESS != err) {
-            sensor_hub_diagnostics.failure_kind = (SENSOR_TOF_RESULT_DATA_READY_TIMEOUT == init_result)
+            sensor_hub_diagnostics.failure_kind = (VL53L1X_RESULT_DATA_READY_TIMEOUT == init_result)
                                                       ? CPU0_SENSOR_FAILURE_VL53L1X_DATA_READY_TIMEOUT
                                                       : sensor_hub_transport_failure_kind(err);
             sensor_hub_diagnostics.failure_device = sensor_hub_tof_device(position);
@@ -360,12 +360,12 @@ EXPORT fsp_err_t sensor_hub_poll(sensor_snapshot_t * p_snapshot) {
         p_snapshot->diagnostics.tof_result[index] = (UB) reading.result;
         if (FSP_SUCCESS != read_err) {
             p_snapshot->error_flags |= sensor_hub_tof_error_flag(position);
-            if ((SENSOR_TOF_RESULT_RANGE_STATUS_INVALID == reading.result) ||
-                (SENSOR_TOF_RESULT_DISTANCE_INVALID == reading.result)) {
+            if ((VL53L1X_RESULT_RANGE_STATUS_INVALID == reading.result) ||
+                (VL53L1X_RESULT_DISTANCE_INVALID == reading.result)) {
                 sensor_hub_record_failure(p_snapshot, CPU0_SENSOR_FAILURE_MEASUREMENT_INVALID,
                                           sensor_hub_tof_device(position), sensor_hub_tof_read_stage(position),
                                           (B) channel, read_err);
-            } else if (SENSOR_TOF_RESULT_DATA_READY_TIMEOUT == reading.result) {
+            } else if (VL53L1X_RESULT_DATA_READY_TIMEOUT == reading.result) {
                 sensor_hub_record_failure(p_snapshot, CPU0_SENSOR_FAILURE_VL53L1X_DATA_READY_TIMEOUT,
                                           sensor_hub_tof_device(position), sensor_hub_tof_read_stage(position),
                                           (B) channel, read_err);

@@ -9,7 +9,7 @@
 #define CPU0_SENSOR_PERIOD_MS              (50U)
 #define CPU0_SENSOR_RETRY_PERIOD_MS        (1000U)
 #define CPU0_SENSOR_STALE_TIMEOUT_MS       (200U)
-#define CPU0_SENSOR_I2C_TIMEOUT_MS         (20U)
+#define CPU0_SENSOR_I2C_TIMEOUT_MS         (50U)
 #define CPU0_TOF_DATA_READY_TIMEOUT_MS     (100U)
 
 /* TCA9548Aは常に対象一チャネルのみを有効にする。 */

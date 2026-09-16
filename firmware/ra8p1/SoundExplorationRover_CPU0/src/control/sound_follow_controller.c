@@ -199,10 +199,15 @@ LOCAL void sound_follow_motion_from_doa(H doa_deg) {
     H const steering_deg = sound_follow_steering_from_doa(doa_deg);
     H left_rpm = CPU0_SOUND_MOVE_LEFT_RPM;
     H right_rpm = CPU0_SOUND_MOVE_RIGHT_RPM;
+    W const steering_magnitude = sound_follow_abs_i16(steering_deg);
     if (steering_deg > 0) {
-        right_rpm = CPU0_SOUND_TURN_INNER_RPM;
+        W const rpm_range = (W) CPU0_SOUND_MOVE_RIGHT_RPM - CPU0_SOUND_TURN_INNER_RPM;
+        right_rpm = (H) ((W) CPU0_SOUND_MOVE_RIGHT_RPM -
+                         ((rpm_range * steering_magnitude) / CPU0_SOUND_STEERING_MAX_DEG));
     } else if (steering_deg < 0) {
-        left_rpm = CPU0_SOUND_TURN_INNER_RPM;
+        W const rpm_range = (W) CPU0_SOUND_MOVE_LEFT_RPM - CPU0_SOUND_TURN_INNER_RPM;
+        left_rpm = (H) ((W) CPU0_SOUND_MOVE_LEFT_RPM -
+                        ((rpm_range * steering_magnitude) / CPU0_SOUND_STEERING_MAX_DEG));
     }
 
     controller.desired_steering_deg = steering_deg;

@@ -17,6 +17,9 @@ typedef enum e_sensor_rule {
     CPU0_SENSOR_RULE_TURN_RIGHT,
     CPU0_SENSOR_RULE_BLOCKED_STOP,
     CPU0_SENSOR_RULE_IMU_STOP,
+    CPU0_SENSOR_RULE_PIVOT_LEFT,
+    CPU0_SENSOR_RULE_PIVOT_RIGHT,
+    CPU0_SENSOR_RULE_BACKUP,
 } obstacle_avoidance_rule_t;
 
 typedef struct st_obstacle_avoidance_output {
@@ -31,6 +34,6 @@ typedef struct st_obstacle_avoidance_output {
 
 EXPORT void obstacle_avoidance_controller_init(void);       /* ルール判断初期化 */
 EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snapshot,
-                                                BOOL fault_active, obstacle_avoidance_output_t * p_output);
+                                                BOOL fault_active, UW now_ms, obstacle_avoidance_output_t * p_output);
 
 #endif /* SEROV_CPU0_OBSTACLE_AVOIDANCE_CONTROLLER_H */

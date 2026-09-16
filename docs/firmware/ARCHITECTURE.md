@@ -301,7 +301,7 @@ CPU0 fault番号は、1がtask create/start、2がIPC初期化、3がIPC送信�
 
 I2Cセンサーを使うとき、CPU0のタスク登録はsensor taskを追加します。sensor taskはI2C1、TCA9548A、VL53L1X 3台、BMI270を50 ms周期で取得し、mutexで保護した最新sensor snapshotを公開します。通信異常はCPU0全体のfaultへ昇格させず、snapshotをinvalidとして走行判断を安全停止に戻し、1秒ごとに再初期化します。
 
-自律モードはSOUND_FOLLOWとSENSOR_RULEをビルド時に選びます。SENSOR_RULEではthink taskがToFのLEFT/CENTER/RIGHTとBMI270の傾き・衝撃・角速度から前進、減速、左右緩旋回、停止を決定します。CPU1のPWM・エンコーダ処理は変更せず、既存IPC経路だけを使います。後方距離は未計測のため、近接時の自律後退は行わず停止します。
+自律モードはSOUND_FOLLOWとSENSOR_RULEをビルド時に選びます。SENSOR_RULEではthink taskがToFのLEFT/CENTER/RIGHTとBMI270の傾き・衝撃・角速度から前進、減速、左右緩旋回、停止を決定します。CPU1のPWM・エンコーダ処理は変更せず、既存IPC経路だけを使います。SENSOR_RULEの近接時は、方向を保持した有限回の後退・前進旋回で脱出を試みます。後方距離は未計測なので後退に時間上限を設け、距離・回頭の進捗が得られない場合は停止します。詳細は[SENSOR_AUTONOMY §5](SENSOR_AUTONOMY.md#5-方向を保持する回避と有限回の切り返し)を参照してください。
 
 実装、FSP生成、配線、閾値、Live Watch、UDP診断の詳細は[I2Cセンサー・ルールベース走行](SENSOR_AUTONOMY.md)を参照してください。
 
@@ -506,22 +506,24 @@ J11/USB Full Speed、P500、`USB_FS_VBUSEN`はReSpeaker経路に使用しない�
 | 論理左モーターLPWM | `g_motor_pwm_lpwm` | GPT7B | P602 | Pmod2 J25-3 / MISO |
 | 論理右モーターLPWM | `g_motor_pwm_lpwm` | GPT7A | P603 | Pmod2 J25-2 / MOSI |
 | 左右BTS7960共通EN | `g_ioport` | GPIO出力 | PD01 | Arduino J24-1 / D8、左右ENへ分岐 |
-| 予備GPIO | なし | 未使用 | P312 | Arduino J23-8 / D7（解放） |
+| I2C SCL（センサー用） | `g_ioport` (GPIO I2C) | GPIO出力/プルアップ入力 | P312 | Arduino J23-8 / D7（※J24-10 P512破損回避） |
+| I2C SDA（センサー用） | `g_ioport` (GPIO I2C) | GPIO出力/プルアップ入力 | P511 | Arduino J24-9 / SDA |
 | 論理左代表エンコーダA | `g_encoder_left_a_irq` | IRQ16入力 | P011 | Arduino J23-3 / D2 |
 | 論理左代表エンコーダB | `g_encoder_left_b_irq` | IRQ20入力 | P809 | Arduino J23-2 / D1 |
 | 論理右代表エンコーダA | `g_encoder_right_a_irq` | IRQ11入力 | P006 | Pmod1 J26-7 / IRQ |
 | 論理右代表エンコーダB | `g_encoder_right_b_irq` | IRQ18入力 | P413 | Pmod1 J26-10 / GPIO2 / IRQ |
 | センサー共通電源 | なし | +3.3 V / GND | - | Pmod2 J25-6 / J25-5 |
-| TCA9548A I2Cマルチプレクサ | `g_i2c_sensor` | IIC1、7-bit address `0x70` | P511 / SDA1、P512 / SCL1 | Arduino J24-9 / SDA、J24-10 / SCL |
-| VL53L1X LEFT | `g_i2c_sensor` | IIC1、TCA9548A CH0、7-bit address `0x29` | P511 / SDA1、P512 / SCL1 | TCA9548A CH0 |
-| VL53L1X CENTER | `g_i2c_sensor` | IIC1、TCA9548A CH1、7-bit address `0x29` | P511 / SDA1、P512 / SCL1 | TCA9548A CH1 |
-| VL53L1X RIGHT | `g_i2c_sensor` | IIC1、TCA9548A CH2、7-bit address `0x29` | P511 / SDA1、P512 / SCL1 | TCA9548A CH2 |
-| BMI270 IMU | `g_i2c_sensor` | IIC1直結、7-bit address `0x68` / `0x69` | P511 / SDA1、P512 / SCL1 | Arduino J24-9 / SDA、J24-10 / SCL |
+| TCA9548A I2Cマルチプレクサ | `g_ioport` (GPIO I2C) | 7-bit address `0x70` | P511 / SDA、P312 / SCL | Arduino J24-9 / SDA、J23-8 / D7 (SCL) |
+| VL53L1X LEFT | `g_ioport` (GPIO I2C) | TCA9548A CH0、7-bit address `0x29` | P511 / SDA、P312 / SCL | TCA9548A CH0 |
+| VL53L1X CENTER | `g_ioport` (GPIO I2C) | TCA9548A CH1、7-bit address `0x29` | P511 / SDA、P312 / SCL | TCA9548A CH1 |
+| VL53L1X RIGHT | `g_ioport` (GPIO I2C) | TCA9548A CH2、7-bit address `0x29` | P511 / SDA、P312 / SCL | TCA9548A CH2 |
+| BMI270 IMU | `g_ioport` (GPIO I2C) | 主バス直結、7-bit address `0x68` / `0x69` | P511 / SDA、P312 / SCL | Arduino J24-9 / SDA、J23-8 / D7 (SCL) |
 
-I2CバスはTCA9548AとBMI270で共有し、同一address `0x29`のVL53L1XはTCA9548AのCH0/CH1/CH2で分離する。P511/P512を上記の外部I2Cコネクタへ接続するには、EK-RA8P1のSW4-5をOFFにしてIIC1を選ぶ。[EK-RA8P1 User's Manual](https://www.renesas.com/en/document/mat/ek-ra8p1-v1-users-manual)のI2C/I3C切替も確認する。
+I2CバスはTCA9548AとBMI270で共有し、同一address `0x29`のVL53L1XはTCA9548AのCH0/CH1/CH2で分離する。J24-10 (P512) はハードウェア端子破損（GND短絡）のため放棄し、予備GPIOであったJ23-8 (P312 / D7) を高信頼性GPIO SCLとして使用する。
 
 ToFの光学中心は、車体座標（前方`+y`、右方向`+x`）でLEFT=(-90, +94) mm、
 CENTER=(0, 0) mm、RIGHT=(+90, +94) mm。3台とも前方へ平行に向ける。
+
 
 P801、P803、P808をサーボへ転用しているため、現行構成ではOcto-SPIフラッシュを使用できない。SW4-3をONにしてOcto-SPIを無効、SW4-4をONにしてArduino端子を有効にする。LPWMはPmod2 J25-2/J25-3へ割り当て、OSPI0とは競合させない。BTS7960は左右のVCCを共通化し、R_EN/L_ENをPD01へまとめる。VCCとENは直結せず、P312は未使用のまま解放する。電源はJ18-5の+5 VをBTS7960 VCC、J18-4の+3.3 Vを左右代表エンコーダVCC、J18-6/J18-7のGNDを全機器共通GNDとして分岐する。I2CセンサーはPmod2 J25-6の+3.3 VとJ25-5のGNDから別枝で給電する。これらは同じ+3.3 V/GNDネットであり、別電源ではないが、BTS7960のGNDからセンサーを数珠つなぎにしない。BTS7960のモーター電流の帰路はバッテリーとモータードライバの間で直接配線する。ただしBTS7960モジュールの仕様が3.3 V対応でない場合は5 Vを使用し、電流容量が不足する場合は外部安定化電源を使用する。
 

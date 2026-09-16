@@ -83,6 +83,7 @@ static char const * wifi_telemetry_think_state(uint8_t state) {
         "WAIT_LINK", "LISTEN", "STEER_PREP", "MOVE_STEP", "SETTLE", "COOLDOWN", "SENSOR_SAFE_STOP",
         "SENSOR_FORWARD", "SENSOR_CAUTION_FORWARD", "SENSOR_TURN_LEFT", "SENSOR_TURN_RIGHT",
         "SENSOR_BLOCKED_STOP", "SENSOR_IMU_STOP", "FAULT",
+        "SENSOR_PIVOT_LEFT", "SENSOR_PIVOT_RIGHT", "SENSOR_BACKUP",
     };
     return (state < (sizeof(names) / sizeof(names[0]))) ? names[state] : "UNKNOWN";
 }
@@ -104,6 +105,7 @@ static char const * wifi_telemetry_autonomy_mode(uint8_t mode) {
 static char const * wifi_telemetry_sensor_rule(uint8_t rule) {
     static char const * const names[] = {
         "SAFE_STOP", "FORWARD", "CAUTION_FORWARD", "TURN_LEFT", "TURN_RIGHT", "BLOCKED_STOP", "IMU_STOP",
+        "PIVOT_LEFT", "PIVOT_RIGHT", "BACKUP",
     };
     return (rule < (sizeof(names) / sizeof(names[0]))) ? names[rule] : "UNKNOWN";
 }

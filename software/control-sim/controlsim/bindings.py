@@ -130,6 +130,7 @@ def library() -> ctypes.CDLL:
     handle.obstacle_avoidance_controller_step.argtypes = [
         ctypes.POINTER(SensorSnapshot),
         BOOL,
+        ctypes.c_uint32,
         ctypes.POINTER(ObstacleAvoidanceOutput),
     ]
     handle.obstacle_avoidance_controller_step.restype = None
@@ -162,10 +163,31 @@ def sound_follow_trace(inputs: Iterable[tuple[SoundFollowInput, int]]) -> list[S
 
 
 def obstacle_avoidance_step(snapshot: SensorSnapshot, *, fault_active: bool = False) -> ObstacleAvoidanceOutput:
+    return obstacle_avoidance_trace([snapshot], fault_active=fault_active)[0]
+
+
+def obstacle_avoidance_trace(
+    snapshots: Iterable[SensorSnapshot], *, fault_active: bool = False,
+    timestamps_ms: Iterable[int] | None = None,
+) -> list[ObstacleAvoidanceOutput]:
+    """Run at the firmware's 100 ms period unless measured timestamps are supplied.
+
+    update_count is kept verbatim: repeated snapshots must not create IMU progress.
+    """
     handle = library()
-    output = ObstacleAvoidanceOutput()
-    handle.obstacle_avoidance_controller_step(ctypes.byref(snapshot), BOOL(fault_active), ctypes.byref(output))
-    return output
+    handle.obstacle_avoidance_controller_init()
+    outputs: list[ObstacleAvoidanceOutput] = []
+    snapshots = list(snapshots)
+    times = list(timestamps_ms) if timestamps_ms is not None else [i * 100 for i in range(len(snapshots))]
+    if len(times) != len(snapshots):
+        raise ValueError("one timestamp is required per snapshot")
+    for snapshot, now_ms in zip(snapshots, times):
+        output = ObstacleAvoidanceOutput()
+        handle.obstacle_avoidance_controller_step(
+            ctypes.byref(snapshot), BOOL(fault_active), now_ms, ctypes.byref(output)
+        )
+        outputs.append(output)
+    return outputs
 
 
 def sound_output_values(output: SoundFollowOutput) -> tuple[int, int, int, int, int, int]:

@@ -308,7 +308,8 @@
             0: "WAIT_LINK", 1: "LISTEN", 2: "STEER_PREP", 3: "MOVE_STEP", 4: "SETTLE", 5: "COOLDOWN",
             6: "SENSOR_SAFE_STOP", 7: "SENSOR_FORWARD", 8: "SENSOR_CAUTION_FORWARD",
             9: "SENSOR_TURN_LEFT", 10: "SENSOR_TURN_RIGHT", 11: "SENSOR_BLOCKED_STOP",
-            12: "SENSOR_IMU_STOP", 13: "FAULT"
+            12: "SENSOR_IMU_STOP", 13: "FAULT",
+            14: "SENSOR_PIVOT_LEFT", 15: "SENSOR_PIVOT_RIGHT", 16: "SENSOR_BACKUP"
         };
         const CPU0_FAULTS = {
             1: "TASK_CREATE", 2: "TASK_START", 4: "IPC_INIT", 8: "IPC_SEND",
@@ -320,9 +321,9 @@
         };
         function getThinkStateClass(c) {
             switch(c) {
-                case 0: case 5: case 6: case 8: case 11: return 'val-warn';
+                case 0: case 5: case 6: case 8: case 11: case 16: return 'val-warn';
                 case 1: return 'val-blue';
-                case 2: case 3: case 4: case 7: case 9: case 10: return 'val-ok';
+                case 2: case 3: case 4: case 7: case 9: case 10: case 14: case 15: return 'val-ok';
                 case 12: case 13: return 'val-error';
                 default: return '';
             }
@@ -403,7 +404,12 @@
             }
         });
 
-        const TOF_BEARINGS_DEG = [45, 0, -45];
+        // 2026-09-15実機確認: 3台とも前向き。位置は中央ToFを原点とする。
+        const TOF_POSES = [
+            { label: 'L', rightMm: -90, forwardMm: 94 },
+            { label: 'C', rightMm: 0, forwardMm: 0 },
+            { label: 'R', rightMm: 90, forwardMm: 94 }
+        ];
         const MAP_DEFAULT_RANGE_MM = 2000;
         let latestSensors = null;
         let latestSteer = 0; 
@@ -441,20 +447,21 @@
             ctx.fillText('90°', ox - r - 25, oy); ctx.fillText('-90°', ox + r + 25, oy);
 
             if (latestSensors) {
-                TOF_BEARINGS_DEG.forEach((deg, i) => {
+                TOF_POSES.forEach((pose, i) => {
                     if (!isSensorValid(latestSensors, i)) return;
                     const dist = sensorValue(latestSensors.tof_mm, i);
                     if (dist === null || dist <= 0) return;
 
-                    const angle = (-deg - 90) * Math.PI / 180;
                     const pd = Math.min(dist, MAP_DEFAULT_RANGE_MM);
-                    const px = ox + Math.cos(angle) * r * pd / MAP_DEFAULT_RANGE_MM;
-                    const py = oy + Math.sin(angle) * r * pd / MAP_DEFAULT_RANGE_MM;
+                    const px = ox + pose.rightMm * r / MAP_DEFAULT_RANGE_MM;
+                    const py = oy - (pose.forwardMm + pd) * r / MAP_DEFAULT_RANGE_MM;
 
                     ctx.fillStyle = dist > MAP_DEFAULT_RANGE_MM ? '#ff9800' : '#2196f3';
                     ctx.beginPath(); ctx.arc(px, py, 6, 0, 2 * Math.PI); ctx.fill();
                     ctx.fillStyle = '#e0e0e0'; ctx.font = '10px monospace';
-                    ctx.fillText(`${dist}mm`, px, py + 12);
+                    ctx.textAlign = i === 0 ? 'right' : i === 2 ? 'left' : 'center';
+                    ctx.fillText(`${pose.label} ${dist}mm`, px + (i - 1) * 8, py + (i === 1 ? 26 : 12));
+                    ctx.textAlign = 'center';
                 });
             }
 
@@ -478,7 +485,7 @@
             audioLenFactor = Math.max(0.1, Math.min(1.0, audioLenFactor));
 
             drawArrow(latestAudioDoa, '#ff9800', true, audioLenFactor);
-            drawArrow(latestSteer, '#4caf50', false, 1.0);
+            drawArrow(-latestSteer, '#4caf50', false, 1.0);
             
             ctx.fillStyle = '#4caf50'; ctx.beginPath(); ctx.arc(ox, oy, 4, 0, 2 * Math.PI); ctx.fill();
         }
@@ -512,7 +519,8 @@
             if ((validFlags & 0x08) && d.sensors.gyro_dps_x10) {
                 const gyroYawRateDps = d.sensors.gyro_dps_x10[2] / 10.0;
                 const gyroYawRateRad = gyroYawRateDps * (Math.PI / 180.0);
-                odomTheta += gyroYawRateRad * dt;
+                // 実機のgyro Zは右回頭で正。地図の反時計回り正へ変換する。
+                odomTheta -= gyroYawRateRad * dt;
             } else {
                 odomTheta += ((vR - vL) / TRACK_WIDTH_MM) * dt;
             }
@@ -527,14 +535,14 @@
             }
 
             if (d.sensors && Number(d.sensors.valid_flags) > 0) {
-                TOF_BEARINGS_DEG.forEach((bearingDeg, index) => {
+                TOF_POSES.forEach((pose, index) => {
                     if (!isSensorValid(d.sensors, index)) return;
                     const distance = sensorValue(d.sensors.tof_mm, index);
 
                     if (distance !== null && distance > 50 && distance < 2000) {
-                        const angle = odomTheta + (bearingDeg * Math.PI / 180);
-                        const targetX = odomX + distance * Math.cos(angle);
-                        const targetY = odomY + distance * Math.sin(angle);
+                        const forward = pose.forwardMm + distance;
+                        const targetX = odomX + forward * Math.cos(odomTheta) + pose.rightMm * Math.sin(odomTheta);
+                        const targetY = odomY + forward * Math.sin(odomTheta) - pose.rightMm * Math.cos(odomTheta);
 
                         let isDuplicate = false;
                         for (let i = 0; i < obstaclePoints.length; i++) {
@@ -789,8 +797,27 @@
 
             const validFlags = Number(d.sensors?.valid_flags) || 0;
             const sensorError = Number(d.sensors?.error_flags) || 0;
+            const lastError = Number(d.sensors?.last_error) || 0;
             setVal('val_sensor_valid', `0x${validFlags.toString(16).padStart(2, '0').toUpperCase()}`, validFlags === 0x0f ? 'val-ok' : 'val-warn');
-            setVal('val_sensor_error', `0x${sensorError.toString(16).padStart(2, '0').toUpperCase()}`, sensorError === 0 ? 'val-ok' : 'val-error');
+
+            let errorText = `0x${sensorError.toString(16).padStart(2, '0').toUpperCase()}`;
+            if (sensorError !== 0) {
+                const parts = [];
+                if (sensorError & (1 << 0)) parts.push("INIT");
+                if (sensorError & (1 << 1)) parts.push("TCA9548A");
+                if (sensorError & (1 << 2)) parts.push("TOF_L");
+                if (sensorError & (1 << 3)) parts.push("TOF_C");
+                if (sensorError & (1 << 4)) parts.push("TOF_R");
+                if (sensorError & (1 << 5)) parts.push("BMI270");
+                if (sensorError & (1 << 6)) parts.push("STALE");
+                let errReason = "";
+                if (lastError === 18) errReason = " (NACK)";
+                else if (lastError === 8) errReason = " (BUSY)";
+                else if (lastError === 20) errReason = " (TIMEOUT)";
+                else if (lastError !== 0) errReason = ` (ERR ${lastError})`;
+                errorText += ` [${parts.join('|')}]${errReason}`;
+            }
+            setVal('val_sensor_error', errorText, sensorError === 0 ? 'val-ok' : 'val-error');
 
             drawIntegratedRadar();
             updateOdometry(d);
