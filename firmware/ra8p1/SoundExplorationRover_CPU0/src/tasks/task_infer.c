@@ -40,6 +40,8 @@ LOCAL ID infer_event_id;
 LOCAL BOOL infer_task_started;
 LOCAL BOOL infer_result_ready;
 LOCAL BOOL infer_storage_valid;
+LOCAL UB infer_target_peak_bin;
+LOCAL float infer_bin_weights[CPU0_ACOUSTIC_FEATURE_BIN_COUNT];
 LOCAL UW infer_last_feature_generation;
 LOCAL prototype_storage_data_t infer_storage_data;
 LOCAL background_model_state_t infer_background_model;
@@ -93,6 +95,7 @@ EXPORT void task_infer_start_optional(void) {
     task_infer_resources_delete();
     infer_result_ready = FALSE;
     infer_storage_valid = FALSE;
+    infer_target_peak_bin = 255U;
     infer_last_feature_generation = 0U;
     memset(&infer_storage_data, 0, sizeof(infer_storage_data));
     background_model_init(&infer_background_model, CPU0_BACKGROUND_MODEL_DEFAULT_SEED);
@@ -164,6 +167,21 @@ EXPORT ER task_infer_prototype_set(const prototype_storage_data_t * p_data, BOOL
     }
     infer_storage_data = *p_data;
     infer_storage_valid = storage_valid;
+
+    infer_target_peak_bin = 255U;
+    for (UW b = 0U; b < CPU0_ACOUSTIC_FEATURE_BIN_COUNT; b++) {
+        infer_bin_weights[b] = 1.0F;
+    }
+    if (storage_valid && (p_data->sample_count > 0U)) {
+        if (p_data->target_peak_bin < CPU0_ACOUSTIC_FEATURE_BIN_COUNT) {
+            infer_target_peak_bin = p_data->target_peak_bin;
+        } else {
+            infer_target_peak_bin = acoustic_identifier_find_peak_bin((const B *) p_data->samples,
+                                                                      p_data->sample_count);
+        }
+        acoustic_identifier_build_weights(infer_target_peak_bin, infer_bin_weights);
+    }
+
     background_model_init(&infer_background_model,
                           (0U == p_data->encoder_seed) ? CPU0_BACKGROUND_MODEL_DEFAULT_SEED : p_data->encoder_seed);
     if (storage_valid) {
@@ -219,6 +237,40 @@ EXPORT ER task_infer_result_get(task_infer_result_t * p_result) {
     return tk_unl_mtx(infer_mutex_id);
 }
 
+EXPORT ER task_infer_prototype_get(prototype_storage_data_t * p_data, BOOL * p_storage_valid) {
+    if ((NULL == p_data) || (NULL == p_storage_valid)) {
+        return E_PAR;
+    }
+    if (infer_mutex_id <= 0) {
+        return E_NOEXS;
+    }
+    ER const err = tk_loc_mtx(infer_mutex_id, TMO_POL);
+    if (E_OK != err) {
+        return err;
+    }
+    *p_data = infer_storage_data;
+    *p_storage_valid = infer_storage_valid;
+    return tk_unl_mtx(infer_mutex_id);
+}
+
+EXPORT ER task_infer_prototype_telemetry_get(task_infer_prototype_telemetry_t * p_telemetry) {
+    if (NULL == p_telemetry) {
+        return E_PAR;
+    }
+    if (infer_mutex_id <= 0) {
+        return E_NOEXS;
+    }
+    ER const err = tk_loc_mtx(infer_mutex_id, TMO_POL);
+    if (E_OK != err) {
+        return err;
+    }
+    p_telemetry->storage_valid = infer_storage_valid;
+    p_telemetry->sample_count = infer_storage_data.sample_count;
+    p_telemetry->target_peak_bin = infer_target_peak_bin;
+    p_telemetry->identifier_threshold = infer_storage_data.identifier_threshold;
+    return tk_unl_mtx(infer_mutex_id);
+}
+
 /** =================================================================*
  * @brief  完成特徴量を背景学習・能動要約・個別見本照合へ渡す
  * @details 音響リンクmutexはfeature_getのコピーだけで解放され、以降のRLSとcosine計算は
@@ -241,7 +293,7 @@ LOCAL void task_infer_feature_process(void) {
         return;
     }
 
-    task_infer_result_t next;
+    static task_infer_result_t next;
     task_infer_result_clear(&next);
     next.feature_generation = generation;
     BOOL active_mse_found = FALSE;
@@ -272,6 +324,7 @@ LOCAL void task_infer_feature_process(void) {
     acoustic_identifier_summary_classify(next.summary, next.summary_valid, next.active_frame_count,
                                          (const B *) infer_storage_data.samples,
                                          infer_storage_data.sample_count,
+                                         infer_bin_weights,
                                          infer_storage_data.identifier_threshold, &next.identifier);
     if (CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_TARGET == next.identifier.status) {
         g_task_infer_match_count++;

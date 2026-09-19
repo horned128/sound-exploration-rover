@@ -162,10 +162,12 @@ EXPORT void obstacle_avoidance_controller_init(void) {
  * @param[in] p_snapshot 最新センサー値。NULLは安全停止
  * @param[in] fault_active 異常・走行禁止状態
  * @param[in] now_ms 呼出側の実時刻[ms]
+ * @param[in] target_steering_deg 音源方向への引力として用いる目標操舵角[°]
  * @param[out] p_output 走行指令
  * ================================================================= */
 EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snapshot, BOOL fault_active,
-                                               UW now_ms, obstacle_avoidance_output_t * p_output) {
+                                               UW now_ms, H target_steering_deg,
+                                               obstacle_avoidance_output_t * p_output) {
     if (NULL == p_output) {
         return;
     }
@@ -362,8 +364,15 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
 
     /* 合成操舵力: 左が近ければ右(+), 右が近ければ左(-), 正面が近ければより広い側へ */
     W steer_force = repulse_left - repulse_right;
+
+    /* S3: target_steering_deg（音源方向）への引力を加算 */
+    W const attractive_force = ((W) target_steering_deg * 1000) /
+                               (W) CPU0_SENSOR_STEERING_MAX_DEG;
+    steer_force += attractive_force;
+
     if (center_mm < 900U) {
-        W const side_bias = avoidance.direction;
+        W const side_bias = (0 != avoidance.direction) ? avoidance.direction :
+                            (target_steering_deg >= 0 ? 1 : -1);
         steer_force += (side_bias * repulse_center * 15) / 10;
     }
 

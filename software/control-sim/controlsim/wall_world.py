@@ -51,7 +51,7 @@ def run_wall_approach(
         def controller_step(snapshot: SensorSnapshot, now_ms: int) -> ObstacleAvoidanceOutput:
             output = ObstacleAvoidanceOutput()
             handle.obstacle_avoidance_controller_step(
-                ctypes.byref(snapshot), False, now_ms, ctypes.byref(output)
+                ctypes.byref(snapshot), False, now_ms, ctypes.c_int16(0), ctypes.byref(output)
             )
             return output
 

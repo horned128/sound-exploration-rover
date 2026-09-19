@@ -17,9 +17,16 @@ typedef struct st_task_infer_result {
     BOOL background_anomaly;                                /**< 背景候補として異常ならTRUE */
     float event_mse;                                        /**< 能動フレームの最大再構成MSE */
     float background_threshold;                             /**< 背景MSE mean+3sigma */
-    B summary[CPU0_ACOUSTIC_SUMMARY_DIMENSION];             /**< mean/std/maxの96次元int8 */
+    B summary[CPU0_ACOUSTIC_SUMMARY_DIMENSION];             /**< 2スロット分割mean/std/maxの192次元int8 */
     acoustic_identifier_summary_output_t identifier;        /**< 個別見本へのcosine照合結果 */
 } task_infer_result_t;
+
+typedef struct st_task_infer_prototype_telemetry {
+    BOOL storage_valid;
+    UB sample_count;
+    UB target_peak_bin;
+    float identifier_threshold;
+} task_infer_prototype_telemetry_t;
 
 /* 推論タスクは走行タスク群と独立に、失敗しても非致命で起動する。 */
 EXPORT void task_infer_start_optional(void);
@@ -32,6 +39,10 @@ EXPORT ER task_infer_prototype_set(const prototype_storage_data_t * p_data, BOOL
 EXPORT ER task_infer_background_export(prototype_storage_data_t * p_data);
 /* 最新推論結果をコピーする。まだ特徴量を処理していなければE_NOEXS。 */
 EXPORT ER task_infer_result_get(task_infer_result_t * p_result);
+/* 保存済み見本データを安全に取得する。 */
+EXPORT ER task_infer_prototype_get(prototype_storage_data_t * p_data, BOOL * p_storage_valid);
+/* テレメトリ用の軽量見本情報取得（スタック消費を抑える） */
+EXPORT ER task_infer_prototype_telemetry_get(task_infer_prototype_telemetry_t * p_telemetry);
 
 IMPORT volatile BOOL g_task_infer_available;
 IMPORT volatile UW g_task_infer_feature_generation;

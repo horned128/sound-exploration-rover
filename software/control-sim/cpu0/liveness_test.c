@@ -47,11 +47,28 @@ ER task_infer_background_export(prototype_storage_data_t *data) {
     (void)data;return E_NOEXS;
 }
 
+UB acoustic_identifier_find_peak_bin(const B *samples, UW sample_count) {
+    (void)samples;
+    (void)sample_count;
+    return 0U;
+}
+
+void acoustic_identifier_build_weights(UB peak_bin, float *weights) {
+    (void)peak_bin;
+    if (weights != NULL) {
+        for (int i = 0; i < 32; i++) {
+            weights[i] = 1.0F;
+        }
+    }
+}
+
 BOOL acoustic_identifier_leave_one_out_threshold(const B *samples,
                                                  UW sample_count,
+                                                 const float *bin_weights,
                                                  float *threshold) {
     (void)samples;
     (void)sample_count;
+    (void)bin_weights;
     if (threshold != NULL) {
         *threshold=0.0F;
     }
@@ -84,7 +101,7 @@ ER task_acoustic_link_snapshot_get(task_acoustic_link_snapshot_t *out) {
         .usb_configured=TRUE,.hello_received=TRUE,.observation_received=TRUE,.observation_sequence=loops+1,
         .observation={.xvf_status=ACOUSTIC_XVF_STATUS_READY,.level_dbfs_x100=-2000,.vad=1},
     };
-    if (stage==2 && ++recovery_loops<=10) {
+    if (stage==2 && ++recovery_loops<=20) {
         out->observation.vad=0;
         out->observation.level_dbfs_x100=-8000;
     }
@@ -92,7 +109,7 @@ ER task_acoustic_link_snapshot_get(task_acoustic_link_snapshot_t *out) {
 }
 ER task_command_set_target(const rover_motion_target_t *in) { target=*in;publications++;return 0; }
 ER tk_dly_tsk(INT delay) {
-    assert(delay==100);loops++;assert(loops<300);
+    assert(delay==50);loops++;assert(loops<600);
     if(stage==0 && target.left_target_rpm!=0) {
         stage=1;freeze_publications=publications;
     } else if(stage==1 && !g_task_think_sensor_fresh) {
@@ -104,7 +121,7 @@ ER tk_dly_tsk(INT delay) {
     } else if(stage==2 && g_task_think_sensor_fresh && target.left_target_rpm!=0) {
         longjmp(done,1);
     }
-    now+=100;return 0;
+    now+=delay;return 0;
 }
 static void pure_boundaries(void) {
     sensor_liveness_t s={0};

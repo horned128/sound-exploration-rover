@@ -422,7 +422,6 @@
     <module id="module.driver.flash_on_mram.0">
       <property id="module.driver.mram.name" value="g_mram0"/>
       <property id="module.driver.mram.p_callback" value="NULL"/>
-      <property id="module.driver.mram.p_context" value="NULL"/>
       <property id="module.driver.mram.err_ipl" value="_disabled"/>
     </module>
     <context id="_hal.0">
@@ -434,14 +433,6 @@
         <stack module="module.driver.basic_on_usb.0" requires="module.driver.basic_on_usb.requires.basic"/>
       </stack>
     </context>
-    <config id="config.driver.flash_hp">
-      <property id="config.driver.flash_hp.param_checking_enable" value="config.flash_hp.param_checking_enable.bsp"/>
-      <property id="config.driver.flash_hp.param_code_flash_programming_enable" value="config.driver.flash_hp.param_code_flash_programming_enable.disabled"/>
-      <property id="config.driver.flash_hp.param_data_flash_programming_enable" value="config.driver.flash_hp.param_data_flash_programming_enable.enabled"/>
-    </config>
-    <config id="config.driver.mram">
-      <property id="config.driver.mram.param_checking_enable" value="config.mram.param_checking_enable.bsp"/>
-    </config>
     <config id="config.driver.usb_basic">
       <property id="config.driver.usb_basic.param_checking_enable" value="config.driver.usb_basic.param_checking_enable.bsp"/>
       <property id="config.driver.usb_basic.pll_clock_frequency" value="config.driver.usb_basic.pll_clock_frequency.24mhz"/>
@@ -465,6 +456,9 @@
       <property id="config.driver.iic_master.param_checking_enable" value="config.driver.iic_master.param_checking_enable.bsp"/>
       <property id="config.driver.iic_master.dtc_enable" value="config.driver.iic_master.dtc_enable.disabled"/>
       <property id="config.driver.iic_master.addr_mode_10_bit_enable" value="config.driver.iic_master.addr_mode_10_bit_enable.disabled"/>
+    </config>
+    <config id="config.driver.mram">
+      <property id="config.driver.mram.param_checking_enable" value="config.mram.param_checking_enable.bsp"/>
     </config>
     <config id="config.driver.ioport">
       <property id="config.driver.ioport.checking" value="config.driver.ioport.checking.system"/>

@@ -30,6 +30,9 @@ typedef struct st_actuator_status {
     UH fault_flags;
     UW applied_command_sequence;
     UW sequence_number;
+    UW left_encoder_count;
+    UW right_encoder_count;
+    UW status_uptime_ms;
 } actuator_status_t;
 
 typedef enum e_actuator_fault {
@@ -46,7 +49,7 @@ typedef enum e_actuator_fault {
 #define ACTUATOR_IPC_MESSAGE_ID_MASK        (0xFF000000UL)
 #define ACTUATOR_IPC_PAYLOAD_MASK           (0x00FFFFFFUL)
 #define ACTUATOR_IPC_SEQUENCE_MASK          (0x00FFFFFFUL)
-#define ACTUATOR_IPC_STATUS_WORD_COUNT      (7U)
+#define ACTUATOR_IPC_STATUS_WORD_COUNT      (10U)
 
 #define ACTUATOR_CONTROL_ENABLE_MASK         (1UL << 0)
 #define ACTUATOR_CONTROL_EMERGENCY_STOP_MASK (1UL << 1)
@@ -67,6 +70,9 @@ typedef enum e_actuator_ipc_message_id {
     ACTUATOR_IPC_STATUS_RIGHT_ENCODER_RPM_X10 = 0x85U,
     ACTUATOR_IPC_STATUS_APPLIED_SEQUENCE    = 0x86U,
     ACTUATOR_IPC_STATUS_SEQUENCE            = 0x87U,
+    ACTUATOR_IPC_STATUS_LEFT_ENCODER_COUNT  = 0x88U,
+    ACTUATOR_IPC_STATUS_RIGHT_ENCODER_COUNT = 0x89U,
+    ACTUATOR_IPC_STATUS_UPTIME_MS           = 0x8AU,
 } actuator_ipc_message_id_t;
 
 /** =================================================================*

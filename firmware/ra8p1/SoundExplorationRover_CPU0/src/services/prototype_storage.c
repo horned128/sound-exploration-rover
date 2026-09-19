@@ -9,8 +9,8 @@
 
 #define CPU0_PROTOTYPE_STORAGE_MAGIC             (0x53525650U)
 #define CPU0_PROTOTYPE_STORAGE_COMMIT             (0x434F4D54U)
-/* v3の32 KiB領域だけを読み、旧領域の内容は保存データとして扱わない。 */
-#define CPU0_PROTOTYPE_STORAGE_VERSION            (3U)
+/* v4の32 KiB領域だけを読み、旧領域の内容は保存データとして扱わない。 */
+#define CPU0_PROTOTYPE_STORAGE_VERSION            (4U)
 #define CPU0_PROTOTYPE_STORAGE_SLOT_BYTES         (16384U)
 #define CPU0_PROTOTYPE_STORAGE_SLOT_COUNT         (2U)
 #define CPU0_PROTOTYPE_STORAGE_REGION_BYTES       (32768U)

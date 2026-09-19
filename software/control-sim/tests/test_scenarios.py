@@ -20,7 +20,7 @@ class Controller:
             snapshot.gyro_dps_x10[2] = gyro
         output = ObstacleAvoidanceOutput()
         self.handle.obstacle_avoidance_controller_step(
-            ctypes.byref(snapshot), fault, self.now_ms & 0xFFFFFFFF, ctypes.byref(output)
+            ctypes.byref(snapshot), fault, self.now_ms & 0xFFFFFFFF, ctypes.c_int16(0), ctypes.byref(output)
         )
         self.now_ms += dt
         return output

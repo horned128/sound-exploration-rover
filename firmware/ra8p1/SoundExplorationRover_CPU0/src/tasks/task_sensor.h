@@ -37,4 +37,10 @@ IMPORT volatile UW g_task_sensor_hub_recovery_count;         /**< I2C障害後�
 
 IMPORT volatile BOOL g_task_sensor_test_pause;              /**< 更新停止試験用、既定FALSE */
 
+IMPORT volatile W  g_task_sensor_odometry_x_mm;              /**< オドメトリ推定X[mm] */
+IMPORT volatile W  g_task_sensor_odometry_y_mm;              /**< オドメトリ推定Y[mm] */
+IMPORT volatile H  g_task_sensor_odometry_theta_deg_x10;     /**< オドメトリ推定方位[0.1 deg] */
+IMPORT volatile UW g_task_sensor_odometry_distance_mm;       /**< オドメトリ累積走行距離[mm] */
+IMPORT volatile BOOL g_task_sensor_odometry_valid;           /**< オドメトリ有効フラグ */
+
 #endif /* SEROV_CPU0_TASK_SENSOR_H */

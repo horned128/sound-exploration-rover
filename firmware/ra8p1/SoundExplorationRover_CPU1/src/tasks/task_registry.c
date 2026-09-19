@@ -3,6 +3,7 @@
  * @brief  CPU1タスク群の初期化
  * ================================================================= */
 #include "task_registry.h"                                        /* CPU1タスク初期化API */
+#include "task_safety.h"                                      /* 安全ウォッチドッグタスクAPI */
 #include "task_actuator.h"                                    /* アクチュエータタスク生成・開始API */
 #include "task_status.h"                                      /* 状態表示タスク生成・開始API */
 
@@ -20,6 +21,11 @@ LOCAL void task_registry_delete(UW task_count);                /* 登録済み�
 
 /**< CPU1タスクの生成、開始、解放API登録。 */
 LOCAL task_registry_registration_t const task_registry_entries[] = {
+    {
+        .create = task_safety_create,
+        .start = task_safety_start,
+        .delete = task_safety_delete,
+    },
     {
         .create = task_actuator_create,
         .start = task_actuator_start,

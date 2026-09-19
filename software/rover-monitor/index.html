@@ -183,6 +183,82 @@
         .chart-btn { background: #2a2a2a; border: 1px solid #444; color: #aaa; font-size: 11px; padding: 2px 8px; border-radius: 3px; cursor: pointer; transition: all 0.2s; }
         .chart-btn:hover { background: #383838; color: #fff; border-color: #666; }
         .chart-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: bold; }
+
+        /* Acoustic Recognition Widget */
+        .recog-widget {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .recog-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .recog-title {
+            font-size: 12px;
+            font-weight: bold;
+            color: #ddd;
+        }
+        .recog-badge {
+            font-size: 11px;
+            font-weight: bold;
+            padding: 2px 8px;
+            border-radius: 4px;
+            letter-spacing: 0.5px;
+        }
+        .recog-badge.target { background: #1b5e20; color: #81c784; border: 1px solid #2e7d32; }
+        .recog-badge.not-target { background: #e65100; color: #ffb74d; border: 1px solid #f57c00; }
+        .recog-badge.listening { background: #0d47a1; color: #90caf9; border: 1px solid #1976d2; }
+        .recog-badge.idle { background: #2a2a2a; color: #888; border: 1px solid #444; }
+        .recog-meter-container {
+            position: relative;
+            background: #222;
+            height: 14px;
+            border-radius: 7px;
+            overflow: hidden;
+            border: 1px solid #444;
+        }
+        .recog-meter-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #ff9800, #4caf50);
+            transition: width 0.15s ease-out, background 0.2s;
+        }
+        .recog-meter-fill.match {
+            background: #4caf50;
+            box-shadow: 0 0 8px rgba(76, 175, 80, 0.6);
+        }
+        .recog-thresh-marker {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #ff5252;
+            z-index: 2;
+        }
+        .recog-thresh-marker::after {
+            content: 'Thresh';
+            position: absolute;
+            top: -12px;
+            left: -15px;
+            font-size: 9px;
+            color: #ff5252;
+        }
+        .recog-meta {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #aaa;
+        }
+        .recog-meta span strong {
+            color: #fff;
+        }
     </style>
 </head>
 <body>
@@ -227,10 +303,19 @@
             </div>
 
             <div class="panel">
-                <h3 class="panel-title">Learning & MRAM</h3>
+                <h3 class="panel-title">Acoustic AI & Learning</h3>
                 <div class="data-grid">
-                    <span class="data-label" data-help="現場音の見本を収集する学習モードです。ACTIVE中は安全のため非常停止が有効になります。">Learning</span><span class="data-value" id="val_learning_active">-</span>
+                    <span class="data-label" data-help="音響認識の判定状態です。TARGET（一致）、NOT_TARGET（不一致）、INDETERMINATE（判定不能・無音）、INACTIVE（待機）を表します。">Match Status</span><span class="data-value" id="val_recog_status">-</span>
+                    <span class="data-label" data-help="現在の音が学習したターゲット音とどれくらい似ているかを示す指標（0〜100%）です。しきい値を超えるとTARGET判定になります。">Similarity</span><span class="data-value" id="val_recog_similarity">-</span>
+                    <span class="data-label" data-help="学習音の最近傍見本との重み付きコサイン距離（0.0〜2.0）です。192次元（時間2スロット）およびピーク周波数重視で計算され、値が小さいほど酷似しています。">Cosine Dist</span><span class="data-value" id="val_recog_distance">-</span>
+                    <span class="data-label" data-help="ターゲット音と判定するためのコサイン距離のしきい値です。距離がこの値以下であればターゲット音と判定します。">Threshold</span><span class="data-value" id="val_recog_threshold">-</span>
+                    <span class="data-label" data-help="学習した音の代表ピーク周波数帯域です。この周波数帯（最大2.5倍）を重点評価し、低周波暗騒音（bin 0〜2: 0.5倍）を抑制します。">Target Peak</span><span class="data-value" id="val_recog_target_peak">-</span>
+                    <span class="data-label" data-help="現在マイクロホンが捉えている音のピーク周波数帯域です。Target Peakと一致していれば目標音である可能性が高くなります。">Current Peak</span><span class="data-value" id="val_recog_current_peak">-</span>
+                    <span class="data-label" data-help="現場音の見本を収集する学習モードです。ACTIVE中は安全のため非常停止が有効になります。">Learning Mode</span><span class="data-value" id="val_learning_active">-</span>
                     <span class="data-label" data-help="MRAMに、有効な背景モデルと音の見本が保存されているかを示します。VALIDなら次回起動後にも利用できます。">Stored Data</span><span class="data-value" id="val_storage_valid">-</span>
+                    <span class="data-label" data-help="MRAMに保存されている学習サンプルの件数です（最大5件）。">Samples</span><span class="data-value" id="val_learning_samples">-</span>
+                    <span class="data-label" data-help="800msウィンドウ内の有効音響フレーム数です（最大80フレーム）。前半40・後半40の2スロット分割によりリズム・断続を認識します。">Active Frames</span><span class="data-value" id="val_recog_frames">-</span>
+                    <span class="data-label" data-help="直近の照合で最も距離が近かった学習サンプルのインデックスです。">Nearest Sample</span><span class="data-value" id="val_recog_nearest">-</span>
                     <span class="data-label" data-help="直近のMRAM操作結果です。OK (0) は成功、EMPTY (1) は未学習で正常、その他は初期化・保存の異常です。">Last Result</span><span class="data-value" id="val_storage_result">-</span>
                 </div>
             </div>
@@ -242,8 +327,6 @@
                     <span class="data-label" data-help="1秒あたりのlog-mel特徴量フレーム数です。通常は約100 fpsです。">Feature Rate</span><span class="data-value" id="val_dsp_fps">-</span>
                     <span class="data-label" data-help="直近の音響イベントとして保持している特徴量フレーム数です。80 / 80で1つの完成イベントになります。">Ring Frames</span><span class="data-value" id="val_dsp_ring">-</span>
                     <span class="data-label" data-help="起動後に生成されたlog-mel特徴量フレームの累計です。音声DSPが継続動作していれば増え続けます。">Feature Frames</span><span class="data-value" id="val_dsp_frames">-</span>
-                    <span class="data-label" data-help="最後のlog-mel特徴量計算にかかった時間です。単位はマイクロ秒です。">Last Block</span><span class="data-value" id="val_dsp_last_us">-</span>
-                    <span class="data-label" data-help="起動後のlog-mel特徴量計算時間の最大値です。16,000 us未満なら、100 fps処理の周期内に収まっています。">Max Block</span><span class="data-value" id="val_dsp_max_us">-</span>
                     <span class="data-label" data-help="I2S音声入力の取りこぼし回数です。0を維持することが正常です。">I2S Overruns</span><span class="data-value" id="val_dsp_overruns">-</span>
                 </div>
             </div>
@@ -254,6 +337,18 @@
                     <span class="data-label" data-help="CPU1からのアクチュエータ状態が受信できているかを示します。VALIDが通常状態です。">Status</span><span class="data-value" id="val_act_valid">-</span>
                     <span class="data-label" data-help="最後にCPU1のアクチュエータ状態を受信してからの時間です。小さい値で更新され続けることを確認します。">Age</span><span class="data-value" id="val_act_age">-</span>
                     <span class="data-label" data-help="CPU1のアクチュエータ異常フラグです。非常停止が有効な間は安全停止のフラグが表示されることがあります。">Faults</span><span class="data-value" id="val_act_faults">-</span>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3 class="panel-title">Odometry & Pose</h3>
+                <div class="data-grid">
+                    <span class="data-label" data-help="CPU0オドメトリによる車体推定位置(X, Y)です。原点は起動またはリセット位置です。">Pose (X, Y)</span><span class="data-value" id="val_odom_pos">-</span>
+                    <span class="data-label" data-help="オドメトリ相補フィルタによる車体推定方位角です。反時計回りが正です。">Heading (θ)</span><span class="data-value" id="val_odom_heading">-</span>
+                    <span class="data-label" data-help="車体の並進速度[mm/s]と旋回角速度[°/s]です。">Speed (V, ω)</span><span class="data-value" id="val_odom_speed">-</span>
+                    <span class="data-label" data-help="左右駆動輪エンコーダの24-bit累積カウントです。">Encoders (L, R)</span><span class="data-value" id="val_odom_encoders">-</span>
+                    <span class="data-label" data-help="静止時に自動校正されたジャイロZ軸バイアス値です。">Gyro Bias</span><span class="data-value" id="val_odom_bias">-</span>
+                    <span class="data-label" data-help="オドメトリの健全性状態（CALIBRATED/STATIONARY）です。">Odom State</span><span class="data-value" id="val_odom_state">-</span>
                 </div>
             </div>
         </div>
@@ -273,8 +368,10 @@
                         </div>
                         <div class="map-container">
                             <canvas id="trajectoryCanvas" class="map-canvas"></canvas>
-                            <div style="position: absolute; left: 8px; bottom: 4px; color: var(--text-muted); font-size: 10px; pointer-events: none;">
-                                Global Trajectory (Wheel + Gyro Z) & ToF Obstacles
+                            <div style="position: absolute; top: 10px; left: 10px; font-size: 11px; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 5px 8px; border-radius: 4px; border: 1px solid #444;">
+                                <div style="color: #4caf50; font-weight: bold; margin-bottom: 3px;">累積相対マップ (Relative Odometry Map)</div>
+                                <div style="color: #ff9800; font-size: 10px; margin-bottom: 2px;">⚠️ 相対マップ・累積誤差あり (Drift Accumulation)</div>
+                                <div style="color: #aaa; font-size: 10px;" id="trajectorySourceLabel">Source: CPU0 Odometry (24-bit Diff + Gyro Comp)</div>
                             </div>
                         </div>
                     </div>
@@ -283,11 +380,12 @@
                         <button class="btn-close">Close</button>
                         <div class="map-container">
                             <canvas id="radarCanvas" class="map-canvas"></canvas>
-                            <div style="position: absolute; top: 10px; left: 10px; font-size: 11px; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.5); padding: 4px; border-radius: 4px;">
-                                <div style="color: #e0e0e0; font-weight: bold; margin-bottom: 4px;">360° Radar View</div>
-                                <div style="color: #4caf50;">■ Steering (実線)</div>
-                                <div style="color: #ff9800;">■ Audio DoA (点線)</div>
-                                <div style="color: #2196f3;">● Obstacles (ToF)</div>
+                            <div style="position: absolute; top: 10px; left: 10px; font-size: 11px; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 5px 8px; border-radius: 4px; border: 1px solid #444;">
+                                <div style="color: #e0e0e0; font-weight: bold; margin-bottom: 3px;">ローバー中心ビュー (Rover-Centric View)</div>
+                                <div style="color: #4caf50; font-size: 10px;">■ Steering 操舵目標 (実線)</div>
+                                <div style="color: #ff9800; font-size: 10px;">■ Audio DoA 音源方位 (点線)</div>
+                                <div style="color: #2196f3; font-size: 10px;">● Obstacles (ToF L/C/R 平行ビーム)</div>
+                                <div style="color: #f44336; font-size: 10px;">-- 250mm 停止 / 234mm 交差ライン</div>
                             </div>
                         </div>
                     </div>
@@ -304,7 +402,23 @@
 
                     <div class="chart-box" id="box-audio">
                         <button class="btn-close">Close</button>
-                        <div class="chart-container"><canvas id="audioChart"></canvas></div>
+                        <div class="recog-widget">
+                            <div class="recog-header">
+                                <span class="recog-title">Acoustic AI Recognition</span>
+                                <span id="recogBadge" class="recog-badge idle">IDLE</span>
+                            </div>
+                            <div class="recog-meter-container" title="Target Similarity vs Threshold">
+                                <div id="recogMeterFill" class="recog-meter-fill"></div>
+                                <div id="recogThreshMarker" class="recog-thresh-marker" style="left: 0%;"></div>
+                            </div>
+                            <div class="recog-meta">
+                                <span>Sim: <strong id="recogSimVal">0.0%</strong> (Dist: <span id="recogDistVal">-</span>)</span>
+                                <span>Thresh: <strong id="recogThreshVal">-</strong></span>
+                                <span>Target: <strong id="recogTargetPeakVal">-</strong></span>
+                                <span>Now: <strong id="recogCurrentPeakVal">-</strong></span>
+                            </div>
+                        </div>
+                        <div class="chart-container" style="flex: 1; min-height: 120px;"><canvas id="audioChart"></canvas></div>
                     </div>
                     
                     <!-- 追加: ToF距離とGyro Zの時系列グラフ -->
@@ -433,6 +547,15 @@
             return `${names.length ? names.join(' | ') : 'UNKNOWN'} (${flags})`;
         }
 
+        function getLogMelFreqLabel(bin) {
+            if (bin === undefined || bin === null || bin < 0 || bin >= 32) return '-';
+            const melLow = 195.6, melHigh = 2774.3;
+            const mel = melLow + (bin / 31.0) * (melHigh - melLow);
+            const freqHz = 700.0 * (Math.pow(10.0, mel / 2595.0) - 1.0);
+            const freqStr = freqHz >= 1000 ? `${(freqHz / 1000.0).toFixed(1)}k` : `${Math.round(freqHz)}`;
+            return `bin ${bin} (~${freqStr}Hz)`;
+        }
+
         Chart.defaults.color = '#888';
         Chart.defaults.borderColor = '#333';
         const MAX_POINTS = 200;
@@ -507,14 +630,24 @@
             { label: 'R', rightMm: 90, forwardMm: 94 }
         ];
         const MAP_DEFAULT_RANGE_MM = 2000;
+        const WHEEL_RADIUS_MM = 54.0;
+        const TRACK_WIDTH_MM = 260.0;
         let latestSensors = null;
         let latestSteer = 0; 
         let latestAudioDoa = 0;
-        let latestAudioLevel = -100; // 追加: Audio Levelの保持
+        let latestAudioLevel = -100;
+        let latestPose = null;
 
         function sensorValue(values, index) { return Number.isFinite(values?.[index]) ? values[index] : null; }
         function isSensorValid(sensors, index) { return ((Number(sensors?.valid_flags) || 0) & (1 << index)) !== 0; }
 
+        /**
+         * ① ローバー中心ビュー (Rover-Centric Local View)
+         * - ToF 3台の実オフセットからの平行ビーム描画
+         * - 234 mm交差ライン・250 mm停止ラインの明示
+         * - 車体外形 (トレッド幅260mm / 輪径108mm) の正確な幾何描画
+         * - 音響DoAおよび操舵目標ベクトルの重畳
+         */
         function drawIntegratedRadar() {
             const canvas = document.getElementById('radarCanvas');
             if(!canvas) return;
@@ -527,45 +660,132 @@
             ctx.clearRect(0, 0, w, h);
             ctx.fillStyle = '#1e1e1e'; ctx.fillRect(0, 0, w, h);
 
-            const ox = w / 2, oy = h / 2;
-            const r = Math.min(w, h) * 0.42;
+            const ox = w / 2, oy = h / 2 + 30; // 車体をやや下側に配置して前方視野を広く確保
+            const r = Math.min(w, h) * 0.44;
 
-            ctx.strokeStyle = '#3a3a3a'; ctx.fillStyle = '#888'; ctx.font = '10px Segoe UI'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            // 距離レンジリング
+            ctx.strokeStyle = '#333'; ctx.fillStyle = '#777'; ctx.font = '10px Segoe UI'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
             for (let ring = 1; ring <= 4; ring++) {
                 const rr = r * ring / 4;
                 ctx.beginPath(); ctx.arc(ox, oy, rr, 0, 2 * Math.PI); ctx.stroke();
                 if(ring === 4) ctx.fillText(`${MAP_DEFAULT_RANGE_MM / 1000} m`, ox, oy - rr - 8);
             }
 
-            ctx.strokeStyle = '#333'; ctx.lineWidth = 1; ctx.beginPath();
+            // 十字軸
+            ctx.strokeStyle = '#2d2d2d'; ctx.lineWidth = 1; ctx.beginPath();
             ctx.moveTo(ox, oy - r); ctx.lineTo(ox, oy + r); ctx.moveTo(ox - r, oy); ctx.lineTo(ox + r, oy); ctx.stroke();
-            ctx.fillText('0° (Front)', ox, oy - r - 20); ctx.fillText('180°', ox, oy + r + 10);
-            ctx.fillText('90°', ox - r - 25, oy); ctx.fillText('-90°', ox + r + 25, oy);
+            ctx.fillText('0° (Front)', ox, oy - r - 12); ctx.fillText('180°', ox, oy + r + 10);
+            ctx.fillText('90°', ox - r - 20, oy); ctx.fillText('-90°', ox + r + 20, oy);
 
+            const toRadX = (xMm) => ox + (xMm * r / MAP_DEFAULT_RANGE_MM);
+            const toRadY = (yMm) => oy - (yMm * r / MAP_DEFAULT_RANGE_MM);
+
+            // ==========================================
+            // 安全ライン・幾何ラインの描画
+            // ==========================================
+            const lineHalfW = 160; // mm (車幅よりやや広め)
+            const lx1 = toRadX(-lineHalfW);
+            const lx2 = toRadX(lineHalfW);
+
+            // 250 mm 停止ライン (赤破線: 前進停止閾値)
+            const y250 = toRadY(250);
+            ctx.strokeStyle = '#f44336'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 4]);
+            ctx.beginPath(); ctx.moveTo(lx1, y250); ctx.lineTo(lx2, y250); ctx.stroke();
+            ctx.fillStyle = '#f44336'; ctx.font = '9px monospace'; ctx.textAlign = 'left';
+            ctx.fillText('STOP 250mm', lx2 + 4, y250 + 3);
+
+            // 234 mm 交差ライン (オレンジ点線: L/R ToF視野交差)
+            const y234 = toRadY(234);
+            ctx.strokeStyle = '#ff9800'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+            ctx.beginPath(); ctx.moveTo(lx1, y234); ctx.lineTo(lx2, y234); ctx.stroke();
+            ctx.fillStyle = '#ff9800'; ctx.fillText('CROSS 234mm', lx2 + 4, y234 + 3);
+            ctx.setLineDash([]);
+
+            // ==========================================
+            // ローバー車体モデル (幾何縮尺準拠)
+            // ==========================================
+            // 車体本体 (幅200mm, 前後220mm)
+            const bodyW = 180 * r / MAP_DEFAULT_RANGE_MM;
+            const bodyH = 210 * r / MAP_DEFAULT_RANGE_MM;
+            const bodyCenterY = toRadY(20);
+            ctx.fillStyle = 'rgba(45, 55, 72, 0.6)';
+            ctx.strokeStyle = '#4a5568';
+            ctx.lineWidth = 1.5;
+            ctx.fillRect(ox - bodyW / 2, bodyCenterY - bodyH / 2, bodyW, bodyH);
+            ctx.strokeRect(ox - bodyW / 2, bodyCenterY - bodyH / 2, bodyW, bodyH);
+
+            // 左右駆動輪 (トレッド幅260mm: ±130mm, 輪径108mm, 幅24mm)
+            const tireW = 20 * r / MAP_DEFAULT_RANGE_MM;
+            const tireH = 108 * r / MAP_DEFAULT_RANGE_MM;
+            ctx.fillStyle = '#718096';
+            ctx.fillRect(toRadX(-130) - tireW / 2, oy - tireH / 2, tireW, tireH);
+            ctx.fillRect(toRadX(130) - tireW / 2, oy - tireH / 2, tireW, tireH);
+
+            // ==========================================
+            // ToF 3台の実オフセットからの平行ビーム描画
+            // ==========================================
             if (latestSensors) {
                 TOF_POSES.forEach((pose, i) => {
+                    const sx = toRadX(pose.rightMm);
+                    const sy = toRadY(pose.forwardMm);
+
+                    // センサー本体マウント位置
+                    ctx.fillStyle = '#cbd5e0';
+                    ctx.fillRect(sx - 3, sy - 3, 6, 6);
+
                     if (!isSensorValid(latestSensors, i)) return;
                     const dist = sensorValue(latestSensors.tof_mm, i);
                     if (dist === null || dist <= 0) return;
 
                     const pd = Math.min(dist, MAP_DEFAULT_RANGE_MM);
-                    const px = ox + pose.rightMm * r / MAP_DEFAULT_RANGE_MM;
-                    const py = oy - (pose.forwardMm + pd) * r / MAP_DEFAULT_RANGE_MM;
+                    const beamEndY = toRadY(pose.forwardMm + pd);
 
-                    ctx.fillStyle = dist > MAP_DEFAULT_RANGE_MM ? '#ff9800' : '#2196f3';
-                    ctx.beginPath(); ctx.arc(px, py, 6, 0, 2 * Math.PI); ctx.fill();
-                    ctx.fillStyle = '#e0e0e0'; ctx.font = '10px monospace';
-                    ctx.textAlign = i === 0 ? 'right' : i === 2 ? 'left' : 'center';
-                    ctx.fillText(`${pose.label} ${dist}mm`, px + (i - 1) * 8, py + (i === 1 ? 26 : 12));
-                    ctx.textAlign = 'center';
+                    // 平行ビームライン (0°前方へ直線)
+                    const isAlert = dist <= 250;
+                    ctx.strokeStyle = isAlert ? 'rgba(244, 67, 54, 0.7)' : 'rgba(33, 150, 243, 0.45)';
+                    ctx.lineWidth = isAlert ? 2 : 1.5;
+                    ctx.setLineDash([3, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(sx, sy);
+                    ctx.lineTo(sx, beamEndY);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // 検出先端ポイント
+                    ctx.fillStyle = isAlert ? '#f44336' : (dist > MAP_DEFAULT_RANGE_MM ? '#ff9800' : '#2196f3');
+                    ctx.beginPath();
+                    ctx.arc(sx, beamEndY, isAlert ? 6 : 5, 0, 2 * Math.PI);
+                    ctx.fill();
+
+                    // 距離ラベル表示
+                    ctx.fillStyle = '#e2e8f0';
+                    ctx.font = '10px monospace';
+                    ctx.textAlign = (i === 0) ? 'right' : ((i === 2) ? 'left' : 'center');
+                    const xOffset = (i === 0) ? -8 : ((i === 2) ? 8 : 0);
+                    ctx.fillText(`${pose.label}:${dist}mm`, sx + xOffset, beamEndY + (i === 1 ? -8 : 4));
                 });
             }
 
-            // 変更: 矢印の長さを lenFactor で動的にスケール可能にする
-            function drawArrow(deg, color, isDashed, lenFactor = 1.0) {
+            // ==========================================
+            // 音響DoAおよび操舵目標レイの重畳描画
+            // ==========================================
+            function drawArrow(deg, color, isDashed, lenFactor = 1.0, isFan = false) {
                 const angle = (-deg - 90) * Math.PI / 180;
                 const arrowR = r * lenFactor;
                 const ex = ox + Math.cos(angle) * arrowR, ey = oy + Math.sin(angle) * arrowR;
+
+                if (isFan) {
+                    // 音響DoAの指向性ファン (±15°の広がり)
+                    const fAngle1 = angle - (15 * Math.PI / 180);
+                    const fAngle2 = angle + (15 * Math.PI / 180);
+                    ctx.fillStyle = 'rgba(255, 152, 0, 0.12)';
+                    ctx.beginPath();
+                    ctx.moveTo(ox, oy);
+                    ctx.arc(ox, oy, arrowR, fAngle1, fAngle2);
+                    ctx.closePath();
+                    ctx.fill();
+                }
+
                 ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.setLineDash(isDashed ? [5, 5] : []);
                 ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ex, ey); ctx.stroke(); ctx.setLineDash([]);
 
@@ -576,60 +796,102 @@
                 ctx.fill();
             }
 
-            // -100dBFSを最小(0.1)、0dBFSを最大(1.0)としてマッピング
             let audioLenFactor = (latestAudioLevel + 100) / 100;
-            audioLenFactor = Math.max(0.1, Math.min(1.0, audioLenFactor));
+            audioLenFactor = Math.max(0.15, Math.min(1.0, audioLenFactor));
 
-            drawArrow(latestAudioDoa, '#ff9800', true, audioLenFactor);
+            if (latestAudioDoa !== 65535) {
+                drawArrow(latestAudioDoa, '#ff9800', true, audioLenFactor, true);
+            }
             drawArrow(-latestSteer, '#4caf50', false, 1.0);
             
+            // ローバー原点マーク
             ctx.fillStyle = '#4caf50'; ctx.beginPath(); ctx.arc(ox, oy, 4, 0, 2 * Math.PI); ctx.fill();
         }
 
+        // ==========================================
+        // ② 累積相対マップ (Relative Odometry Map)
+        // ==========================================
         let odomX = 0, odomY = 0, odomTheta = Math.PI / 2;
+        let resetOffsetX = 0, resetOffsetY = 0, resetOffsetTheta = 0;
         let lastEspMs = null;
-        const pathHistory = []; const obstaclePoints = [];
-        const MAX_PATH = 1500; const MAX_OBSTACLES = 500;
-        const WHEEL_RADIUS_MM = 54; const TRACK_WIDTH_MM = 260;
+        let hasPoseBaseline = false;
+        const pathHistory = [];
+        const obstaclePoints = [];
+        const audioEvents = [];
+        const MAX_PATH = 2000;
+        const MAX_OBSTACLES = 600;
+        const MAX_AUDIO_EVENTS = 50;
 
         document.getElementById('btn-reset-odom').addEventListener('click', (e) => {
-            e.stopPropagation(); odomX = 0; odomY = 0; odomTheta = Math.PI / 2;
-            pathHistory.length = 0; obstaclePoints.length = 0; drawTrajectoryMap();
+            e.stopPropagation();
+            if (latestPose && latestPose.valid) {
+                resetOffsetX = latestPose.x_mm;
+                resetOffsetY = latestPose.y_mm;
+                resetOffsetTheta = (latestPose.theta_mrad / 1000.0);
+            } else {
+                resetOffsetX = 0; resetOffsetY = 0; resetOffsetTheta = 0;
+            }
+            odomX = 0; odomY = 0; odomTheta = Math.PI / 2;
+            pathHistory.length = 0; obstaclePoints.length = 0; audioEvents.length = 0;
+            drawTrajectoryMap();
         });
 
         function updateOdometry(d) {
-            if (!d.esp_ms) return;
-            if (lastEspMs === null) { lastEspMs = d.esp_ms; pathHistory.push({x: odomX, y: odomY}); return; }
+            latestPose = d.pose || null;
 
-            let dt = (d.esp_ms - lastEspMs) / 1000.0;
-            lastEspMs = d.esp_ms;
-            if (dt <= 0 || dt > 1.0) return;
+            if (d.pose && d.pose.valid) {
+                // CPU0 オドメトリ直接利用 (24-bit 剰余差分 + 相補フィルタ中点法)
+                if (!hasPoseBaseline) {
+                    resetOffsetX = d.pose.x_mm;
+                    resetOffsetY = d.pose.y_mm;
+                    resetOffsetTheta = (d.pose.theta_mrad / 1000.0);
+                    hasPoseBaseline = true;
+                }
 
-            const rpmL = (d.actuator?.left_encoder_rpm_x10 || 0) / 10;
-            const rpmR = (d.actuator?.right_encoder_rpm_x10 || 0) / 10;
-            const vL = (rpmL / 60.0) * (2 * Math.PI * WHEEL_RADIUS_MM);
-            const vR = (rpmR / 60.0) * (2 * Math.PI * WHEEL_RADIUS_MM);
-            const V = (vL + vR) / 2.0;
+                // CPU0座標系 (前: +X, 左: +Y) を 地図座標系 (北/上: +Y, 東/右: +X) にマッピング
+                const dx = d.pose.x_mm - resetOffsetX;
+                const dy = d.pose.y_mm - resetOffsetY;
+                const dTheta = (d.pose.theta_mrad / 1000.0) - resetOffsetTheta;
 
-            const validFlags = d.sensors ? Number(d.sensors.valid_flags) : 0;
-            if ((validFlags & 0x08) && d.sensors.gyro_dps_x10) {
-                const gyroYawRateDps = d.sensors.gyro_dps_x10[2] / 10.0;
-                const gyroYawRateRad = gyroYawRateDps * (Math.PI / 180.0);
-                // 実機のgyro Zは右回頭で正。地図の反時計回り正へ変換する。
-                odomTheta -= gyroYawRateRad * dt;
-            } else {
-                odomTheta += ((vR - vL) / TRACK_WIDTH_MM) * dt;
+                // 地図上のX(右) = -dy, 地図上のY(前) = dx, 方位θ = dTheta + 90° (上向きが0)
+                odomX = -dy;
+                odomY = dx;
+                odomTheta = dTheta + (Math.PI / 2);
+            } else if (d.esp_ms) {
+                // フォールバック: ブラウザ側RPM積分
+                if (lastEspMs === null) { lastEspMs = d.esp_ms; pathHistory.push({x: odomX, y: odomY}); return; }
+
+                let dt = (d.esp_ms - lastEspMs) / 1000.0;
+                lastEspMs = d.esp_ms;
+                if (dt <= 0 || dt > 1.0) return;
+
+                const rpmL = (d.actuator?.left_encoder_rpm_x10 || 0) / 10;
+                const rpmR = (d.actuator?.right_encoder_rpm_x10 || 0) / 10;
+                const vL = (rpmL / 60.0) * (2 * Math.PI * WHEEL_RADIUS_MM);
+                const vR = (rpmR / 60.0) * (2 * Math.PI * WHEEL_RADIUS_MM);
+                const V = (vL + vR) / 2.0;
+
+                const validFlags = d.sensors ? Number(d.sensors.valid_flags) : 0;
+                if ((validFlags & 0x08) && d.sensors.gyro_dps_x10) {
+                    const gyroYawRateDps = d.sensors.gyro_dps_x10[2] / 10.0;
+                    const gyroYawRateRad = gyroYawRateDps * (Math.PI / 180.0);
+                    odomTheta -= gyroYawRateRad * dt;
+                } else {
+                    odomTheta += ((vR - vL) / TRACK_WIDTH_MM) * dt;
+                }
+
+                odomX += V * Math.cos(odomTheta) * dt;
+                odomY += V * Math.sin(odomTheta) * dt;
             }
 
-            odomX += V * Math.cos(odomTheta) * dt;
-            odomY += V * Math.sin(odomTheta) * dt;
-
+            // 軌道履歴サンプリング (15mm移動ごと)
             const lastP = pathHistory[pathHistory.length - 1];
-            if (!lastP || Math.hypot(odomX - lastP.x, odomY - lastP.y) > 20) {
+            if (!lastP || Math.hypot(odomX - lastP.x, odomY - lastP.y) > 15) {
                 pathHistory.push({x: odomX, y: odomY});
                 if (pathHistory.length > MAX_PATH) pathHistory.shift();
             }
 
+            // ToF障害物ポイントのグローバルプロット
             if (d.sensors && Number(d.sensors.valid_flags) > 0) {
                 TOF_POSES.forEach((pose, index) => {
                     if (!isSensorValid(d.sensors, index)) return;
@@ -642,7 +904,7 @@
 
                         let isDuplicate = false;
                         for (let i = 0; i < obstaclePoints.length; i++) {
-                            if (Math.hypot(obstaclePoints[i].x - targetX, obstaclePoints[i].y - targetY) < 100) {
+                            if (Math.hypot(obstaclePoints[i].x - targetX, obstaclePoints[i].y - targetY) < 80) {
                                 isDuplicate = true;
                                 break;
                             }
@@ -654,6 +916,23 @@
                         }
                     }
                 });
+            }
+
+            // ③ 音響イベントの重畳記録 (VAD検出時)
+            if (d.audio && d.audio.vad && d.audio.doa_deg !== 65535) {
+                const doaRad = (d.audio.doa_deg * Math.PI) / 180.0;
+                const soundTheta = odomTheta - doaRad + (Math.PI / 2);
+                const lastEvt = audioEvents[audioEvents.length - 1];
+                if (!lastEvt || (d.esp_ms - lastEvt.ms) > 400) {
+                    audioEvents.push({
+                        x: odomX,
+                        y: odomY,
+                        theta: soundTheta,
+                        level: latestAudioLevel,
+                        ms: d.esp_ms
+                    });
+                    if (audioEvents.length > MAX_AUDIO_EVENTS) audioEvents.shift();
+                }
             }
         }
 
@@ -673,33 +952,59 @@
             const allPts = pathHistory.concat(obstaclePoints);
             allPts.forEach(p => { if(p.x < minX) minX = p.x; if(p.x > maxX) maxX = p.x; if(p.y < minY) minY = p.y; if(p.y > maxY) maxY = p.y; });
 
-            const pad = 1000; minX -= pad; maxX += pad; minY -= pad; maxY += pad;
+            const pad = 800; minX -= pad; maxX += pad; minY -= pad; maxY += pad;
             const drawScale = Math.min(w / (maxX - minX), h / (maxY - minY));
             const cx = w / 2, cy = h / 2, midX = (minX + maxX) / 2, midY = (minY + maxY) / 2;
             const toCanvasX = (x) => cx + (x - midX) * drawScale;
             const toCanvasY = (y) => cy - (y - midY) * drawScale;
 
-            ctx.strokeStyle = '#2a2a2a'; ctx.lineWidth = 1; ctx.beginPath();
+            // グリッド描画 (1mグリッド)
+            ctx.strokeStyle = '#282828'; ctx.lineWidth = 1; ctx.beginPath();
             const gridStep = 1000;
             for(let gx = Math.floor(minX/gridStep)*gridStep; gx <= maxX; gx+=gridStep) { ctx.moveTo(toCanvasX(gx), 0); ctx.lineTo(toCanvasX(gx), h); }
             for(let gy = Math.floor(minY/gridStep)*gridStep; gy <= maxY; gy+=gridStep) { ctx.moveTo(0, toCanvasY(gy)); ctx.lineTo(w, toCanvasY(gy)); }
             ctx.stroke();
 
+            // ③ 音響イベント重畳レイの描画 (オレンジ色)
+            audioEvents.forEach(evt => {
+                const age = (latestSensors?.age_ms || 0);
+                const rayLen = 300 * drawScale;
+                const ex = toCanvasX(evt.x) + Math.cos(evt.theta) * rayLen;
+                const ey = toCanvasY(evt.y) - Math.sin(evt.theta) * rayLen;
+                ctx.strokeStyle = 'rgba(255, 152, 0, 0.4)';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([2, 3]);
+                ctx.beginPath();
+                ctx.moveTo(toCanvasX(evt.x), toCanvasY(evt.y));
+                ctx.lineTo(ex, ey);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#ff9800';
+                ctx.beginPath();
+                ctx.arc(toCanvasX(evt.x), toCanvasY(evt.y), 2.5, 0, 2 * Math.PI);
+                ctx.fill();
+            });
+
+            // 走行軌跡ライン
             if (pathHistory.length > 1) {
-                ctx.strokeStyle = '#2196f3'; ctx.lineWidth = 2; ctx.beginPath();
+                ctx.strokeStyle = '#2196f3'; ctx.lineWidth = 2.5; ctx.beginPath();
                 ctx.moveTo(toCanvasX(pathHistory[0].x), toCanvasY(pathHistory[0].y));
                 for (let i = 1; i < pathHistory.length; i++) ctx.lineTo(toCanvasX(pathHistory[i].x), toCanvasY(pathHistory[i].y));
                 ctx.stroke();
             }
 
+            // 障害物プロット
             ctx.fillStyle = '#f44336';
-            obstaclePoints.forEach(p => { ctx.beginPath(); ctx.arc(toCanvasX(p.x), toCanvasY(p.y), 2, 0, 2 * Math.PI); ctx.fill(); });
+            obstaclePoints.forEach(p => { ctx.beginPath(); ctx.arc(toCanvasX(p.x), toCanvasY(p.y), 2.5, 0, 2 * Math.PI); ctx.fill(); });
 
-            const rx = toCanvasX(odomX), ry = toCanvasY(odomY), roverSize = 10;
+            // ローバー車体アイコン
+            const rx = toCanvasX(odomX), ry = toCanvasY(odomY), roverSize = 12;
             ctx.fillStyle = '#4caf50'; ctx.beginPath();
             ctx.moveTo(rx + Math.cos(odomTheta) * roverSize, ry - Math.sin(odomTheta) * roverSize);
-            ctx.lineTo(rx + Math.cos(odomTheta + 2.5) * roverSize, ry - Math.sin(odomTheta + 2.5) * roverSize);
-            ctx.lineTo(rx + Math.cos(odomTheta - 2.5) * roverSize, ry - Math.sin(odomTheta - 2.5) * roverSize);
+            ctx.lineTo(rx + Math.cos(odomTheta + 2.4) * (roverSize * 0.9), ry - Math.sin(odomTheta + 2.4) * (roverSize * 0.9));
+            ctx.lineTo(rx, ry);
+            ctx.lineTo(rx + Math.cos(odomTheta - 2.4) * (roverSize * 0.9), ry - Math.sin(odomTheta - 2.4) * (roverSize * 0.9));
+            ctx.closePath();
             ctx.fill();
         }
 
@@ -856,6 +1161,7 @@
             setVal('val_link_ready', d.think?.link_ready ? 'YES' : 'NO', d.think?.link_ready ? 'val-ok' : 'val-warn');
             setVal('val_faults', formatCpu0Faults(d.think?.faults), d.think?.faults > 0 ? 'val-error' : 'val-ok');
 
+            // 音響学習 & AI 照合テレメトリ
             const learningAvailable = d.learning !== undefined;
             const learning = d.learning || {};
             const storageResult = Number(learning.storage_result);
@@ -867,6 +1173,81 @@
             setVal('val_storage_result', storageResultAvailable
                 ? `${MRAM_RESULTS[storageResult] ?? 'UNKNOWN'} (${storageResult})` : '-',
                 storageResultAvailable ? (storageResult === 0 ? 'val-ok' : storageResult === 1 ? 'val-warn' : 'val-error') : '');
+            setVal('val_learning_samples', learningAvailable ? `${learning.samples ?? 0} / 5` : '-');
+
+            const recogAvailable = d.recognition !== undefined;
+            const recog = d.recognition || {};
+            const recogStatus = recog.status_name || (recog.status === 1 ? 'TARGET' : recog.status === 2 ? 'NOT_TARGET' : 'INDETERMINATE');
+            let recogClass = '';
+            if (recog.status === 1) recogClass = 'val-ok';
+            else if (recog.status === 2) recogClass = 'val-warn';
+            else if (recog.status === 3) recogClass = 'val-blue';
+
+            setVal('val_recog_status', recogAvailable ? recogStatus : '-', recogClass);
+            const simVal = recogAvailable && recog.similarity !== undefined ? Number(recog.similarity) : null;
+            const distVal = recogAvailable && recog.distance !== undefined ? Number(recog.distance) : null;
+            const threshVal = (recogAvailable && recog.threshold !== undefined) ? Number(recog.threshold) : (learningAvailable ? Number(learning.threshold) : null);
+
+            setVal('val_recog_similarity', simVal !== null ? `${simVal.toFixed(1)} %` : '-',
+                simVal !== null && threshVal !== null && distVal !== null ? (distVal <= threshVal ? 'val-ok' : 'val-warn') : '');
+            setVal('val_recog_distance', distVal !== null ? distVal.toFixed(3) : '-');
+            setVal('val_recog_threshold', threshVal !== null ? threshVal.toFixed(3) : '-');
+            setVal('val_recog_frames', recogAvailable ? `${recog.active_frames ?? 0} / 80` : '-');
+            setVal('val_recog_nearest', (recogAvailable && recog.nearest_sample != null && recog.nearest_sample >= 0) ? `#${recog.nearest_sample}` : '-');
+
+            const targetPeakBin = learning.target_peak_bin !== undefined ? learning.target_peak_bin : null;
+            const currentPeakBin = recog.current_peak_bin !== undefined ? recog.current_peak_bin : null;
+            setVal('val_recog_target_peak', targetPeakBin !== null ? getLogMelFreqLabel(targetPeakBin) : '-');
+            setVal('val_recog_current_peak', currentPeakBin !== null ? getLogMelFreqLabel(currentPeakBin) : '-');
+
+            // Dashboard の 音響照合ウィジェット更新
+            const badgeEl = document.getElementById('recogBadge');
+            const fillEl = document.getElementById('recogMeterFill');
+            const threshMarkerEl = document.getElementById('recogThreshMarker');
+            const simValEl = document.getElementById('recogSimVal');
+            const distValEl = document.getElementById('recogDistVal');
+            const threshValEl = document.getElementById('recogThreshVal');
+            const targetPeakValEl = document.getElementById('recogTargetPeakVal');
+            const currentPeakValEl = document.getElementById('recogCurrentPeakVal');
+
+            if (badgeEl) {
+                if (recog.status === 1) {
+                    badgeEl.textContent = 'TARGET MATCH';
+                    badgeEl.className = 'recog-badge target';
+                } else if (recog.status === 2) {
+                    badgeEl.textContent = 'NON-TARGET';
+                    badgeEl.className = 'recog-badge not-target';
+                } else if (recog.status === 3) {
+                    badgeEl.textContent = 'LISTENING';
+                    badgeEl.className = 'recog-badge listening';
+                } else {
+                    badgeEl.textContent = learning.active ? 'LEARNING' : 'IDLE';
+                    badgeEl.className = 'recog-badge idle';
+                }
+            }
+            if (simValEl) simValEl.textContent = simVal !== null ? `${simVal.toFixed(1)}%` : '-';
+            if (distValEl) distValEl.textContent = distVal !== null ? distVal.toFixed(3) : '-';
+            if (threshValEl) threshValEl.textContent = threshVal !== null ? threshVal.toFixed(3) : '-';
+            if (targetPeakValEl) targetPeakValEl.textContent = targetPeakBin !== null ? getLogMelFreqLabel(targetPeakBin) : '-';
+            if (currentPeakValEl) currentPeakValEl.textContent = currentPeakBin !== null ? getLogMelFreqLabel(currentPeakBin) : '-';
+
+            if (fillEl) {
+                const fillPct = Math.max(0, Math.min(100, simVal || 0));
+                fillEl.style.width = `${fillPct}%`;
+                if (recog.status === 1) {
+                    fillEl.classList.add('match');
+                } else {
+                    fillEl.classList.remove('match');
+                }
+            }
+            if (threshMarkerEl && threshVal !== null) {
+                // しきい値の類似度換算 (1.0 - threshold) * 100%
+                const threshPct = Math.max(0, Math.min(100, (1.0 - threshVal) * 100));
+                threshMarkerEl.style.left = `${threshPct}%`;
+                threshMarkerEl.style.display = 'block';
+            } else if (threshMarkerEl) {
+                threshMarkerEl.style.display = 'none';
+            }
 
             setVal('val_vad', d.audio?.vad ? 'DETECTED' : 'NONE', d.audio?.vad ? 'val-ok' : '');
             setVal('val_aud_crc', d.audio?.crc_errors, d.audio?.crc_errors > 0 ? 'val-error' : '');
@@ -881,9 +1262,6 @@
             setVal('val_dsp_ring', `${espAudio.ring_frames ?? 0} / 80`,
                 espAudio.ring_frames === 80 ? 'val-ok' : 'val-warn');
             setVal('val_dsp_frames', espAudio.feature_frames ?? 0);
-            setVal('val_dsp_last_us', `${espAudio.log_mel_block_last_us ?? 0} us`);
-            setVal('val_dsp_max_us', `${espAudio.log_mel_block_max_us ?? 0} us`,
-                espAudio.log_mel_block_max_us < 16000 ? 'val-ok' : 'val-error');
             setVal('val_dsp_overruns', espAudio.i2s_overruns ?? 0,
                 espAudio.i2s_overruns === 0 ? 'val-ok' : 'val-error');
 
@@ -922,6 +1300,25 @@
             setVal('val_act_valid', d.actuator?.valid ? 'VALID' : 'NO DATA', d.actuator?.valid ? 'val-ok' : 'val-error');
             setVal('val_act_age', d.actuator?.valid ? `${d.actuator?.age_ms} ms` : '-');
             setVal('val_act_faults', d.actuator?.faults ?? '-', d.actuator?.faults ? 'val-error' : 'val-ok');
+
+            if (d.pose && d.pose.valid) {
+                setVal('val_odom_pos', `${d.pose.x_mm}, ${d.pose.y_mm} mm`, 'val-ok');
+                const headingDeg = (d.pose.theta_mrad * 180.0 / Math.PI / 1000.0).toFixed(1);
+                setVal('val_odom_heading', `${headingDeg}° (${d.pose.theta_mrad} mrad)`, 'val-ok');
+                const omegaDeg = (d.pose.omega_mrad_s * 180.0 / Math.PI / 1000.0).toFixed(1);
+                setVal('val_odom_speed', `${d.pose.v_mm_s} mm/s, ${omegaDeg} °/s`);
+                setVal('val_odom_encoders', `${d.pose.left_encoder}, ${d.pose.right_encoder}`);
+                setVal('val_odom_bias', `${(d.pose.gyro_bias_dps_x10 / 10.0).toFixed(2)} dps`);
+                const odomState = d.pose.stationary ? 'STATIONARY' : (d.pose.calibrated ? 'CALIBRATED' : 'UNCALIBRATED');
+                setVal('val_odom_state', odomState, d.pose.calibrated ? 'val-ok' : 'val-warn');
+            } else {
+                setVal('val_odom_pos', '-');
+                setVal('val_odom_heading', '-');
+                setVal('val_odom_speed', '-');
+                setVal('val_odom_encoders', '-');
+                setVal('val_odom_bias', '-');
+                setVal('val_odom_state', 'NO DATA', 'val-warn');
+            }
         };
 
         const resizeObserver = new ResizeObserver(() => redrawAllCanvases());

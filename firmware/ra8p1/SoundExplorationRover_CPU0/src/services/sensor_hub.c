@@ -9,9 +9,11 @@
 #include "platform/i2c_bus.h"                              /* I2CバスAPI */
 #include "config/sensor_config.h"                          /* センサー設定値 */
 
+#define CPU0_SENSOR_TOF_HOLD_MAX_FRAMES     (3U)
 LOCAL BOOL sensor_hub_initialized;                          /**< 全センサー初期化状態 */
 LOCAL BOOL sensor_hub_filter_valid[CPU0_SENSOR_TOF_COUNT];  /**< ToFフィルタ初期値状態 */
 LOCAL UH sensor_hub_filtered_distance_mm[CPU0_SENSOR_TOF_COUNT]; /**< ToF平滑化値 */
+LOCAL UW sensor_hub_tof_drop_count[CPU0_SENSOR_TOF_COUNT];  /**< 連続測定失敗回数 */
 LOCAL sensor_diagnostics_t sensor_hub_diagnostics;     /**< 最終センサー診断 */
 
 LOCAL UB sensor_hub_tof_channel(tof_position_t position); /* ToF位置からTCAチャネル取得 */
@@ -217,6 +219,7 @@ EXPORT fsp_err_t sensor_hub_init(void) {
     for (UW index = 0U; index < CPU0_SENSOR_TOF_COUNT; index++) {
         sensor_hub_filter_valid[index] = FALSE;
         sensor_hub_filtered_distance_mm[index] = 0U;
+        sensor_hub_tof_drop_count[index] = 0U;
     }
 
     fsp_err_t err = i2c_bus_init();
@@ -336,6 +339,9 @@ EXPORT fsp_err_t sensor_hub_poll(sensor_snapshot_t * p_snapshot) {
         .last_error = (W) FSP_SUCCESS,
         .initialized = TRUE,
     };
+    for (UW i = 0U; i < CPU0_SENSOR_TOF_COUNT; i++) {
+        p_snapshot->tof_distance_mm[i] = CPU0_TOF_MAX_VALID_MM;
+    }
     sensor_hub_diagnostics_reset(&p_snapshot->diagnostics);
     fsp_err_t first_transport_error = FSP_SUCCESS;
 
@@ -359,7 +365,19 @@ EXPORT fsp_err_t sensor_hub_poll(sensor_snapshot_t * p_snapshot) {
         p_snapshot->diagnostics.tof_range_status[index] = reading.range_status;
         p_snapshot->diagnostics.tof_result[index] = (UB) reading.result;
         if (FSP_SUCCESS != read_err) {
-            p_snapshot->error_flags |= sensor_hub_tof_error_flag(position);
+            sensor_hub_tof_drop_count[index]++;
+            if ((sensor_hub_tof_drop_count[index] <= CPU0_SENSOR_TOF_HOLD_MAX_FRAMES) &&
+                sensor_hub_filter_valid[index]) {
+                /* 一時的なドロップ（3フレーム以内）は直前のフィルタ値をホールドして有効扱いを維持 */
+                p_snapshot->tof_distance_mm[index] = sensor_hub_filtered_distance_mm[index];
+                p_snapshot->valid_flags |= sensor_hub_tof_valid_flag(position);
+            } else {
+                /* 連続ドロップまたは初期値なし: 0mmではなくクリア距離(4000mm)を代入し、エラーフラグをセット */
+                sensor_hub_filter_valid[index] = FALSE;
+                p_snapshot->tof_distance_mm[index] = CPU0_TOF_MAX_VALID_MM;
+                p_snapshot->error_flags |= sensor_hub_tof_error_flag(position);
+            }
+
             if ((VL53L1X_RESULT_RANGE_STATUS_INVALID == reading.result) ||
                 (VL53L1X_RESULT_DISTANCE_INVALID == reading.result)) {
                 sensor_hub_record_failure(p_snapshot, CPU0_SENSOR_FAILURE_MEASUREMENT_INVALID,
@@ -380,6 +398,7 @@ EXPORT fsp_err_t sensor_hub_poll(sensor_snapshot_t * p_snapshot) {
             continue;
         }
 
+        sensor_hub_tof_drop_count[index] = 0U;
         if (sensor_hub_filter_valid[index]) {
             sensor_hub_filtered_distance_mm[index] =
                 (UH) (((3U * sensor_hub_filtered_distance_mm[index]) + reading.distance_mm) / 4U);

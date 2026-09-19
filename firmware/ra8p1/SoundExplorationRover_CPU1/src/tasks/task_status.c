@@ -232,7 +232,10 @@ LOCAL void task_status_entry(INT start_code, void * p_extended_information) {
             telemetry_elapsed_ms += elapsed;
             if ((telemetry_word_index >= ACTUATOR_IPC_STATUS_WORD_COUNT) &&
                 (telemetry_elapsed_ms >= CPU1_STATUS_TELEMETRY_PERIOD_MS)) {
-                telemetry_status = (actuator_status_t){.sequence_number = telemetry_sequence};
+                telemetry_status = (actuator_status_t){
+                    .sequence_number = telemetry_sequence,
+                    .status_uptime_ms = (UW) now_ms,
+                };
                 actuator_service_status_get(&telemetry_status);
                 telemetry_word_index = 0U;
                 /* 取り逃した周期をまとめて捨て、古い状態の連続送信を避ける。 */
@@ -243,9 +246,10 @@ LOCAL void task_status_entry(INT start_code, void * p_extended_information) {
                 snapshot_previous_ms = now_ms;
                 g_task_status_snapshot_count++;
             }
-            if (telemetry_word_index < ACTUATOR_IPC_STATUS_WORD_COUNT) {
+            while (telemetry_word_index < ACTUATOR_IPC_STATUS_WORD_COUNT) {
                 /* FIFO満杯時は同じ語を次の起床で再試行し、途中のsnapshotを上書きしない。 */
-                if (FSP_SUCCESS == actuator_ipc_server_send_status_word(&telemetry_status, telemetry_word_index)) {
+                fsp_err_t const send_err = actuator_ipc_server_send_status_word(&telemetry_status, telemetry_word_index);
+                if (FSP_SUCCESS == send_err) {
                     telemetry_word_index++;
                     if (telemetry_word_index >= ACTUATOR_IPC_STATUS_WORD_COUNT) {
                         telemetry_sequence = (telemetry_sequence + 1U) & ACTUATOR_IPC_SEQUENCE_MASK;
@@ -253,6 +257,7 @@ LOCAL void task_status_entry(INT start_code, void * p_extended_information) {
                     }
                 } else {
                     g_task_status_send_retry_count++;
+                    break;
                 }
             }
         }

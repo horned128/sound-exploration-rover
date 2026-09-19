@@ -36,6 +36,9 @@
 
 /* 接続先PCと同じLANの値を設定する。空文字の間はWi-Fiを開始しない。 */
 #define APP_WIFI_SSID                      "Fight Club"
+
+/* 接続先PCと同じLANの値を設定する。空文字の間はWi-Fiを開始しない。 */
+#define APP_WIFI_SSID                      "Fight Club"
 #define APP_WIFI_PASSWORD                  "soap1999"
 #define APP_UDP_DESTINATION_IPV4           "192.168.0.232"
 #define APP_UDP_DESTINATION_PORT           (5005U)
@@ -44,7 +47,7 @@
 
 #define APP_AUDIO_TASK_STACK_SIZE          (6144U)
 #define APP_FRONTEND_TASK_STACK_SIZE       (4096U)
-#define APP_TELEMETRY_TASK_STACK_SIZE      (5120U)
+#define APP_TELEMETRY_TASK_STACK_SIZE      (8192U)
 #define APP_AUDIO_TASK_PRIORITY            (6U)
 #define APP_FRONTEND_TASK_PRIORITY         (5U)
 #define APP_TELEMETRY_TASK_PRIORITY        (4U)

@@ -24,7 +24,7 @@
 #include <string.h>                                         /* 文字列・メモリー操作API */
 
 #define WIFI_TELEMETRY_CONNECTED_BIT       (1U << 0)
-#define WIFI_TELEMETRY_JSON_CAPACITY       (1600U)
+#define WIFI_TELEMETRY_JSON_CAPACITY       (2048U)
 
 static EventGroupHandle_t s_wifi_event_group;               /**< Wi-Fi接続状態イベント */
 static struct sockaddr_in s_destination;                    /**< UDP送信先IPv4アドレス */
@@ -37,6 +37,7 @@ static int wifi_telemetry_flag(uint8_t flags, uint8_t mask);/* フラグをJSON�
 static char const * wifi_telemetry_think_state(uint8_t state); /* 思考状態名取得 */
 static char const * wifi_telemetry_autonomy_mode(uint8_t mode); /* 自律モード名取得 */
 static char const * wifi_telemetry_sensor_rule(uint8_t rule); /* センサー走行ルール名取得 */
+static char const * wifi_telemetry_infer_status(uint8_t status); /* 音響認識判定名取得 */
 /* ESP-IDF Wi-Fi/IPイベント処理 */
 static void wifi_telemetry_event_handler(void * argument, esp_event_base_t event_base, int32_t event_id,
                                          void * event_data);
@@ -45,9 +46,11 @@ static esp_err_t wifi_telemetry_station_start(void);        /* Wi-Fiステーシ
 static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rover_telemetry_t const * telemetry,
                                       acoustic_frame_t const * frame,
                                       acoustic_actuator_telemetry_t const * actuator_telemetry,
-                                      bool actuator_frame_valid, uint32_t received_at_ms,
-                                      uint32_t actuator_received_at_ms, int rssi_dbm,
-                                      audio_capture_snapshot_t const * esp_audio,
+                                      bool actuator_frame_valid,
+                                      acoustic_pose_telemetry_t const * pose_telemetry,
+                                      bool pose_frame_valid, uint32_t received_at_ms,
+                                      uint32_t actuator_received_at_ms, uint32_t pose_received_at_ms,
+                                      int rssi_dbm, audio_capture_snapshot_t const * esp_audio,
                                       uint32_t feature_fps_x100);
 /* 接続状態JSON整形 */
 static int wifi_telemetry_format_heartbeat(char * json, size_t capacity, int rssi_dbm,
@@ -108,6 +111,18 @@ static char const * wifi_telemetry_sensor_rule(uint8_t rule) {
         "PIVOT_LEFT", "PIVOT_RIGHT", "BACKUP",
     };
     return (rule < (sizeof(names) / sizeof(names[0]))) ? names[rule] : "UNKNOWN";
+}
+
+/** =================================================================*
+ * @brief  音響認識判定名を取得
+ * @param[in] status 音響認識判定値
+ * @return JSONに記録する判定名
+ * ================================================================= */
+static char const * wifi_telemetry_infer_status(uint8_t status) {
+    static char const * const names[] = {
+        "INVALID", "INDETERMINATE", "NOT_READY", "NOT_TARGET", "TARGET",
+    };
+    return (status < (sizeof(names) / sizeof(names[0]))) ? names[status] : "UNKNOWN";
 }
 
 /** =================================================================*
@@ -198,8 +213,11 @@ static esp_err_t wifi_telemetry_station_start(void) {
  * @param[in] frame 受信フレーム情報
  * @param[in] actuator_telemetry CPU1から返された実出力状態
  * @param[in] actuator_frame_valid 実出力フレーム受信済みならtrue
+ * @param[in] pose_telemetry 姿勢推定テレメトリ
+ * @param[in] pose_frame_valid 姿勢推定フレーム受信済みならtrue
  * @param[in] received_at_ms ESP32での受信時刻[ms]
  * @param[in] actuator_received_at_ms 実出力フレーム受信時刻[ms]
+ * @param[in] pose_received_at_ms 姿勢推定フレーム受信時刻[ms]
  * @param[in] rssi_dbm Wi-Fi受信強度[dBm]
  * @param[in] esp_audio ESP32S3の音声DSP診断値
  * @param[in] feature_fps_x100 特徴量生成レート[fps x100]
@@ -208,9 +226,11 @@ static esp_err_t wifi_telemetry_station_start(void) {
 static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rover_telemetry_t const * telemetry,
                                       acoustic_frame_t const * frame,
                                       acoustic_actuator_telemetry_t const * actuator_telemetry,
-                                      bool actuator_frame_valid, uint32_t received_at_ms,
-                                      uint32_t actuator_received_at_ms, int rssi_dbm,
-                                      audio_capture_snapshot_t const * esp_audio,
+                                      bool actuator_frame_valid,
+                                      acoustic_pose_telemetry_t const * pose_telemetry,
+                                      bool pose_frame_valid, uint32_t received_at_ms,
+                                      uint32_t actuator_received_at_ms, uint32_t pose_received_at_ms,
+                                      int rssi_dbm, audio_capture_snapshot_t const * esp_audio,
                                       uint32_t feature_fps_x100) {
     uint32_t const now_ms = wifi_telemetry_uptime_ms();
     uint8_t const flags = telemetry->flags;
@@ -219,6 +239,17 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
                                          ? actuator_telemetry->actuator_status_age_ms +
                                                (now_ms - actuator_received_at_ms)
                                          : UINT32_MAX;
+    bool const pose_valid = pose_frame_valid && ((pose_telemetry->flags & ACOUSTIC_POSE_FLAG_CALIBRATED) != 0U);
+    uint32_t const pose_age_ms = pose_frame_valid ? (now_ms - pose_received_at_ms) : UINT32_MAX;
+
+    float const cosine_dist = (0xFFFFU == telemetry->infer_cosine_dist_x1000)
+                                  ? -1.0f
+                                  : ((float) telemetry->infer_cosine_dist_x1000 / 1000.0f);
+    float const threshold = (float) telemetry->infer_threshold_x1000 / 1000.0f;
+    float const similarity = (float) telemetry->infer_similarity_permille / 10.0f;
+    int const nearest_sample = (255U == telemetry->infer_nearest_sample) ? -1 : (int) telemetry->infer_nearest_sample;
+    int const target_peak = (255U == telemetry->infer_target_peak_bin) ? -1 : (int) telemetry->infer_target_peak_bin;
+    int const current_peak = (255U == telemetry->infer_current_peak_bin) ? -1 : (int) telemetry->infer_current_peak_bin;
 
     return snprintf(
         json, capacity,
@@ -229,7 +260,6 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         "\"esp_audio\":{\"valid\":%d,\"pcm_frames\":%lu,"
         "\"feature_frames\":%lu,\"feature_fps_x100\":%lu,"
         "\"ring_frames\":%u,\"self_test_pass\":%s,"
-        "\"log_mel_block_last_us\":%lu,\"log_mel_block_max_us\":%lu,"
         "\"i2s_overruns\":%lu},"
         "\"usb\":{\"mounted\":%d,\"rx_drops\":%lu,"
         "\"cpu_ms\":%lu,\"cpu_seq\":%lu,\"state\":%u,"
@@ -237,32 +267,39 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         "\"audio\":{\"observation\":%d,\"sequence\":%lu,"
         "\"age_ms\":%lu,\"doa_deg\":%u,"
         "\"level_dbfs_x100\":%d,\"peak_dbfs_x100\":%d,"
-        "\"vad\":%u,\"xvf_status\":%u,\"xvf_raw_status\":%u,"
+        "\"vad\":%u,\"xvf_status\":%u,"
         "\"doa_fallback\":%d,\"flags\":%u,"
-        "\"pcm_frames\":%lu,\"crc_errors\":%lu},"
+        "\"crc_errors\":%lu},"
         "\"think\":{\"state\":%u,\"name\":\"%s\","
         "\"link_ready\":%d,\"new_observation\":%d,"
         "\"faults\":%lu,\"steering_deg\":%d},"
         "\"command\":{\"left_rpm\":%d,\"right_rpm\":%d,"
-        "\"servo_deg\":[%d,%d,%d,%d],\"enable\":%d,"
-        "\"emergency_stop\":%d,\"stale\":%d,"
-        "\"target_age_ms\":%lu,\"sequence\":%lu,"
-        "\"sent\":%lu,\"last_error\":%ld},"
+        "\"enable\":%d,\"emergency_stop\":%d,\"stale\":%d,"
+        "\"target_age_ms\":%lu,\"sequence\":%lu,\"last_error\":%ld},"
         "\"sensors\":{\"mode\":%u,\"mode_name\":\"%s\",\"rule\":%u,\"rule_name\":\"%s\"," 
         "\"valid_flags\":%u,\"tof_mm\":[%u,%u,%u],\"accel_mg\":[%d,%d,%d],"
         "\"gyro_dps_x10\":[%d,%d,%d],\"error_flags\":%u,\"last_error\":%ld,\"age_ms\":%lu},"
-        "\"learning\":{\"active\":%d,\"storage_valid\":%d,\"storage_result\":%u},"
+        "\"learning\":{\"active\":%d,\"storage_valid\":%d,\"storage_result\":%u,"
+        "\"samples\":%u,\"threshold\":%.3f,\"target_peak_bin\":%d},"
+        "\"recognition\":{\"status\":%u,\"status_name\":\"%s\",\"distance\":%.3f,"
+        "\"threshold\":%.3f,\"similarity\":%.1f,\"active_frames\":%u,\"nearest_sample\":%d,"
+        "\"current_peak_bin\":%d},"
         "\"actuator\":{\"valid\":%u,\"age_ms\":%lu,"
         "\"status_sequence\":%lu,\"applied_command_sequence\":%lu,"
         "\"faults\":%u,\"left_duty_permille\":%d,"
         "\"right_duty_permille\":%d,\"left_encoder_rpm_x10\":%d,"
-        "\"right_encoder_rpm_x10\":%d}}\n",
+        "\"right_encoder_rpm_x10\":%d},"
+        "\"pose\":{\"valid\":%u,\"age_ms\":%lu,"
+        "\"x_mm\":%ld,\"y_mm\":%ld,\"theta_mrad\":%ld,"
+        "\"v_mm_s\":%ld,\"omega_mrad_s\":%ld,"
+        "\"left_encoder\":%ld,\"right_encoder\":%ld,"
+        "\"gyro_bias_dps_x10\":%d,\"stationary\":%u,\"calibrated\":%u,"
+        "\"uptime_ms\":%lu}}\n",
         (unsigned long) now_ms, (unsigned long) (now_ms - received_at_ms), rssi_dbm,
         (unsigned long) s_wifi_reconnect_count, (unsigned long) s_udp_send_count, (unsigned long) s_udp_error_count,
         esp_audio->valid ? 1 : 0, (unsigned long) esp_audio->frame_count,
         (unsigned long) esp_audio->feature_frame_count, (unsigned long) feature_fps_x100,
         (unsigned int) esp_audio->feature_ring_frames, esp_audio->log_mel_self_test_pass ? "true" : "false",
-        (unsigned long) esp_audio->log_mel_block_last_us, (unsigned long) esp_audio->log_mel_block_max_us,
         (unsigned long) esp_audio->overrun_count,
         usb_link_is_mounted() ? 1 : 0, (unsigned long) usb_link_rx_drop_count(), (unsigned long) frame->uptime_ms,
         (unsigned long) frame->sequence, (unsigned int) telemetry->usb_state,
@@ -271,20 +308,19 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         wifi_telemetry_flag(flags, ACOUSTIC_TELEMETRY_FLAG_OBSERVATION),
         (unsigned long) telemetry->observation_sequence, (unsigned long) telemetry->observation_age_ms,
         (unsigned int) telemetry->doa_deg, telemetry->level_dbfs_x100, telemetry->peak_dbfs_x100,
-        (unsigned int) telemetry->vad, (unsigned int) telemetry->xvf_status, (unsigned int) telemetry->xvf_raw_status,
+        (unsigned int) telemetry->vad, (unsigned int) telemetry->xvf_status,
         wifi_telemetry_flag(telemetry->audio_flags, ACOUSTIC_AUDIO_FLAG_DOA_FALLBACK),
-        (unsigned int) telemetry->audio_flags, (unsigned long) telemetry->audio_frame_count,
+        (unsigned int) telemetry->audio_flags,
         (unsigned long) telemetry->audio_crc_error_count, (unsigned int) telemetry->think_state,
         wifi_telemetry_think_state(telemetry->think_state),
         wifi_telemetry_flag(flags, ACOUSTIC_TELEMETRY_FLAG_LINK_READY),
         wifi_telemetry_flag(flags, ACOUSTIC_TELEMETRY_FLAG_NEW_OBSERVATION), (unsigned long) telemetry->fault_flags,
         telemetry->steering_deg, telemetry->left_target_rpm, telemetry->right_target_rpm,
-        telemetry->servo_target_deg[0], telemetry->servo_target_deg[1], telemetry->servo_target_deg[2],
-        telemetry->servo_target_deg[3], wifi_telemetry_flag(flags, ACOUSTIC_TELEMETRY_FLAG_ACTUATOR_ENABLE),
+        wifi_telemetry_flag(flags, ACOUSTIC_TELEMETRY_FLAG_ACTUATOR_ENABLE),
         wifi_telemetry_flag(flags, ACOUSTIC_TELEMETRY_FLAG_EMERGENCY_STOP),
         wifi_telemetry_flag(flags, ACOUSTIC_TELEMETRY_FLAG_COMMAND_STALE),
         (unsigned long) telemetry->command_target_age_ms, (unsigned long) telemetry->command_sequence,
-        (unsigned long) telemetry->command_send_count, (long) telemetry->command_last_error,
+        (long) telemetry->command_last_error,
         (unsigned int) telemetry->autonomy_mode, wifi_telemetry_autonomy_mode(telemetry->autonomy_mode),
         (unsigned int) telemetry->sensor_rule, wifi_telemetry_sensor_rule(telemetry->sensor_rule),
         (unsigned int) telemetry->sensor_valid_flags, (unsigned int) telemetry->tof_distance_mm[0],
@@ -295,12 +331,24 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         wifi_telemetry_flag(telemetry->sensor_reserved, ACOUSTIC_TELEMETRY_LEARNING_MODE),
         wifi_telemetry_flag(telemetry->sensor_reserved, ACOUSTIC_TELEMETRY_STORAGE_VALID),
         (unsigned int) (telemetry->sensor_reserved & ACOUSTIC_TELEMETRY_STORAGE_RESULT_MASK),
+        (unsigned int) telemetry->infer_sample_count, (double) threshold, target_peak,
+        (unsigned int) telemetry->infer_status, wifi_telemetry_infer_status(telemetry->infer_status),
+        (double) cosine_dist, (double) threshold, (double) similarity,
+        (unsigned int) telemetry->infer_active_frames, nearest_sample, current_peak,
         actuator_valid ? 1U : 0U, (unsigned long) actuator_age_ms,
         (unsigned long) actuator_telemetry->actuator_status_sequence,
         (unsigned long) actuator_telemetry->actuator_applied_command_sequence,
         (unsigned int) actuator_telemetry->fault_flags, actuator_telemetry->actuator_left_duty_permille,
         actuator_telemetry->actuator_right_duty_permille, actuator_telemetry->actuator_left_encoder_rpm_x10,
-        actuator_telemetry->actuator_right_encoder_rpm_x10);
+        actuator_telemetry->actuator_right_encoder_rpm_x10,
+        pose_valid ? 1U : 0U, (unsigned long) pose_age_ms,
+        (long) pose_telemetry->x_mm, (long) pose_telemetry->y_mm, (long) pose_telemetry->theta_mrad,
+        (long) pose_telemetry->v_mm_s, (long) pose_telemetry->omega_mrad_s,
+        (long) pose_telemetry->left_encoder_count, (long) pose_telemetry->right_encoder_count,
+        (int) pose_telemetry->gyro_bias_dps_x10,
+        ((pose_telemetry->flags & ACOUSTIC_POSE_FLAG_STATIONARY) != 0U) ? 1U : 0U,
+        ((pose_telemetry->flags & ACOUSTIC_POSE_FLAG_CALIBRATED) != 0U) ? 1U : 0U,
+        (unsigned long) pose_telemetry->uptime_ms);
 }
 
 /** =================================================================*
@@ -324,7 +372,6 @@ static int wifi_telemetry_format_heartbeat(char * json, size_t capacity, int rss
                     "\"esp_audio\":{\"valid\":%d,\"pcm_frames\":%lu,"
                     "\"feature_frames\":%lu,\"feature_fps_x100\":%lu,"
                     "\"ring_frames\":%u,\"self_test_pass\":%s,"
-                    "\"log_mel_block_last_us\":%lu,\"log_mel_block_max_us\":%lu,"
                     "\"i2s_overruns\":%lu}}\n",
                     (unsigned long) wifi_telemetry_uptime_ms(), rssi_dbm, (unsigned long) s_wifi_reconnect_count,
                     (unsigned long) s_udp_send_count, (unsigned long) s_udp_error_count, usb_link_is_mounted() ? 1 : 0,
@@ -332,8 +379,7 @@ static int wifi_telemetry_format_heartbeat(char * json, size_t capacity, int rss
                     (unsigned long) esp_audio->frame_count, (unsigned long) esp_audio->feature_frame_count,
                     (unsigned long) feature_fps_x100, (unsigned int) esp_audio->feature_ring_frames,
                     esp_audio->log_mel_self_test_pass ? "true" : "false",
-                    (unsigned long) esp_audio->log_mel_block_last_us,
-                    (unsigned long) esp_audio->log_mel_block_max_us, (unsigned long) esp_audio->overrun_count);
+                    (unsigned long) esp_audio->overrun_count);
 }
 
 /** =================================================================*
@@ -347,14 +393,17 @@ static void wifi_telemetry_task(void * argument) {
     acoustic_protocol_parser_t parser;
     acoustic_rover_telemetry_t latest_telemetry = {0};
     acoustic_actuator_telemetry_t latest_actuator_telemetry = {0};
+    acoustic_pose_telemetry_t latest_pose_telemetry = {0};
     acoustic_frame_t latest_frame = {0};
     uint32_t received_at_ms = 0U;
     uint32_t actuator_received_at_ms = 0U;
+    uint32_t pose_received_at_ms = 0U;
     uint32_t last_send_ms = 0U;
     uint32_t previous_feature_frame_count = 0U;
     uint32_t previous_feature_sample_ms = 0U;
     bool telemetry_valid = false;
     bool actuator_frame_valid = false;
+    bool pose_frame_valid = false;
     int socket_fd = -1;
     uint8_t rx_data[CONFIG_TINYUSB_CDC_RX_BUFSIZE];
     acoustic_protocol_parser_init(&parser);
@@ -376,6 +425,9 @@ static void wifi_telemetry_task(void * argument) {
                     } else if (acoustic_protocol_decode_actuator_telemetry(&frame, &latest_actuator_telemetry)) {
                         actuator_received_at_ms = wifi_telemetry_uptime_ms();
                         actuator_frame_valid = true;
+                    } else if (acoustic_protocol_decode_pose_telemetry(&frame, &latest_pose_telemetry)) {
+                        pose_received_at_ms = wifi_telemetry_uptime_ms();
+                        pose_frame_valid = true;
                     }
                 }
             }
@@ -420,21 +472,23 @@ static void wifi_telemetry_task(void * argument) {
         previous_feature_frame_count = esp_audio.feature_frame_count;
         previous_feature_sample_ms = now_ms;
 
-        char json[WIFI_TELEMETRY_JSON_CAPACITY];
+        static char s_telemetry_json[WIFI_TELEMETRY_JSON_CAPACITY];
         int const json_length = telemetry_valid
                                     ? wifi_telemetry_format_json(
-                                          json, sizeof(json), &latest_telemetry, &latest_frame,
-                                          &latest_actuator_telemetry, actuator_frame_valid, received_at_ms,
-                                          actuator_received_at_ms, rssi_dbm, &esp_audio, feature_fps_x100)
-                                    : wifi_telemetry_format_heartbeat(json, sizeof(json), rssi_dbm, &esp_audio,
+                                          s_telemetry_json, sizeof(s_telemetry_json), &latest_telemetry, &latest_frame,
+                                          &latest_actuator_telemetry, actuator_frame_valid,
+                                          &latest_pose_telemetry, pose_frame_valid,
+                                          received_at_ms, actuator_received_at_ms, pose_received_at_ms,
+                                          rssi_dbm, &esp_audio, feature_fps_x100)
+                                    : wifi_telemetry_format_heartbeat(s_telemetry_json, sizeof(s_telemetry_json), rssi_dbm, &esp_audio,
                                                                       feature_fps_x100);
-        if ((json_length <= 0) || ((size_t) json_length >= sizeof(json))) {
+        if ((json_length <= 0) || ((size_t) json_length >= sizeof(s_telemetry_json))) {
             s_udp_error_count++;
             continue;
         }
 
         int const sent =
-            sendto(socket_fd, json, (size_t) json_length, 0, (struct sockaddr *) &s_destination, sizeof(s_destination));
+            sendto(socket_fd, s_telemetry_json, (size_t) json_length, 0, (struct sockaddr *) &s_destination, sizeof(s_destination));
         if (sent == json_length) {
             s_udp_send_count++;
         } else {

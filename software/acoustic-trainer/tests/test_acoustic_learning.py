@@ -97,7 +97,7 @@ class ActiveFrameIdentifierReferenceTest(unittest.TestCase):
         self.assertFalse(is_active_frame(equal_threshold))
         self.assertTrue(is_active_frame(_active_frame()))
 
-    def test_summary_is_96_int8_values_and_ignores_inactive_frames(self) -> None:
+    def test_summary_is_192_int8_values_with_2_slots(self) -> None:
         source = _patch(MIN_ACTIVE_FRAMES)
         summary = active_summary(source)
         self.assertIsNotNone(summary)
@@ -106,9 +106,42 @@ class ActiveFrameIdentifierReferenceTest(unittest.TestCase):
         self.assertEqual(summary.dtype, np.int8)
         expected_active = source[:MIN_ACTIVE_FRAMES]
         expected_mean = np.rint(np.mean(expected_active, axis=0)).astype(np.int8)
+        # Slot 1: 有効フレーム
         np.testing.assert_array_equal(summary[:FEATURE_BINS], expected_mean)
         np.testing.assert_array_equal(summary[FEATURE_BINS : 2 * FEATURE_BINS], np.array([1] * FEATURE_BINS, dtype=np.int8))
-        np.testing.assert_array_equal(summary[2 * FEATURE_BINS :], np.max(expected_active, axis=0))
+        np.testing.assert_array_equal(summary[2 * FEATURE_BINS : 3 * FEATURE_BINS], np.max(expected_active, axis=0))
+        # Slot 2: 能動フレームなし（全ゼロ）
+        np.testing.assert_array_equal(summary[3 * FEATURE_BINS :], np.zeros(FEATURE_BINS * 3, dtype=np.int8))
+
+    def test_slot_division_distinguishes_rhythm_patterns(self) -> None:
+        # パターン1: 前半のみ発音（Slot 1のみ能動、短音）
+        p1 = np.zeros((80, FEATURE_BINS), dtype=np.int8)
+        for i in range(15):
+            p1[i] = _active_frame()
+        # パターン2: 後半のみ発音（Slot 2のみ能動）
+        p2 = np.zeros((80, FEATURE_BINS), dtype=np.int8)
+        for i in range(40, 55):
+            p2[i] = _active_frame()
+        # パターン3: 前半・後半両方発音（連続音/断続音）
+        p3 = np.zeros((80, FEATURE_BINS), dtype=np.int8)
+        for i in range(10):
+            p3[i] = _active_frame()
+        for i in range(40, 50):
+            p3[i] = _active_frame()
+
+        s1 = active_summary(p1)
+        s2 = active_summary(p2)
+        s3 = active_summary(p3)
+        assert s1 is not None and s2 is not None and s3 is not None
+
+        # スペクトルは同一だが時間配置が異なるため、コサイン距離が有意に離れる
+        dist_1_2 = cosine_distance(s1, s2)
+        dist_1_3 = cosine_distance(s1, s3)
+        assert dist_1_2 is not None and dist_1_3 is not None
+        # 直交している（前半のみ vs 後半のみ）
+        self.assertAlmostEqual(dist_1_2, 1.0, places=4)
+        # 短音 vs 連続音
+        self.assertGreater(dist_1_3, 0.25)
 
     def test_insufficient_active_frames_is_indeterminate_not_not_target(self) -> None:
         samples = np.stack([active_summary(_patch(MIN_ACTIVE_FRAMES))] * 5)
@@ -121,14 +154,22 @@ class ActiveFrameIdentifierReferenceTest(unittest.TestCase):
         reference = active_summary(_patch(MIN_ACTIVE_FRAMES, offset=0))
         assert reference is not None
         samples = np.stack([reference] * 5)
-        self.assertEqual(leave_one_out_threshold(samples), 0.0)
+        # 下限0.08にクランプされる
+        self.assertAlmostEqual(leave_one_out_threshold(samples), 0.08, places=4)
         target = identify(_patch(MIN_ACTIVE_FRAMES, offset=0), samples)
         self.assertEqual(target.status, Identification.TARGET)
         self.assertEqual(target.minimum_distance, 0.0)
 
-        non_target = identify(_patch(MIN_ACTIVE_FRAMES, offset=50), samples)
+        # 異なる周波数帯域（低周波中心）の非対象音
+        other_patch = np.zeros((80, FEATURE_BINS), dtype=np.int8)
+        for i in range(MIN_ACTIVE_FRAMES):
+            frame = np.zeros(FEATURE_BINS, dtype=np.int8)
+            frame[3] = 80
+            frame[4] = -80
+            other_patch[i] = frame
+        non_target = identify(other_patch, samples)
         self.assertEqual(non_target.status, Identification.NOT_TARGET)
-        self.assertGreater(non_target.minimum_distance or 0.0, 0.0)
+        self.assertGreater(non_target.minimum_distance or 0.0, 0.2)
 
     def test_not_ready_and_zero_vector_are_never_silently_accepted(self) -> None:
         reference = active_summary(_patch(MIN_ACTIVE_FRAMES))

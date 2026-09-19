@@ -34,6 +34,7 @@ typedef struct st_obstacle_avoidance_output {
 
 EXPORT void obstacle_avoidance_controller_init(void);       /* ルール判断初期化 */
 EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snapshot,
-                                                BOOL fault_active, UW now_ms, obstacle_avoidance_output_t * p_output);
+                                                BOOL fault_active, UW now_ms, H target_steering_deg,
+                                                obstacle_avoidance_output_t * p_output);
 
 #endif /* SEROV_CPU0_OBSTACLE_AVOIDANCE_CONTROLLER_H */

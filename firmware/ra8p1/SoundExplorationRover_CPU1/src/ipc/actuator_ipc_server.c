@@ -100,6 +100,15 @@ EXPORT fsp_err_t actuator_ipc_server_send_status_word(const actuator_status_t * 
         return actuator_ipc_server_send_word(actuator_ipc_make_word(
             ACTUATOR_IPC_STATUS_APPLIED_SEQUENCE, p_status->applied_command_sequence & ACTUATOR_IPC_SEQUENCE_MASK));
     case 6U:
+        return actuator_ipc_server_send_word(actuator_ipc_make_word(
+            ACTUATOR_IPC_STATUS_LEFT_ENCODER_COUNT, p_status->left_encoder_count & ACTUATOR_IPC_PAYLOAD_MASK));
+    case 7U:
+        return actuator_ipc_server_send_word(actuator_ipc_make_word(
+            ACTUATOR_IPC_STATUS_RIGHT_ENCODER_COUNT, p_status->right_encoder_count & ACTUATOR_IPC_PAYLOAD_MASK));
+    case 8U:
+        return actuator_ipc_server_send_word(actuator_ipc_make_word(
+            ACTUATOR_IPC_STATUS_UPTIME_MS, p_status->status_uptime_ms & ACTUATOR_IPC_PAYLOAD_MASK));
+    case 9U:
         /* 最後のsequenceワードでCPU0側のスナップショットを確定する。 */
         return actuator_ipc_server_send_word(actuator_ipc_make_status_sequence_word(p_status->sequence_number));
     default:

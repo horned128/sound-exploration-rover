@@ -223,15 +223,26 @@ EXPORT fsp_err_t vl53l1x_read_distance(vl53l1x_reading_t * p_reading) {
         }
         return err;
     }
-    if (VL53L1X_RANGE_STATUS_VALID != p_reading->range_status) {
-        p_reading->result = VL53L1X_RESULT_RANGE_STATUS_INVALID;
-        return FSP_ERR_INVALID_DATA;
-    }
-    if ((p_reading->distance_mm < CPU0_TOF_MIN_VALID_MM) || (p_reading->distance_mm > CPU0_TOF_MAX_VALID_MM)) {
-        p_reading->result = VL53L1X_RESULT_DISTANCE_INVALID;
-        return FSP_ERR_INVALID_DATA;
+
+    /* 遠方・反射なし（Signal Fail(4) / Wrap Target(7) / Out of Bounds(5) / 4000mm超）は
+     * 障害物が存在しないクリアな空間とみなし、最大距離(4000mm)として正常扱いとする。 */
+    if ((4U == p_reading->range_status) || (7U == p_reading->range_status) ||
+        (5U == p_reading->range_status) || (p_reading->distance_mm > CPU0_TOF_MAX_VALID_MM)) {
+        p_reading->distance_mm = CPU0_TOF_MAX_VALID_MM;
+        p_reading->result = VL53L1X_RESULT_VALID;
+        return FSP_SUCCESS;
     }
 
-    p_reading->result = VL53L1X_RESULT_VALID;
-    return FSP_SUCCESS;
+    /* 正常測距 (Range Status 9) */
+    if (VL53L1X_RANGE_STATUS_VALID == p_reading->range_status) {
+        if (p_reading->distance_mm < CPU0_TOF_MIN_VALID_MM) {
+            p_reading->distance_mm = CPU0_TOF_MIN_VALID_MM;
+        }
+        p_reading->result = VL53L1X_RESULT_VALID;
+        return FSP_SUCCESS;
+    }
+
+    /* Sigma fail (6) や Target Phase (12) 等、その他の信頼性低下 */
+    p_reading->result = VL53L1X_RESULT_RANGE_STATUS_INVALID;
+    return FSP_ERR_INVALID_DATA;
 }

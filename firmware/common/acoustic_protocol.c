@@ -271,13 +271,18 @@ size_t acoustic_protocol_encode_rover_telemetry(uint32_t sequence, uint32_t upti
     acoustic_write_u16_le(&payload[34], (uint16_t) p_telemetry->steering_deg);
     acoustic_write_u16_le(&payload[36], (uint16_t) p_telemetry->left_target_rpm);
     acoustic_write_u16_le(&payload[38], (uint16_t) p_telemetry->right_target_rpm);
-    for (uint32_t index = 0U; index < 4U; index++) {
-        acoustic_write_u16_le(&payload[40U + (index * 2U)], (uint16_t) p_telemetry->servo_target_deg[index]);
-    }
+    payload[40] = p_telemetry->infer_status;
+    payload[41] = p_telemetry->infer_sample_count;
+    payload[42] = p_telemetry->infer_active_frames;
+    payload[43] = p_telemetry->infer_nearest_sample;
+    acoustic_write_u16_le(&payload[44], p_telemetry->infer_cosine_dist_x1000);
+    acoustic_write_u16_le(&payload[46], p_telemetry->infer_threshold_x1000);
     acoustic_write_u32_le(&payload[48], p_telemetry->command_sequence);
     acoustic_write_u32_le(&payload[52], (uint32_t) p_telemetry->command_last_error);
     acoustic_write_u32_le(&payload[56], p_telemetry->command_target_age_ms);
-    acoustic_write_u32_le(&payload[60], p_telemetry->command_send_count);
+    payload[60] = p_telemetry->infer_target_peak_bin;
+    payload[61] = p_telemetry->infer_current_peak_bin;
+    acoustic_write_u16_le(&payload[62], p_telemetry->infer_similarity_permille);
     payload[64] = p_telemetry->autonomy_mode;
     payload[65] = p_telemetry->sensor_rule;
     payload[66] = p_telemetry->sensor_valid_flags;
@@ -324,6 +329,39 @@ size_t acoustic_protocol_encode_actuator_telemetry(uint32_t sequence, uint32_t u
     acoustic_write_u16_le(&payload[22], (uint16_t) p_telemetry->actuator_right_encoder_rpm_x10);
 
     return acoustic_protocol_encode(ACOUSTIC_MESSAGE_ACTUATOR_TELEMETRY, sequence, uptime_ms, payload,
+                                    (uint16_t) sizeof(payload), p_output, output_capacity);
+}
+
+/** =================================================================*
+ * @brief  オドメトリ位置姿勢テレメトリ符号化
+ * @param[in] sequence 送信シーケンス
+ * @param[in] uptime_ms CPU0起動後時間
+ * @param[in] p_telemetry オドメトリ位置姿勢テレメトリ
+ * @param[out] p_output フレーム出力先
+ * @param[in] output_capacity 出力先容量
+ * @return 符号化長。引数不正時は0
+ * ================================================================= */
+size_t acoustic_protocol_encode_pose_telemetry(uint32_t sequence, uint32_t uptime_ms,
+                                               const acoustic_pose_telemetry_t * p_telemetry,
+                                               uint8_t * p_output, size_t output_capacity) {
+    if (NULL == p_telemetry) {
+        return 0U;
+    }
+
+    uint8_t payload[ACOUSTIC_POSE_TELEMETRY_PAYLOAD_SIZE];
+    acoustic_write_u32_le(&payload[0], (uint32_t) p_telemetry->x_mm);
+    acoustic_write_u32_le(&payload[4], (uint32_t) p_telemetry->y_mm);
+    acoustic_write_u32_le(&payload[8], (uint32_t) p_telemetry->theta_mrad);
+    acoustic_write_u32_le(&payload[12], (uint32_t) p_telemetry->v_mm_s);
+    acoustic_write_u32_le(&payload[16], (uint32_t) p_telemetry->omega_mrad_s);
+    acoustic_write_u32_le(&payload[20], (uint32_t) p_telemetry->left_encoder_count);
+    acoustic_write_u32_le(&payload[24], (uint32_t) p_telemetry->right_encoder_count);
+    acoustic_write_u16_le(&payload[28], (uint16_t) p_telemetry->gyro_bias_dps_x10);
+    payload[30] = p_telemetry->flags;
+    payload[31] = p_telemetry->reserved;
+    acoustic_write_u32_le(&payload[32], p_telemetry->uptime_ms);
+
+    return acoustic_protocol_encode(ACOUSTIC_MESSAGE_POSE_TELEMETRY, sequence, uptime_ms, payload,
                                     (uint16_t) sizeof(payload), p_output, output_capacity);
 }
 
@@ -547,13 +585,18 @@ bool acoustic_protocol_decode_rover_telemetry(const acoustic_frame_t * p_frame,
     p_telemetry->steering_deg = (int16_t) acoustic_read_u16_le(&p_frame->payload[34]);
     p_telemetry->left_target_rpm = (int16_t) acoustic_read_u16_le(&p_frame->payload[36]);
     p_telemetry->right_target_rpm = (int16_t) acoustic_read_u16_le(&p_frame->payload[38]);
-    for (uint32_t index = 0U; index < 4U; index++) {
-        p_telemetry->servo_target_deg[index] = (int16_t) acoustic_read_u16_le(&p_frame->payload[40U + (index * 2U)]);
-    }
+    p_telemetry->infer_status = p_frame->payload[40];
+    p_telemetry->infer_sample_count = p_frame->payload[41];
+    p_telemetry->infer_active_frames = p_frame->payload[42];
+    p_telemetry->infer_nearest_sample = p_frame->payload[43];
+    p_telemetry->infer_cosine_dist_x1000 = acoustic_read_u16_le(&p_frame->payload[44]);
+    p_telemetry->infer_threshold_x1000 = acoustic_read_u16_le(&p_frame->payload[46]);
     p_telemetry->command_sequence = acoustic_read_u32_le(&p_frame->payload[48]);
     p_telemetry->command_last_error = (int32_t) acoustic_read_u32_le(&p_frame->payload[52]);
     p_telemetry->command_target_age_ms = acoustic_read_u32_le(&p_frame->payload[56]);
-    p_telemetry->command_send_count = acoustic_read_u32_le(&p_frame->payload[60]);
+    p_telemetry->infer_target_peak_bin = p_frame->payload[60];
+    p_telemetry->infer_current_peak_bin = p_frame->payload[61];
+    p_telemetry->infer_similarity_permille = acoustic_read_u16_le(&p_frame->payload[62]);
     p_telemetry->autonomy_mode = p_frame->payload[64];
     p_telemetry->sensor_rule = p_frame->payload[65];
     p_telemetry->sensor_valid_flags = p_frame->payload[66];
@@ -592,5 +635,32 @@ bool acoustic_protocol_decode_actuator_telemetry(const acoustic_frame_t * p_fram
     p_telemetry->actuator_right_duty_permille = (int16_t) acoustic_read_u16_le(&p_frame->payload[18]);
     p_telemetry->actuator_left_encoder_rpm_x10 = (int16_t) acoustic_read_u16_le(&p_frame->payload[20]);
     p_telemetry->actuator_right_encoder_rpm_x10 = (int16_t) acoustic_read_u16_le(&p_frame->payload[22]);
+    return true;
+}
+
+/** =================================================================*
+ * @brief  オドメトリ位置姿勢テレメトリ復号
+ * @param[in] p_frame 受信フレーム
+ * @param[out] p_telemetry オドメトリ位置姿勢テレメトリ
+ * @return フレームが正しい位置姿勢テレメトリならtrue
+ * ================================================================= */
+bool acoustic_protocol_decode_pose_telemetry(const acoustic_frame_t * p_frame,
+                                             acoustic_pose_telemetry_t * p_telemetry) {
+    if ((NULL == p_frame) || (NULL == p_telemetry) || (ACOUSTIC_MESSAGE_POSE_TELEMETRY != p_frame->type) ||
+        (ACOUSTIC_POSE_TELEMETRY_PAYLOAD_SIZE != p_frame->payload_length)) {
+        return false;
+    }
+
+    p_telemetry->x_mm = (int32_t) acoustic_read_u32_le(&p_frame->payload[0]);
+    p_telemetry->y_mm = (int32_t) acoustic_read_u32_le(&p_frame->payload[4]);
+    p_telemetry->theta_mrad = (int32_t) acoustic_read_u32_le(&p_frame->payload[8]);
+    p_telemetry->v_mm_s = (int32_t) acoustic_read_u32_le(&p_frame->payload[12]);
+    p_telemetry->omega_mrad_s = (int32_t) acoustic_read_u32_le(&p_frame->payload[16]);
+    p_telemetry->left_encoder_count = (int32_t) acoustic_read_u32_le(&p_frame->payload[20]);
+    p_telemetry->right_encoder_count = (int32_t) acoustic_read_u32_le(&p_frame->payload[24]);
+    p_telemetry->gyro_bias_dps_x10 = (int16_t) acoustic_read_u16_le(&p_frame->payload[28]);
+    p_telemetry->flags = p_frame->payload[30];
+    p_telemetry->reserved = p_frame->payload[31];
+    p_telemetry->uptime_ms = acoustic_read_u32_le(&p_frame->payload[32]);
     return true;
 }

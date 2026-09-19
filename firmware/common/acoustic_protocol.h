@@ -30,6 +30,10 @@
 #define ACOUSTIC_FEATURE_PAYLOAD_SIZE          (ACOUSTIC_FEATURE_META_SIZE + ACOUSTIC_FEATURE_DATA_SIZE)
 #define ACOUSTIC_ROVER_TELEMETRY_PAYLOAD_SIZE (96U)
 #define ACOUSTIC_ACTUATOR_TELEMETRY_PAYLOAD_SIZE (24U)
+#define ACOUSTIC_POSE_TELEMETRY_PAYLOAD_SIZE (36U)
+
+#define ACOUSTIC_POSE_FLAG_STATIONARY      (1U << 0)
+#define ACOUSTIC_POSE_FLAG_CALIBRATED      (1U << 1)
 
 #define ACOUSTIC_CAPABILITY_DOA            (1UL << 0)
 #define ACOUSTIC_CAPABILITY_VAD            (1UL << 1)
@@ -133,11 +137,18 @@ typedef struct st_acoustic_rover_telemetry {
     int16_t steering_deg;
     int16_t left_target_rpm;
     int16_t right_target_rpm;
-    int16_t servo_target_deg[4];
+    uint8_t infer_status;
+    uint8_t infer_sample_count;
+    uint8_t infer_active_frames;
+    uint8_t infer_nearest_sample;
+    uint16_t infer_cosine_dist_x1000;
+    uint16_t infer_threshold_x1000;
     uint32_t command_sequence;
     int32_t command_last_error;
     uint32_t command_target_age_ms;
-    uint32_t command_send_count;
+    uint8_t infer_target_peak_bin;
+    uint8_t infer_current_peak_bin;
+    uint16_t infer_similarity_permille;
     uint8_t autonomy_mode;
     uint8_t sensor_rule;
     uint8_t sensor_valid_flags;
@@ -162,6 +173,20 @@ typedef struct st_acoustic_actuator_telemetry {
     int16_t actuator_left_encoder_rpm_x10;
     int16_t actuator_right_encoder_rpm_x10;
 } acoustic_actuator_telemetry_t;
+
+typedef struct st_acoustic_pose_telemetry {
+    int32_t x_mm;
+    int32_t y_mm;
+    int32_t theta_mrad;
+    int32_t v_mm_s;
+    int32_t omega_mrad_s;
+    int32_t left_encoder_count;
+    int32_t right_encoder_count;
+    int16_t gyro_bias_dps_x10;
+    uint8_t flags;
+    uint8_t reserved;
+    uint32_t uptime_ms;
+} acoustic_pose_telemetry_t;
 
 typedef struct st_acoustic_frame {
     uint8_t version;
@@ -210,6 +235,9 @@ size_t acoustic_protocol_encode_rover_telemetry(uint32_t sequence, uint32_t upti
 size_t acoustic_protocol_encode_actuator_telemetry(uint32_t sequence, uint32_t uptime_ms,
                                                    const acoustic_actuator_telemetry_t * p_telemetry,
                                                    uint8_t * p_output, size_t output_capacity);
+size_t acoustic_protocol_encode_pose_telemetry(uint32_t sequence, uint32_t uptime_ms,
+                                               const acoustic_pose_telemetry_t * p_telemetry,
+                                               uint8_t * p_output, size_t output_capacity);
 void acoustic_protocol_parser_init(acoustic_protocol_parser_t * p_parser); /* パーサー初期化 */
 acoustic_parse_result_t acoustic_protocol_parser_push(acoustic_protocol_parser_t * p_parser, uint8_t byte,
                                                             /* 1 byte受信 */
@@ -228,5 +256,7 @@ bool acoustic_protocol_decode_rover_telemetry(const acoustic_frame_t * p_frame,
                                               acoustic_rover_telemetry_t * p_telemetry);
 bool acoustic_protocol_decode_actuator_telemetry(const acoustic_frame_t * p_frame,
                                                  acoustic_actuator_telemetry_t * p_telemetry);
+bool acoustic_protocol_decode_pose_telemetry(const acoustic_frame_t * p_frame,
+                                             acoustic_pose_telemetry_t * p_telemetry);
 
 #endif /* SEROV_ACOUSTIC_PROTOCOL_H */

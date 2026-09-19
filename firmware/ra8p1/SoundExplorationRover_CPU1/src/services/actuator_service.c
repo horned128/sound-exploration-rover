@@ -334,4 +334,6 @@ EXPORT void actuator_service_status_get(actuator_status_t * p_status) {
     p_status->right_encoder_rpm_x10 = (H) g_encoder_right_rpm_x10;
     p_status->fault_flags = g_actuator_service_fault_flags;
     p_status->applied_command_sequence = g_actuator_service_applied_sequence;
+    p_status->left_encoder_count = (UW) (W) g_encoder_left_count;
+    p_status->right_encoder_count = (UW) (W) g_encoder_right_count;
 }

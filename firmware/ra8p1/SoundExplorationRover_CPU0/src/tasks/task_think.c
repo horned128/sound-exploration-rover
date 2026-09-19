@@ -8,6 +8,7 @@
 #include "config/sensor_config.h"                           /* センサー安全判定値 */
 #include "config/task_config.h"                             /* 思考周期と優先度 */
 #include "control/obstacle_avoidance_controller.h"          /* ToF・IMU走行判断 */
+#include "control/safety_arbiter.h"                         /* 安全調停・ToF veto集約 */
 #include "control/sensor_liveness.h"                        /* 取得タスクと独立した更新監視 */
 #include "control/sound_follow_controller.h"                /* 音源追従状態機械 */
 #include "hal_data.h"                                       /* BSP LED情報、ピンAPI */
@@ -26,17 +27,14 @@
 IMPORT bsp_leds_t g_bsp_leds;                               /**< BSPのLED構成情報 */
 
 LOCAL void task_think_entry(INT stacd, void * exinf);      /* 思考タスク本体 */
-#if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SOUND_FOLLOW)
 LOCAL ER task_think_publish_target(const sound_follow_output_t * p_output); /* 追従指令の4輪展開 */
-#endif
 LOCAL ER task_think_publish_motion(H steering_deg, H left_rpm, H right_rpm, BOOL actuator_enable,
                                    BOOL emergency_stop); /* 共通走行指令の4輪展開 */
-#if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SOUND_FOLLOW)
 /* 音源追従の近接安全判定 */
 LOCAL BOOL task_think_sound_motion_allowed(const sensor_snapshot_t * p_snapshot);
-#endif
 LOCAL void task_think_led_write(BOOL blue_on, BOOL green_on); /* 2LED一括更新 */
-LOCAL void task_think_learning_capture(void);               /* 新規特徴量パッチの学習 */
+LOCAL void task_think_learning_capture(const task_acoustic_link_snapshot_t * p_snapshot,
+                                       BOOL observation_usable); /* 新規特徴量パッチの学習 */
 
 LOCAL UW learning_button_press_ms;                          /**< SW1継続押下時間[ms] */
 LOCAL BOOL learning_button_handled;                         /**< 同一押下の多重切替防止 */
@@ -109,7 +107,6 @@ EXPORT volatile UB g_task_think_learning_samples;           /**< 収集済み音
 EXPORT volatile BOOL g_task_think_storage_valid;            /**< 有効なMRAMプロトタイプ有無 */
 EXPORT volatile prototype_storage_result_t g_task_think_storage_result; /**< 直近MRAM処理結果 */
 
-#if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SOUND_FOLLOW)
 /** =================================================================*
  * @brief  音源追従で前進してよいToF状態か判定
  * @details センサー取得失敗、更新期限超過、ToF無効、またはいずれかの測距が
@@ -118,22 +115,8 @@ EXPORT volatile prototype_storage_result_t g_task_think_storage_result; /**< 直
  * @return 3台のToFが有効かつ近接障害物なしならtrue
  * ================================================================= */
 LOCAL BOOL task_think_sound_motion_allowed(const sensor_snapshot_t * p_snapshot) {
-    UB const required_tof_flags = CPU0_SENSOR_VALID_TOF_LEFT | CPU0_SENSOR_VALID_TOF_CENTER |
-                                  CPU0_SENSOR_VALID_TOF_RIGHT;
-    if ((NULL == p_snapshot) || !p_snapshot->initialized ||
-        (required_tof_flags != (p_snapshot->valid_flags & required_tof_flags)) ||
-        (p_snapshot->age_ms > CPU0_SENSOR_STALE_TIMEOUT_MS)) {
-        return FALSE;
-    }
-
-    for (UW index = 0U; index < CPU0_SENSOR_TOF_COUNT; index++) {
-        if (p_snapshot->tof_distance_mm[index] < CPU0_SENSOR_HARD_STOP_DISTANCE_MM) {
-            return FALSE;
-        }
-    }
-    return TRUE;
+    return (BOOL) safety_arbiter_tof_usable(p_snapshot);
 }
-#endif
 
 /** =================================================================*
  * @brief  思考タスクと異常イベント生成
@@ -241,13 +224,19 @@ EXPORT ER task_think_report_fault(app_fault_t fault) {
  * @brief  最新の96次元要約を1回だけ現場見本として取り込む
  * @details 能動フレーム不足は判定不能なので、零ベクトルを見本として保存しない。
  * ================================================================= */
-LOCAL void task_think_learning_capture(void) {
+LOCAL void task_think_learning_capture(const task_acoustic_link_snapshot_t * p_snapshot,
+                                       BOOL observation_usable) {
     if (!g_task_think_learning_mode ||
         (g_task_think_learning_samples >= CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT)) {
         return;
     }
+    if ((NULL == p_snapshot) || (!observation_usable) ||
+        (p_snapshot->observation.level_dbfs_x100 < CPU0_SOUND_TRIGGER_DBFS_X100) ||
+        (0U == p_snapshot->observation.vad)) {
+        return;
+    }
 
-    task_infer_result_t result;
+    static task_infer_result_t result;
     if ((E_OK != task_infer_result_get(&result)) || (result.feature_generation == learning_last_feature_generation)) {
         return;
     }
@@ -279,7 +268,6 @@ EXPORT ER task_think_clear_fault(app_fault_t fault) {
     return tk_set_flg(think_fault_flag_id, (UINT) CPU0_THINK_EVENT_CLEAR_IPC_SEND);
 }
 
-#if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SOUND_FOLLOW)
 /** =================================================================*
  * @brief  追従指令の4輪展開
  * @details 前後輪を逆相操舵し、左右DCモーターを同じ更新で指令する。
@@ -294,7 +282,6 @@ LOCAL ER task_think_publish_target(const sound_follow_output_t * p_output) {
     return task_think_publish_motion(p_output->steering_deg, p_output->left_rpm, p_output->right_rpm,
                                      p_output->actuator_enable, p_output->emergency_stop);
 }
-#endif
 
 /** =================================================================*
  * @brief  共通走行指令を4輪操舵・左右DCモーターの目標へ展開
@@ -470,10 +457,11 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
     UW state_elapsed_ms = 0U;
     UW heartbeat_elapsed_ms = 0U;
     UW fault_elapsed_ms = 0U;
-#if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SOUND_FOLLOW)
     UW last_observation_sequence = 0U;
     BOOL observation_sequence_valid = FALSE;
-#endif
+    UW last_infer_generation = 0U;
+    UW target_sound_match_timer_ms = 0U;
+    BOOL target_sound_matched = FALSE;
 
     while (1) {
         UINT fault_pattern = 0U;
@@ -500,9 +488,15 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
                     if (!g_task_think_learning_mode) {
                         if (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT == g_task_think_learning_samples) {
                             storage_candidate = storage_data;
+                            UB const peak_bin = acoustic_identifier_find_peak_bin((const B *) storage_candidate.samples,
+                                                                                  storage_candidate.sample_count);
+                            storage_candidate.target_peak_bin = peak_bin;
+                            static float bin_weights[CPU0_ACOUSTIC_FEATURE_BIN_COUNT];
+                            acoustic_identifier_build_weights(peak_bin, bin_weights);
                             float threshold = 0.0F;
                             if (acoustic_identifier_leave_one_out_threshold((const B *) storage_candidate.samples,
-                                                                            storage_candidate.sample_count, &threshold) &&
+                                                                            storage_candidate.sample_count,
+                                                                            bin_weights, &threshold) &&
                                 (E_OK == task_infer_background_export(&storage_candidate))) {
                                 storage_candidate.identifier_threshold = threshold;
                                 g_task_think_storage_result = prototype_storage_save(&storage_candidate);
@@ -525,53 +519,15 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             learning_button_press_ms = 0U;
             learning_button_handled = FALSE;
         }
-#if (CPU0_AUTONOMY_MODE == CPU0_AUTONOMY_MODE_SENSOR_RULE)
-        sensor_snapshot_t sensor_snapshot = {0};
+        static sensor_snapshot_t sensor_snapshot;
+        memset(&sensor_snapshot, 0, sizeof(sensor_snapshot));
         ER const sensor_snapshot_err = task_sensor_snapshot_get(&sensor_snapshot);
         BOOL const sensor_fresh = task_think_sensor_fresh(&sensor_snapshot, sensor_snapshot_err);
-        obstacle_avoidance_output_t output;
-        sound_follow_state_t const previous_state = g_task_think_state;
-        obstacle_avoidance_controller_step(sensor_fresh ? &sensor_snapshot : NULL,
-                                           (APP_FAULT_NONE != g_task_think_fault_flags) || g_task_think_learning_mode,
-                                           sensor_now_ms, &output);
-        g_task_think_state = output.state;
-        if (previous_state != g_task_think_state) {
-            state_elapsed_ms = 0U;
-        }
 
-        if (g_task_think_learning_mode) {
-            output.emergency_stop = TRUE;
-            output.actuator_enable = FALSE;
-            output.steering_deg = 0;
-            output.left_rpm = 0;
-            output.right_rpm = 0;
-            task_think_learning_capture();
-        }
-        if (E_OK != task_think_publish_motion(output.steering_deg, output.left_rpm, output.right_rpm,
-                                               output.actuator_enable, output.emergency_stop)) {
-            g_task_think_fault_flags |= APP_FAULT_TARGET_UPDATE;
-            obstacle_avoidance_controller_step(NULL, TRUE, sensor_now_ms, &output);
-            g_task_think_state = output.state;
-            (void) task_think_publish_motion(output.steering_deg, output.left_rpm, output.right_rpm,
-                                              output.actuator_enable, output.emergency_stop);
-        }
-
-        g_task_think_link_ready = sensor_fresh && sensor_snapshot.initialized &&
-                                  (CPU0_SENSOR_VALID_ALL == sensor_snapshot.valid_flags) &&
-                                  (sensor_snapshot.age_ms <= CPU0_SENSOR_STALE_TIMEOUT_MS);
-        g_task_think_new_observation = FALSE;
-        g_task_think_steering_deg = output.steering_deg;
-        g_task_think_left_rpm = output.left_rpm;
-        g_task_think_right_rpm = output.right_rpm;
-        g_task_think_actuator_enable = output.actuator_enable;
-        g_task_think_emergency_stop = output.emergency_stop;
-        g_task_think_sensor_rule = output.rule;
-#else
-        task_acoustic_link_snapshot_t snapshot = {0};
-        sensor_snapshot_t sensor_snapshot = {0};
+        /* --- 音響リンクと推論 --- */
+        static task_acoustic_link_snapshot_t snapshot;
+        memset(&snapshot, 0, sizeof(snapshot));
         ER const snapshot_err = task_acoustic_link_snapshot_get(&snapshot);
-        ER const sensor_snapshot_err = task_sensor_snapshot_get(&sensor_snapshot);
-        BOOL const sensor_fresh = task_think_sensor_fresh(&sensor_snapshot, sensor_snapshot_err);
         BOOL const observation_usable =
             (E_OK == snapshot_err) && snapshot.usb_configured && snapshot.hello_received &&
             snapshot.observation_received && (ACOUSTIC_XVF_STATUS_READY == snapshot.observation.xvf_status) &&
@@ -599,16 +555,97 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             g_task_think_observation_watchdog_ms = UINT32_MAX;
         }
 
-        sound_follow_input_t input = {
+        /* --- 音響識別タスクの最新結果取得とマッチング判定窓の更新 --- */
+        static task_infer_result_t infer_result;
+        memset(&infer_result, 0, sizeof(infer_result));
+        if (E_OK == task_infer_result_get(&infer_result)) {
+            if (infer_result.feature_generation != last_infer_generation) {
+                last_infer_generation = infer_result.feature_generation;
+                if (CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_TARGET == infer_result.identifier.status) {
+                    target_sound_matched = TRUE;
+                    target_sound_match_timer_ms = CPU0_SOUND_IDENTIFIER_TIMEOUT_MS;
+                } else if (CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_NOT_TARGET == infer_result.identifier.status) {
+                    target_sound_matched = FALSE;
+                    target_sound_match_timer_ms = 0U;
+                }
+            }
+        }
+        if (target_sound_match_timer_ms >= CPU0_THINK_PERIOD_MS) {
+            target_sound_match_timer_ms -= CPU0_THINK_PERIOD_MS;
+        } else {
+            target_sound_match_timer_ms = 0U;
+            target_sound_matched = FALSE;
+        }
+
+        /* --- S3: 音源追従コントローラを先に実行し、目標操舵角を取得 --- */
+        BOOL const match_required = (0U != CPU0_SOUND_REQUIRE_IDENTIFIER_MATCH) && g_task_think_storage_valid;
+        static sound_follow_input_t input;
+        input = (sound_follow_input_t){
             .link_ready = link_ready,
             .new_observation = new_observation,
             .fault_active = APP_FAULT_NONE != g_task_think_fault_flags,
             .motion_allowed = sensor_fresh && task_think_sound_motion_allowed(&sensor_snapshot),
             .observation = snapshot.observation,
+            .match_required = match_required,
+            .target_sound_matched = target_sound_matched,
         };
-        sound_follow_output_t output;
+        static sound_follow_output_t sf_output;
+        memset(&sf_output, 0, sizeof(sf_output));
         sound_follow_state_t const previous_state = g_task_think_state;
-        sound_follow_controller_step(&input, CPU0_THINK_PERIOD_MS, &output);
+        sound_follow_controller_step(&input, CPU0_THINK_PERIOD_MS, &sf_output);
+
+        /* --- S3: 回避コントローラにtarget_steering_degとして音源方向を渡す --- */
+        static obstacle_avoidance_output_t oa_output;
+        memset(&oa_output, 0, sizeof(oa_output));
+        obstacle_avoidance_controller_step(sensor_fresh ? &sensor_snapshot : NULL,
+                                           (APP_FAULT_NONE != g_task_think_fault_flags) || g_task_think_learning_mode,
+                                           sensor_now_ms, sf_output.steering_deg, &oa_output);
+        g_task_think_sensor_rule = oa_output.rule;
+
+        /* --- S4: 連続走行マージ（音源引力とToF斥力を合成した回避走行指令を採用） --- */
+        static sound_follow_output_t output;
+        memset(&output, 0, sizeof(output));
+        BOOL const tracking_active = (CPU0_THINK_STATE_MOVE_STEP == sf_output.state);
+        BOOL const avoidance_active = (oa_output.rule == CPU0_SENSOR_RULE_BACKUP) ||
+                                      (oa_output.rule == CPU0_SENSOR_RULE_PIVOT_LEFT) ||
+                                      (oa_output.rule == CPU0_SENSOR_RULE_PIVOT_RIGHT);
+
+        if (oa_output.emergency_stop || sf_output.emergency_stop) {
+            /* 緊急停止要求 */
+            output = sf_output;
+            output.emergency_stop  = TRUE;
+            output.actuator_enable = FALSE;
+            output.left_rpm        = 0;
+            output.right_rpm       = 0;
+        } else if (avoidance_active && oa_output.actuator_enable) {
+            /* 障害物回避の切り返し・脱出動作を最優先実行 */
+            output.state           = oa_output.state;
+            output.steering_deg    = oa_output.steering_deg;
+            output.left_rpm        = oa_output.left_rpm;
+            output.right_rpm       = oa_output.right_rpm;
+            output.actuator_enable = TRUE;
+            output.emergency_stop  = FALSE;
+        } else if (tracking_active && oa_output.actuator_enable) {
+            /* S4連続走行: 音源引力とToF斥力を合成した回避走行指令を採用 */
+            output.state           = oa_output.state;
+            output.steering_deg    = oa_output.steering_deg;
+            output.left_rpm        = oa_output.left_rpm;
+            output.right_rpm       = oa_output.right_rpm;
+            output.actuator_enable = TRUE;
+            output.emergency_stop  = FALSE;
+        } else if (CPU0_THINK_STATE_STEER_PREP == sf_output.state) {
+            /* 初回音源検知時の操舵整定（前進せず舵角のみ準備） */
+            output = sf_output;
+            output.left_rpm        = 0;
+            output.right_rpm       = 0;
+            output.actuator_enable = TRUE;
+        } else {
+            /* 待機・静定・安全停止: 走行停止で音源を待つ */
+            output = sf_output;
+            output.left_rpm        = 0;
+            output.right_rpm       = 0;
+        }
+
         g_task_think_state = output.state;
         if (previous_state != g_task_think_state) {
             state_elapsed_ms = 0U;
@@ -620,12 +657,38 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             output.steering_deg = 0;
             output.left_rpm = 0;
             output.right_rpm = 0;
-            task_think_learning_capture();
+            task_think_learning_capture(&snapshot, observation_usable);
         }
+
+        /* --- S3: safety_arbiter 経由で安全クランプしてから発行 --- */
+        static safety_motion_command_t sa_requested;
+        sa_requested = (safety_motion_command_t){
+            .steering_deg   = output.steering_deg,
+            .left_rpm       = output.left_rpm,
+            .right_rpm      = output.right_rpm,
+            .actuator_enable = output.actuator_enable,
+            .emergency_stop = output.emergency_stop,
+        };
+        static safety_motion_command_t sa_arbitrated;
+        memset(&sa_arbitrated, 0, sizeof(sa_arbitrated));
+        safety_arbiter_arbitrate(&sa_requested, &sensor_snapshot, sensor_fresh, &sa_arbitrated);
+
+        /* 調停後の値を出力に反映 */
+        output.steering_deg   = sa_arbitrated.steering_deg;
+        output.left_rpm       = sa_arbitrated.left_rpm;
+        output.right_rpm      = sa_arbitrated.right_rpm;
+        output.actuator_enable = sa_arbitrated.actuator_enable;
+        output.emergency_stop = sa_arbitrated.emergency_stop;
+
         if (E_OK != task_think_publish_target(&output)) {
             g_task_think_fault_flags |= APP_FAULT_TARGET_UPDATE;
             input.fault_active = TRUE;
-            sound_follow_controller_step(&input, 0U, &output);
+            sound_follow_controller_step(&input, 0U, &sf_output);
+            output = sf_output;
+            output.emergency_stop = TRUE;
+            output.actuator_enable = FALSE;
+            output.left_rpm = 0;
+            output.right_rpm = 0;
             g_task_think_state = output.state;
             (void) task_think_publish_target(&output);
         }
@@ -637,7 +700,6 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         g_task_think_right_rpm = output.right_rpm;
         g_task_think_actuator_enable = output.actuator_enable;
         g_task_think_emergency_stop = output.emergency_stop;
-#endif
 
         task_think_led_update(state_elapsed_ms, heartbeat_elapsed_ms, fault_elapsed_ms);
         g_task_think_cycle_count++;

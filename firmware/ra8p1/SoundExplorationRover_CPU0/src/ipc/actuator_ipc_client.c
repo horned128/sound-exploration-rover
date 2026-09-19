@@ -166,6 +166,15 @@ EXPORT void actuator_ipc_client_callback(ipc_callback_args_t * p_args) {
     case ACTUATOR_IPC_STATUS_APPLIED_SEQUENCE:
         g_staging_status.applied_command_sequence = payload & ACTUATOR_IPC_SEQUENCE_MASK;
         break;
+    case ACTUATOR_IPC_STATUS_LEFT_ENCODER_COUNT:
+        g_staging_status.left_encoder_count = payload;
+        break;
+    case ACTUATOR_IPC_STATUS_RIGHT_ENCODER_COUNT:
+        g_staging_status.right_encoder_count = payload;
+        break;
+    case ACTUATOR_IPC_STATUS_UPTIME_MS:
+        g_staging_status.status_uptime_ms = payload;
+        break;
     case ACTUATOR_IPC_STATUS_SEQUENCE:
         g_staging_status.sequence_number = payload & ACTUATOR_IPC_SEQUENCE_MASK;
         g_committed_status = g_staging_status;

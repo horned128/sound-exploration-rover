@@ -9,7 +9,8 @@ int main(void)
     (void) printf(
         "{"
         "\"sound_follow_input_t\":{\"size\":%zu,\"link_ready\":%zu,\"new_observation\":%zu,"
-        "\"fault_active\":%zu,\"motion_allowed\":%zu,\"observation\":%zu},"
+        "\"fault_active\":%zu,\"motion_allowed\":%zu,\"observation\":%zu,"
+        "\"match_required\":%zu,\"target_sound_matched\":%zu},"
         "\"sound_follow_output_t\":{\"size\":%zu,\"state\":%zu,\"steering_deg\":%zu,"
         "\"left_rpm\":%zu,\"right_rpm\":%zu,\"actuator_enable\":%zu,\"emergency_stop\":%zu},"
         "\"acoustic_observation_t\":{\"size\":%zu,\"doa_deg\":%zu,\"level_dbfs_x100\":%zu,"
@@ -27,6 +28,7 @@ int main(void)
         offsetof(sound_follow_input_t, link_ready),
         offsetof(sound_follow_input_t, new_observation), offsetof(sound_follow_input_t, fault_active),
         offsetof(sound_follow_input_t, motion_allowed), offsetof(sound_follow_input_t, observation),
+        offsetof(sound_follow_input_t, match_required), offsetof(sound_follow_input_t, target_sound_matched),
         sizeof(sound_follow_output_t), offsetof(sound_follow_output_t, state),
         offsetof(sound_follow_output_t, steering_deg), offsetof(sound_follow_output_t, left_rpm),
         offsetof(sound_follow_output_t, right_rpm), offsetof(sound_follow_output_t, actuator_enable),

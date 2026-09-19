@@ -31,8 +31,9 @@ typedef struct st_prototype_storage_data {
     float background_decoder[CPU0_BACKGROUND_MODEL_INPUT_DIMENSION][CPU0_BACKGROUND_MODEL_HIDDEN_DIMENSION];
     float background_mse_threshold;                         /**< 背景異常候補用mean+3sigma */
     float identifier_threshold;                             /**< 見本leave-one-out用mean+3sigma */
-    UB sample_count;                                        /**< 有効な96次元見本数（最大5） */
-    UB reserved[3];
+    UB sample_count;                                        /**< 有効な192次元見本数（最大5） */
+    UB target_peak_bin;                                     /**< 見本群から算出した代表ピークbin（0..31） */
+    UB reserved[2];
     B samples[CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT][CPU0_PROTOTYPE_STORAGE_SUMMARY_BYTES];
 } prototype_storage_data_t;
 

@@ -181,10 +181,12 @@ LOCAL H sound_follow_steering_from_doa(H doa_deg) {
         steering = CPU0_SOUND_STEERING_MAX_DEG;
     } else if (steering < -CPU0_SOUND_STEERING_MAX_DEG) {
         steering = -CPU0_SOUND_STEERING_MAX_DEG;
+#if (CPU0_SOUND_STEERING_MIN_DEG > 1)
     } else if ((steering > 0) && (steering < CPU0_SOUND_STEERING_MIN_DEG)) {
         steering = CPU0_SOUND_STEERING_MIN_DEG;
     } else if ((steering < 0) && (steering > -CPU0_SOUND_STEERING_MIN_DEG)) {
         steering = -CPU0_SOUND_STEERING_MIN_DEG;
+#endif
     }
     return steering;
 }
@@ -223,7 +225,7 @@ LOCAL void sound_follow_state_enter(sound_follow_state_t state) {
     controller.state = state;
     controller.state_elapsed_ms = 0U;
     if ((CPU0_THINK_STATE_LISTEN == state) || (CPU0_THINK_STATE_WAIT_LINK == state) ||
-        (CPU0_THINK_STATE_COOLDOWN == state)) {
+        (CPU0_THINK_STATE_COOLDOWN == state) || (CPU0_THINK_STATE_MOVE_STEP == state)) {
         sound_follow_detection_reset();
         controller.quiet_elapsed_ms = 0U;
     }
@@ -302,14 +304,15 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
         } else if ((CPU0_THINK_STATE_LISTEN == controller.state) && p_input->new_observation) {
             BOOL const usable = sound_follow_observation_usable(&p_input->observation);
             BOOL const loud = p_input->observation.level_dbfs_x100 >= CPU0_SOUND_TRIGGER_DBFS_X100;
+            BOOL const sound_allowed = !p_input->match_required || p_input->target_sound_matched;
 
             if (!controller.trigger_active) {
-                if (usable && loud && (0U != p_input->observation.vad)) {
+                if (usable && loud && (0U != p_input->observation.vad) && sound_allowed) {
                     controller.trigger_active = TRUE;
                     controller.trigger_elapsed_ms = 0U;
                     controller.doa_sample_count = 0U;
                 }
-            } else if (!usable) {
+            } else if (!usable || !sound_allowed) {
                 sound_follow_detection_reset();
             } else {
                 controller.trigger_elapsed_ms += elapsed_ms;
@@ -321,7 +324,7 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
             H mean_doa_deg = 0;
             if (controller.trigger_active && sound_follow_doa_stable(&mean_doa_deg)) {
                 sound_follow_motion_from_doa(mean_doa_deg);
-                if (p_input->motion_allowed) {
+                if (p_input->motion_allowed && sound_allowed) {
                     sound_follow_state_enter(CPU0_THINK_STATE_STEER_PREP);
                 } else {
                     sound_follow_state_enter(CPU0_THINK_STATE_COOLDOWN);
@@ -333,13 +336,36 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
         } else if ((CPU0_THINK_STATE_STEER_PREP == controller.state) &&
                    (controller.state_elapsed_ms >= CPU0_SOUND_STEER_SETTLE_MS)) {
             sound_follow_state_enter(CPU0_THINK_STATE_MOVE_STEP);
-        } else if ((CPU0_THINK_STATE_MOVE_STEP == controller.state) &&
-                   (controller.state_elapsed_ms >= CPU0_SOUND_MOVE_STEP_MS)) {
-            sound_follow_state_enter(CPU0_THINK_STATE_SETTLE);
+        } else if (CPU0_THINK_STATE_MOVE_STEP == controller.state) {
+            /* S4: 走行中も音源を追跡し、連続追従を行う（ながら動作） */
+            BOOL const sound_allowed = !p_input->match_required || p_input->target_sound_matched;
+            if (p_input->new_observation) {
+                BOOL const usable = sound_follow_observation_usable(&p_input->observation);
+                BOOL const loud = p_input->observation.level_dbfs_x100 >= CPU0_SOUND_TRIGGER_DBFS_X100;
+                BOOL const quiet = sound_follow_observation_quiet(&p_input->observation);
+
+                if (usable && loud && (0U != p_input->observation.vad) && sound_allowed) {
+                    /* 有効音源の受信中: DoA履歴を更新し操舵角へ追従 */
+                    sound_follow_doa_push(sound_follow_relative_angle(p_input->observation.doa_deg));
+                    H mean_doa_deg = 0;
+                    if (sound_follow_doa_stable(&mean_doa_deg)) {
+                        sound_follow_motion_from_doa(mean_doa_deg);
+                    }
+                    controller.quiet_elapsed_ms = 0U;
+                } else if (quiet || !sound_allowed) {
+                    controller.quiet_elapsed_ms += elapsed_ms;
+                }
+            } else {
+                controller.quiet_elapsed_ms += elapsed_ms;
+            }
+
+            /* 音源消失判定: 静音が規定時間継続したら減速停止へ遷移 */
+            if (controller.quiet_elapsed_ms >= CPU0_SOUND_LOST_TIMEOUT_MS) {
+                sound_follow_state_enter(CPU0_THINK_STATE_SETTLE);
+            }
         } else if ((CPU0_THINK_STATE_SETTLE == controller.state) &&
                    (controller.state_elapsed_ms >= CPU0_SOUND_LISTEN_SETTLE_MS)) {
-            /* 1回の検出で1 stepだけ動かす。走行後のDoA揺れ（モーター音・
-             * 反射音）を次の移動目標として再解釈しない。 */
+            /* 音源消失後の静定を終えて静音確認へ */
             sound_follow_state_enter(CPU0_THINK_STATE_COOLDOWN);
         } else if ((CPU0_THINK_STATE_COOLDOWN == controller.state) && p_input->new_observation) {
             BOOL const quiet = sound_follow_observation_quiet(&p_input->observation);

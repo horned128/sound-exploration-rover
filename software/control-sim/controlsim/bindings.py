@@ -18,7 +18,7 @@ BOOL = ctypes.c_int32
 ACOUSTIC_XVF_STATUS_READY = 1
 CPU0_SENSOR_VALID_ALL = 0x0F
 CPU0_ACOUSTIC_FEATURE_BIN_COUNT = 32
-CPU0_ACOUSTIC_SUMMARY_DIMENSION = 96
+CPU0_ACOUSTIC_SUMMARY_DIMENSION = 192
 CPU0_BACKGROUND_MODEL_INPUT_DIMENSION = 32
 CPU0_BACKGROUND_MODEL_HIDDEN_DIMENSION = 16
 
@@ -43,6 +43,8 @@ class SoundFollowInput(ctypes.Structure):
         ("fault_active", BOOL),
         ("motion_allowed", BOOL),
         ("observation", AcousticObservation),
+        ("match_required", BOOL),
+        ("target_sound_matched", BOOL),
     ]
 
 
@@ -116,6 +118,83 @@ class BackgroundModelState(ctypes.Structure):
     ]
 
 
+class OdometryPose(ctypes.Structure):
+    _fields_ = [
+        ("x_mm", ctypes.c_int32),
+        ("y_mm", ctypes.c_int32),
+        ("theta_mrad", ctypes.c_int32),
+        ("theta_deg_x10", ctypes.c_int16),
+        ("total_distance_mm", ctypes.c_uint32),
+        ("linear_speed_mm_s", ctypes.c_int16),
+        ("angular_speed_mrad_s", ctypes.c_int16),
+        ("left_encoder_total", ctypes.c_int32),
+        ("right_encoder_total", ctypes.c_int32),
+        ("timestamp_ms", ctypes.c_uint32),
+        ("valid", BOOL),
+    ]
+
+
+class OdometryContext(ctypes.Structure):
+    _fields_ = [
+        ("x_mm", ctypes.c_float),
+        ("y_mm", ctypes.c_float),
+        ("theta_rad", ctypes.c_float),
+        ("total_distance_mm", ctypes.c_float),
+        ("linear_speed_mm_s", ctypes.c_float),
+        ("angular_speed_rad_s", ctypes.c_float),
+        ("gyro_bias_dps", ctypes.c_float),
+        ("prev_left_count", ctypes.c_uint32),
+        ("prev_right_count", ctypes.c_uint32),
+        ("prev_uptime_ms", ctypes.c_uint32),
+        ("left_unwrapped", ctypes.c_int32),
+        ("right_unwrapped", ctypes.c_int32),
+        ("initialized", BOOL),
+        ("gyro_calibrated", BOOL),
+    ]
+
+
+class SmoothAvoidanceInput(ctypes.Structure):
+    _fields_ = [
+        ("tof_distance_mm", ctypes.c_float * 3),
+        ("tof_valid", ctypes.c_bool * 3),
+        ("target_heading_deg", ctypes.c_float),
+        ("current_steering_deg", ctypes.c_float),
+        ("current_speed_scale", ctypes.c_float),
+        ("dt_sec", ctypes.c_float),
+    ]
+
+
+class SmoothAvoidanceOutput(ctypes.Structure):
+    _fields_ = [
+        ("steering_deg", ctypes.c_float),
+        ("speed_scale", ctypes.c_float),
+        ("is_blocked", ctypes.c_bool),
+        ("left_clearance_mm", ctypes.c_float),
+        ("center_clearance_mm", ctypes.c_float),
+        ("right_clearance_mm", ctypes.c_float),
+    ]
+
+
+class SafetyMotionCommand(ctypes.Structure):
+    _fields_ = [
+        ("steering_deg", ctypes.c_int16),
+        ("left_rpm", ctypes.c_int16),
+        ("right_rpm", ctypes.c_int16),
+        ("actuator_enable", ctypes.c_bool),
+        ("emergency_stop", ctypes.c_bool),
+    ]
+
+
+class SafetyArbiterStatus(ctypes.Structure):
+    _fields_ = [
+        ("sensor_fresh", ctypes.c_bool),
+        ("tof_usable", ctypes.c_bool),
+        ("motion_allowed", ctypes.c_bool),
+        ("hard_stop_veto", ctypes.c_bool),
+        ("imu_safe", ctypes.c_bool),
+    ]
+
+
 @lru_cache(maxsize=1)
 def library() -> ctypes.CDLL:
     completed = subprocess.run(
@@ -137,6 +216,7 @@ def library() -> ctypes.CDLL:
         ctypes.POINTER(SensorSnapshot),
         BOOL,
         ctypes.c_uint32,
+        ctypes.c_int16,
         ctypes.POINTER(ObstacleAvoidanceOutput),
     ]
     handle.obstacle_avoidance_controller_step.restype = None
@@ -146,17 +226,31 @@ def library() -> ctypes.CDLL:
         ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32, ctypes.POINTER(ctypes.c_int8), ctypes.POINTER(ctypes.c_uint8),
     ]
     handle.acoustic_identifier_summary_create.restype = BOOL
+    handle.acoustic_identifier_find_peak_bin.argtypes = [
+        ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32,
+    ]
+    handle.acoustic_identifier_find_peak_bin.restype = ctypes.c_uint8
+    handle.acoustic_identifier_build_weights.argtypes = [
+        ctypes.c_uint8, ctypes.POINTER(ctypes.c_float),
+    ]
+    handle.acoustic_identifier_build_weights.restype = None
+    handle.acoustic_identifier_weighted_cosine_distance.argtypes = [
+        ctypes.POINTER(ctypes.c_int8), ctypes.POINTER(ctypes.c_int8),
+        ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float),
+    ]
+    handle.acoustic_identifier_weighted_cosine_distance.restype = BOOL
     handle.acoustic_identifier_cosine_distance.argtypes = [
         ctypes.POINTER(ctypes.c_int8), ctypes.POINTER(ctypes.c_int8), ctypes.POINTER(ctypes.c_float),
     ]
     handle.acoustic_identifier_cosine_distance.restype = BOOL
     handle.acoustic_identifier_leave_one_out_threshold.argtypes = [
-        ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32, ctypes.POINTER(ctypes.c_float),
+        ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32,
+        ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float),
     ]
     handle.acoustic_identifier_leave_one_out_threshold.restype = BOOL
     handle.acoustic_identifier_summary_classify.argtypes = [
         ctypes.POINTER(ctypes.c_int8), BOOL, ctypes.c_uint8, ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32,
-        ctypes.c_float, ctypes.POINTER(AcousticIdentifierSummaryOutput),
+        ctypes.POINTER(ctypes.c_float), ctypes.c_float, ctypes.POINTER(AcousticIdentifierSummaryOutput),
     ]
     handle.acoustic_identifier_summary_classify.restype = None
     handle.background_model_init.argtypes = [ctypes.POINTER(BackgroundModelState), ctypes.c_uint32]
@@ -173,7 +267,83 @@ def library() -> ctypes.CDLL:
     handle.background_model_mse_threshold.restype = BOOL
     handle.background_model_reset_inverse_correlation.argtypes = [ctypes.POINTER(BackgroundModelState)]
     handle.background_model_reset_inverse_correlation.restype = None
+    handle.odometry_init.argtypes = [ctypes.POINTER(OdometryContext)]
+    handle.odometry_init.restype = None
+    handle.odometry_update.argtypes = [
+        ctypes.POINTER(OdometryContext),
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_uint32,
+        ctypes.c_int16,
+        ctypes.c_int16,
+        ctypes.c_int16,
+    ]
+    handle.odometry_update.restype = None
+    handle.odometry_get_pose.argtypes = [
+        ctypes.POINTER(OdometryContext),
+        ctypes.POINTER(OdometryPose),
+    ]
+    handle.odometry_get_pose.restype = None
+    handle.smooth_avoidance_plan.argtypes = [
+        ctypes.POINTER(SmoothAvoidanceInput),
+        ctypes.POINTER(SmoothAvoidanceOutput),
+    ]
+    handle.smooth_avoidance_plan.restype = None
+    handle.safety_arbiter_tof_usable.argtypes = [ctypes.POINTER(SensorSnapshot)]
+    handle.safety_arbiter_tof_usable.restype = ctypes.c_bool
+    handle.safety_arbiter_motion_allowed.argtypes = [
+        ctypes.POINTER(SensorSnapshot),
+        ctypes.c_bool,
+        ctypes.POINTER(SafetyArbiterStatus),
+    ]
+    handle.safety_arbiter_motion_allowed.restype = ctypes.c_bool
+    handle.safety_arbiter_arbitrate.argtypes = [
+        ctypes.POINTER(SafetyMotionCommand),
+        ctypes.POINTER(SensorSnapshot),
+        ctypes.c_bool,
+        ctypes.POINTER(SafetyMotionCommand),
+    ]
+    handle.safety_arbiter_arbitrate.restype = None
     return handle
+
+
+def safety_arbiter_arbitrate_step(
+    command: SafetyMotionCommand,
+    snapshot: SensorSnapshot,
+    sensor_fresh: bool = True,
+) -> SafetyMotionCommand:
+    handle = library()
+    arbitrated = SafetyMotionCommand()
+    handle.safety_arbiter_arbitrate(
+        ctypes.byref(command),
+        ctypes.byref(snapshot),
+        ctypes.c_bool(sensor_fresh),
+        ctypes.byref(arbitrated),
+    )
+    return arbitrated
+
+
+def safety_arbiter_check_allowed(
+    snapshot: SensorSnapshot,
+    sensor_fresh: bool = True,
+) -> tuple[bool, SafetyArbiterStatus]:
+    handle = library()
+    status = SafetyArbiterStatus()
+    allowed = handle.safety_arbiter_motion_allowed(
+        ctypes.byref(snapshot),
+        ctypes.c_bool(sensor_fresh),
+        ctypes.byref(status),
+    )
+    return allowed, status
+
+
+def smooth_avoidance_plan_step(
+    input_val: SmoothAvoidanceInput,
+) -> SmoothAvoidanceOutput:
+    handle = library()
+    output = SmoothAvoidanceOutput()
+    handle.smooth_avoidance_plan(ctypes.byref(input_val), ctypes.byref(output))
+    return output
 
 
 def sound_follow_trace(inputs: Iterable[tuple[SoundFollowInput, int]]) -> list[SoundFollowOutput]:
@@ -189,13 +359,15 @@ def sound_follow_trace(inputs: Iterable[tuple[SoundFollowInput, int]]) -> list[S
     return outputs
 
 
-def obstacle_avoidance_step(snapshot: SensorSnapshot, *, fault_active: bool = False) -> ObstacleAvoidanceOutput:
-    return obstacle_avoidance_trace([snapshot], fault_active=fault_active)[0]
+def obstacle_avoidance_step(
+    snapshot: SensorSnapshot, *, fault_active: bool = False, target_steering_deg: int = 0,
+) -> ObstacleAvoidanceOutput:
+    return obstacle_avoidance_trace([snapshot], fault_active=fault_active, target_steering_deg=target_steering_deg)[0]
 
 
 def obstacle_avoidance_trace(
     snapshots: Iterable[SensorSnapshot], *, fault_active: bool = False,
-    timestamps_ms: Iterable[int] | None = None,
+    timestamps_ms: Iterable[int] | None = None, target_steering_deg: int = 0,
 ) -> list[ObstacleAvoidanceOutput]:
     """Run at the firmware's 100 ms period unless measured timestamps are supplied.
 
@@ -208,10 +380,11 @@ def obstacle_avoidance_trace(
     times = list(timestamps_ms) if timestamps_ms is not None else [i * 100 for i in range(len(snapshots))]
     if len(times) != len(snapshots):
         raise ValueError("one timestamp is required per snapshot")
+    target = ctypes.c_int16(target_steering_deg)
     for snapshot, now_ms in zip(snapshots, times):
         output = ObstacleAvoidanceOutput()
         handle.obstacle_avoidance_controller_step(
-            ctypes.byref(snapshot), BOOL(fault_active), now_ms, ctypes.byref(output)
+            ctypes.byref(snapshot), BOOL(fault_active), now_ms, target, ctypes.byref(output)
         )
         outputs.append(output)
     return outputs

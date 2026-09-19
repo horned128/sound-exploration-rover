@@ -102,30 +102,31 @@ static void test_schedule(void) {
     assert(g_task_status_update_count==100 && g_task_status_elapsed_total_ms==1001);
     assert(g_task_status_period_min_ms==10 && g_task_status_period_max_ms==11);
     assert(g_task_status_late_count==1 && g_task_status_period_last_ms==10);
-    assert(capture_count==10 && commits==9 && calls==64);
+    assert(capture_count==10 && commits==10 && calls==100);
     for(unsigned i=0;i<capture_count;i++)assert(captures[i]==101+100*i);
-    for(unsigned i=0;i<commits;i++)assert(completed[i]==161+100*i);
+    for(unsigned i=0;i<commits;i++)assert(completed[i]==101+100*i);
     assert(g_task_status_snapshot_period_last_ms==100);
     /* Two heartbeat transitions and the exit's LED-off write. */
     assert(led_changes==3 && led==BSP_IO_LEVEL_HIGH);
 }
 static void test_busy_and_delay(void) {
     reset();busy_from=120;busy_until=350;run(50);
-    assert(capture_count==3 && commits==2 && retries==23);
-    assert(captures[0]==100 && captures[1]==400 && captures[2]==500);
-    assert(completed[0]==390 && completed[1]==460);
-    /* A missed interval sends at most one word per wake, keeps the pending frame. */
+    assert(capture_count==5 && commits==5 && retries==15);
+    assert(captures[0]==100 && captures[1]==200 && captures[2]==360 && captures[3]==400 && captures[4]==500);
+    assert(completed[0]==100 && completed[1]==350 && completed[2]==360 && completed[3]==400 && completed[4]==500);
+    /* A missed interval recovers immediately on wake, keeping subsequent frames. */
     reset();steps[0]=100;steps[1]=550;steps[2]=0;step_count=3;run(10);
     assert(g_task_status_update_count==9 && g_task_status_elapsed_total_ms==720);
-    assert(g_task_status_period_max_ms==550 && capture_count==2 && commits==1 && calls==9);
-    assert(captures[0]==100 && captures[1]==710 && completed[0]==700);
-    assert(g_task_status_snapshot_period_last_ms==610);
+    assert(g_task_status_period_max_ms==550 && capture_count==3 && commits==3 && calls==30);
+    assert(captures[0]==100 && captures[1]==650 && captures[2]==700);
+    assert(completed[0]==100 && completed[1]==650 && completed[2]==700);
+    assert(g_task_status_snapshot_period_last_ms==50);
 }
 static void test_time_wrap(void) {
     reset();epoch=now=(UD)UINT32_MAX-50;run(20);
     assert(g_task_status_elapsed_total_ms==200 && captures[0]==100 && captures[1]==200);
     reset();steps[0]=UINT32_MAX;steps[1]=UINT32_MAX;step_count=2;run(2);
-    assert(g_task_status_elapsed_total_ms==(UD)UINT32_MAX*2 && calls==2 && capture_count==1);
+    assert(g_task_status_elapsed_total_ms==(UD)UINT32_MAX*2 && calls==20 && capture_count==2);
 }
 static void test_failures(void) {
     for(int n=1;n<=3;n++) {

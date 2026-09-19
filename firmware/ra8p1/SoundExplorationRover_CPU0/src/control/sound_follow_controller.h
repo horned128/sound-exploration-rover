@@ -34,6 +34,8 @@ typedef struct st_sound_follow_input {
     BOOL fault_active;
     BOOL motion_allowed;
     acoustic_observation_t observation;
+    BOOL match_required;
+    BOOL target_sound_matched;
 } sound_follow_input_t;
 
 typedef struct st_sound_follow_output {

@@ -23,6 +23,7 @@ def test_sensor_liveness_stop_and_recovery(tmp_path, sensor_mode):
         f"-I{tmp_path}", f"-I{sim / 'cpu0/shim'}", f"-I{cpu0}",
         str(cpu0 / "tasks/task_think.c"), str(cpu0 / "control/sound_follow_controller.c"),
         str(cpu0 / "control/obstacle_avoidance_controller.c"),
+        str(cpu0 / "control/safety_arbiter.c"),
         str(sim / "cpu0/liveness_test.c"), "-o", str(executable),
     ], check=True)
     subprocess.run([str(executable)], check=True, timeout=10)

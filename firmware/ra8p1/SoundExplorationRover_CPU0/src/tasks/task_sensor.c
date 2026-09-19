@@ -3,6 +3,8 @@
  * @brief  CPU0センサー取得タスク実装
  * ================================================================= */
 #include "task_sensor.h"                                     /* センサー取得タスクAPI */
+#include "services/odometry.h"                              /* オドメトリサービスAPI */
+#include "ipc/actuator_ipc_client.h"                        /* CPU1状態取得API */
 #include "config/sensor_config.h"                          /* センサー周期、再試行 */
 #include "config/task_config.h"                            /* センサータスク優先度 */
 
@@ -54,6 +56,12 @@ EXPORT volatile UW g_task_sensor_i2c_transfer_timeout_count; /**< I2C転送タ�
 EXPORT volatile UW g_task_sensor_tof_data_ready_timeout_count[CPU0_SENSOR_TOF_COUNT]; /**< ToFデータ準備タイムアウト回数 */
 EXPORT volatile UW g_task_sensor_invalid_data_count[CPU0_SENSOR_TOF_COUNT]; /**< ToF測距無効回数 */
 EXPORT volatile UW g_task_sensor_hub_recovery_count;         /**< I2C障害後ハブ再初期化回数 */
+
+EXPORT volatile W  g_task_sensor_odometry_x_mm = 0;
+EXPORT volatile W  g_task_sensor_odometry_y_mm = 0;
+EXPORT volatile H  g_task_sensor_odometry_theta_deg_x10 = 0;
+EXPORT volatile UW g_task_sensor_odometry_distance_mm = 0U;
+EXPORT volatile BOOL g_task_sensor_odometry_valid = FALSE;
 
 /** =================================================================*
  * @brief  最新スナップショットをmutex下で公開しLive Watch値も更新
@@ -204,6 +212,7 @@ EXPORT app_fault_t task_sensor_create(void) {
         g_task_sensor_invalid_data_count[index] = 0U;
     }
     task_sensor_snapshot_publish(&sensor_snapshot);
+    odometry_service_init();
 
     sensor_mutex_id = tk_cre_mtx(&sensor_mutex_config);
     if (sensor_mutex_id <= 0) {
@@ -315,6 +324,18 @@ LOCAL void task_sensor_entry(INT stacd, void * exinf) {
             update_count++;
             next.update_count = update_count;
             task_sensor_snapshot_publish(&next);
+
+            actuator_status_t actuator_status = {0};
+            if (actuator_ipc_client_status_get(&actuator_status)) {
+                odometry_service_update(&actuator_status, next.gyro_dps_x10[2]);
+                odometry_pose_t pose = {0};
+                odometry_service_get_pose(&pose);
+                g_task_sensor_odometry_x_mm = pose.x_mm;
+                g_task_sensor_odometry_y_mm = pose.y_mm;
+                g_task_sensor_odometry_theta_deg_x10 = pose.theta_deg_x10;
+                g_task_sensor_odometry_distance_mm = pose.total_distance_mm;
+                g_task_sensor_odometry_valid = pose.valid;
+            }
         } else {
             g_task_sensor_hub_recovery_count++;
             sensor_hub_transport_fault_deinit();
