@@ -2,22 +2,23 @@
  * @file   task_registry.c
  * @brief  CPU1タスク群の初期化
  * ================================================================= */
-#include "task_registry.h"                                        /* CPU1タスク初期化API */
-#include "task_safety.h"                                      /* 安全ウォッチドッグタスクAPI */
-#include "task_actuator.h"                                    /* アクチュエータタスク生成・開始API */
-#include "task_status.h"                                      /* 状態表示タスク生成・開始API */
+#include "task_registry.h"                                  /* CPU1タスク初期化API */
+#include "task_safety.h"                                    /* 安全ウォッチドッグタスクAPI */
+#include "task_actuator.h"                                  /* アクチュエータタスク生成・開始API */
+#include "task_status.h"                                    /* 状態表示タスク生成・開始API */
 
 typedef app_fault_t (*task_registry_create_t)(void);
 typedef app_fault_t (*task_registry_start_t)(void);
 typedef void (*task_registry_delete_t)(void);
 
+/**< CPU1タスクの生成・開始・解放API登録 */
 typedef struct st_task_registry_registration {
-    task_registry_create_t create;
-    task_registry_start_t start;
-    task_registry_delete_t delete;
+    task_registry_create_t create;                          /**< タスク生成関数 */
+    task_registry_start_t start;                            /**< タスク開始関数 */
+    task_registry_delete_t delete;                          /**< タスク解放関数 */
 } task_registry_registration_t;
 
-LOCAL void task_registry_delete(UW task_count);                /* 登録済みタスク逆順解放 */
+LOCAL void task_registry_delete(UW task_count);             /* 登録済みタスク逆順解放 */
 
 /**< CPU1タスクの生成、開始、解放API登録。 */
 LOCAL task_registry_registration_t const task_registry_entries[] = {
@@ -38,7 +39,8 @@ LOCAL task_registry_registration_t const task_registry_entries[] = {
     },
 };
 
-#define CPU1_TASK_COUNT                    ((UW) (sizeof(task_registry_entries) / sizeof(task_registry_entries[0])))
+#define CPU1_TASK_COUNT                    /**< CPU1タスク登録数 */ \
+    ((UW) (sizeof(task_registry_entries) / sizeof(task_registry_entries[0])))
 
 /** =================================================================*
  * @brief  CPU1タスク群の生成・開始

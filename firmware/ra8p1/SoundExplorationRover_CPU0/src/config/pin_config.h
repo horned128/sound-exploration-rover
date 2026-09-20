@@ -6,7 +6,7 @@
 #ifndef SEROV_CPU0_CONFIG_PIN_H
 #define SEROV_CPU0_CONFIG_PIN_H
 
-#define CPU0_THINK_BLUE_LED_INDEX          (0U)
-#define CPU0_THINK_GREEN_LED_INDEX         (1U)
+#define CPU0_THINK_BLUE_LED_INDEX          (0U)             /**< 思考青LEDの番号 */
+#define CPU0_THINK_GREEN_LED_INDEX         (1U)             /**< 思考緑LEDの番号 */
 
 #endif /* SEROV_CPU0_CONFIG_PIN_H */

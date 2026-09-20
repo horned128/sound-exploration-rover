@@ -42,8 +42,8 @@ firmware/**/common/
 - `firmware/ra8p1/common/tflm/` は公式ベンダツリーとして型・リンケージ統一、整形、リネーム、lintの対象から除外する。アプリへ公開する `src/ai/tflm_runtime.h/.cc` の薄いC境界は本規約に従う。
 
 ```c
-LOCAL UW command_age_ms;                                  /**< 最終指令からの経過時間 */
-IMPORT volatile UW g_command_sequence;                    /**< 他モジュールが所有する最終sequence */
+LOCAL UW command_age_ms;                                    /**< 最終指令からの経過時間 */
+IMPORT volatile UW g_command_sequence;                      /**< 他モジュールが所有する最終sequence */
 
 EXPORT ER command_send(H left_rpm, H right_rpm);           /* 左右回転数指令送信 */
 ```
@@ -102,8 +102,11 @@ EXPORT INT usermain(void) {
 - 呼び出し条件、単位、安全動作、戻らない条件などが重要な場合だけ`@details`や`@note`、`@attention`を追加する。
 - 関数内部の処理コメントにはDoxygen形式を使わない。
 - `LOCAL`関数（μT-Kernelを使用しないコードでは`static`関数）も、他の関数と同じ形式で記載する。
+- ヘッダ内で本体まで定義する`Inline`関数も実装として扱い、関数直前に同じDoxygen形式のコメントを付ける。
 
 関数内部では、必要な箇所だけ通常コメントを使用し、対象となる文の直前に同じインデントで配置します。関数内部の行末コメントや61桁目への位置揃えは使用しません。
+
+複雑な制御、状態遷移、数値計算、通信の組立・再試行などを関数へ記述する場合は、処理の意図、判断の順序、境界条件が追えるように適宜コメントを付けます。各文の逐語的な説明や、コードと同じ内容のコメントは避けます。
 
 ```c
 /* 制御側が安全出力とIPC受信割込みを初期化する時間を確保する。 */
@@ -143,12 +146,14 @@ command.left_target_rpm = 0;
 
 ## マクロ定義
 
+マクロ定義（インクルードガードを除く）は、定義した行の末尾に簡潔な説明コメントを付けます。関数形式マクロや複数行マクロも対象です。コメントはマクロの用途、単位、または値の意味を補足し、定義値をそのまま言い換えるだけにはしません。
+
 連続するオブジェクト形式の`#define`は、マクロ名の次に空白を入れ、定義値の開始位置を行頭から44桁目に揃えます。マクロ名が長く44桁目までに収まらない場合は、名前の直後に空白を1つ置きます。揃える範囲は空行または別のプリプロセッサディレクティブまでの連続ブロックです。関数形式マクロと複数行マクロは対象外とします。
 
 ```c
-#define CPU0_ACTUATOR_STARTUP_DELAY_MS     (250U)
-#define CPU0_COMMAND_PERIOD_MS             (50U)
-#define CPU0_COMMAND_TARGET_TIMEOUT_MS     (500U)
+#define CPU0_ACTUATOR_STARTUP_DELAY_MS     (250U)           /**< アクチュエータ初期化待ち時間[ms] */
+#define CPU0_COMMAND_PERIOD_MS             (50U)            /**< CPU0指令送信の周期[ms] */
+#define CPU0_COMMAND_TARGET_TIMEOUT_MS     (500U)           /**< CPU1指令応答の期限[ms] */
 ```
 
 ## 外部変数
@@ -156,13 +161,13 @@ command.left_target_rpm = 0;
 RA8P1の`IMPORT`変数、その他のファームウェアの`extern`変数は、宣言行の末尾に簡易的なDoxygenコメントを1行で記載します。
 
 ```c
-IMPORT bsp_leds_t g_bsp_leds;                              /**< BSPが管理するLED構成情報 */
+IMPORT bsp_leds_t g_bsp_leds;                               /**< BSPが管理するLED構成情報 */
 ```
 
 実体の定義場所や所有者が重要な場合は、短く補足します。
 
 ```c
-IMPORT bsp_leds_t g_bsp_leds;                              /**< BSP/SDK生成コードが管理するLED構成情報 */
+IMPORT bsp_leds_t g_bsp_leds;                               /**< BSP/SDK生成コードが管理するLED構成情報 */
 ```
 
 ## 内部変数
@@ -235,6 +240,34 @@ LOCAL void status_led_toggle(void) {
 ```c
 LOCAL void status_led_toggle (void)
 ```
+
+## 構造体
+
+ユーザーコードの`typedef struct`には、typedefの直前に構造体全体の役割を示す`/**< ... */`コメントを1行で記載します。各メンバにも、用途・単位・状態の意味を示す`/**< ... */`コメントを個別に付けます。
+
+```c
+/**< CPU1へ送る左右車輪の走行目標 */
+typedef struct st_motion_target {
+    H left_rpm;                                             /**< 左車輪目標RPM */
+    H right_rpm;                                            /**< 右車輪目標RPM */
+} motion_target_t;
+```
+
+メンバのコード部分が60桁を超える場合は、説明をメンバ宣言の直前の行へ移します。インクルードガードや列挙値には、この構造体用のコメント規則を適用しません。
+
+## 列挙型
+
+ユーザーコードの`typedef enum`には、typedefの直前に列挙型全体の役割を示す`/**< ... */`コメントを1行で記載します。各列挙値にも、状態・結果・異常理由などを判別できる`/**< ... */`コメントを個別に付けます。
+
+```c
+/**< センサー取得処理の結果 */
+typedef enum e_sensor_result {
+    SENSOR_RESULT_VALID = 0U,                               /**< センサー値が有効 */
+    SENSOR_RESULT_TIMEOUT,                                  /**< 取得待ちがタイムアウト */
+} sensor_result_t;
+```
+
+列挙値のコード部分が60桁を超える場合は、説明を列挙値の直前の行へ移します。インクルードガード用マクロや列挙型の内部名には、マクロコメント規則を適用しません。
 
 ## 中括弧
 
@@ -325,6 +358,7 @@ configuration.xml
 - [ ] `IMPORT`/`extern`とファイルスコープの内部変数は簡易Doxygenコメントになっている。
 - [ ] 関数内の内部変数は、同じインデントの直前行コメントで説明されている。
 - [ ] 複数行の内部変数は、宣言前の行に`/**< ... */`形式のコメントを置いている。
+- [ ] `typedef struct`と`typedef enum`には型全体および各メンバ・列挙値の役割コメントを付けている。
 - [ ] `LOCAL const`/`static const`変数は、原則としてファイルスコープに配置している。
 - [ ] 中括弧はK&Rスタイルで、開き中括弧を宣言・制御文と同じ行に置いている。
 - [ ] 関数内部のコメントは必要最低限で、Doxygen形式を使っていない。

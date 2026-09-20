@@ -4,21 +4,23 @@
  * @details 制御タスク(task_actuator: 優先度4)より高い優先度3で動作し、
  *          制御タスクのハングまたは指令途絶時に独立して即座に安全停止を行う。
  * ================================================================= */
-#include "task_safety.h"
-#include "config/task_config.h"
-#include "drivers/bts7960.h"
-#include "services/actuator_service.h"
-#include "task_actuator.h"
-#include <tk/tkernel.h>
+#include "task_safety.h"                                    /* 安全タスクAPI */
+#include "config/task_config.h"                             /* タスク設定 */
+#include "drivers/bts7960.h"                                /* PWM安全停止API */
+#include "services/actuator_service.h"                      /* アクチュエータ更新状態 */
+#include "task_actuator.h"                                  /* 制御タスク更新状態 */
+#include <tk/tkernel.h>                                     /* μT-Kernel API */
 
-#define CPU1_SAFETY_ACTUATOR_HANG_TIMEOUT_MS  (100U)
+#define CPU1_SAFETY_ACTUATOR_HANG_TIMEOUT_MS (100U)         /**< 応答停止判定時間[ms] */
 
-LOCAL void task_safety_entry(INT start_code, void * p_extended_information);
+LOCAL void task_safety_entry(INT start_code, void * p_extended_information); /* 安全監視タスク本体 */
 
-LOCAL ID safety_task_id = 0;
+LOCAL ID safety_task_id = 0;                                /**< 安全監視タスクID */
+/**< アクチュエータ応答停止検出状態 */
 EXPORT volatile BOOL g_task_safety_actuator_hang_detected = FALSE;
-EXPORT volatile BOOL g_task_safety_timeout_detected = FALSE;
+EXPORT volatile BOOL g_task_safety_timeout_detected = FALSE;/**< 安全監視timeout検出状態 */
 
+/**< アクチュエータ応答監視タスクの生成設定 */
 LOCAL T_CTSK const safety_task_config = {
     .exinf   = NULL,
     .tskatr  = TA_HLNG | TA_RNG3,

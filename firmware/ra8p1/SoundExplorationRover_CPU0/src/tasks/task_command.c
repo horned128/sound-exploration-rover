@@ -7,7 +7,7 @@
 #include "ipc/actuator_ipc_client.h"                        /* CPU1へのIPC送信API */
 #include "task_think.h"                                     /* 思考タスクへの異常通知 */
 
-#define CPU0_COMMAND_IPC_RECOVERY_STATUS_COUNT (2U)
+#define CPU0_COMMAND_IPC_RECOVERY_STATUS_COUNT (2U)         /**< IPC回復確認に必要な連続ステータス数 */
 
 /**< 最新アクチュエータ目標を保護するμT-Kernel mutex設定 */
 LOCAL T_CMTX const command_mutex_config = {
@@ -15,9 +15,9 @@ LOCAL T_CMTX const command_mutex_config = {
     .ceilpri = 0,
 };
 
-LOCAL void task_command_entry(INT stacd, void * exinf);                     /* 指令タスク本体 */
-LOCAL void task_command_send_latest(void);                                  /* 最新指令スナップショット送信 */
-LOCAL BOOL task_command_sequence_reached(UW actual, UW reference);          /* 24 bit sequence到達判定 */
+LOCAL void task_command_entry(INT stacd, void * exinf);     /* 指令タスク本体 */
+LOCAL void task_command_send_latest(void);                  /* 最新指令送信 */
+LOCAL BOOL task_command_sequence_reached(UW actual, UW reference); /* 24 bit sequence到達判定 */
 LOCAL void task_command_recovery_check(const actuator_status_t * p_status); /* IPC回復確認 */
 
 /**< CPU1へIPC指令を送信するタスク設定 */
@@ -30,14 +30,14 @@ LOCAL T_CTSK const command_task_config = {
     .bufptr = NULL,
 };
 
-LOCAL ID command_task_id;                                  /**< 指令タスクID */
-LOCAL ID command_mutex_id;                                 /**< 最新目標保護mutex ID */
-LOCAL BOOL command_task_started;                           /**< 指令タスク開始状態 */
-LOCAL BOOL command_ipc_open;                               /**< IPC open状態 */
-LOCAL BOOL command_emergency_reset_pending;                /**< CPU1 estopラッチ解除待ち */
-LOCAL BOOL command_timeout_reported;                       /**< 目標期限切れ通知済み状態 */
-LOCAL BOOL command_target_valid;                           /**< 思考タスクの目標受信済み状態 */
-LOCAL UW command_target_age_ms;                            /**< 最新目標の経過時間 */
+LOCAL ID command_task_id;                                   /**< 指令タスクID */
+LOCAL ID command_mutex_id;                                  /**< 最新目標保護mutex ID */
+LOCAL BOOL command_task_started;                            /**< 指令タスク開始状態 */
+LOCAL BOOL command_ipc_open;                                /**< IPC open状態 */
+LOCAL BOOL command_emergency_reset_pending;                 /**< CPU1 estopラッチ解除待ち */
+LOCAL BOOL command_timeout_reported;                        /**< 目標期限切れ通知済み状態 */
+LOCAL BOOL command_target_valid;                            /**< 思考タスクの目標受信済み状態 */
+LOCAL UW command_target_age_ms;                             /**< 最新目標の経過時間 */
 LOCAL BOOL command_ipc_fault_active;                        /**< IPC送信異常からの回復待ち */
 LOCAL BOOL command_recovery_safe_sequence_valid;            /**< 回復用安全指令を送信済み */
 LOCAL UW command_recovery_safe_sequence;                    /**< 最初に正常送信した安全指令sequence */
@@ -59,11 +59,11 @@ LOCAL rover_motion_target_t command_last_sent_target = {
     .emergency_stop = TRUE,
 };
 
-EXPORT volatile UW g_task_command_sequence;                  /**< 最終送信シーケンス */
-EXPORT volatile UW g_task_command_send_count;                /**< 正常送信回数 */
-EXPORT volatile fsp_err_t g_task_command_last_error;         /**< 最終IPCエラー */
-EXPORT volatile BOOL g_task_command_peer_ready;               /**< CPU1状態受信済み */
-EXPORT volatile BOOL g_task_command_target_valid;             /**< 思考タスクの目標受信済み */
+EXPORT volatile UW g_task_command_sequence;                 /**< 最終送信シーケンス */
+EXPORT volatile UW g_task_command_send_count;               /**< 正常送信回数 */
+EXPORT volatile fsp_err_t g_task_command_last_error;        /**< 最終IPCエラー */
+EXPORT volatile BOOL g_task_command_peer_ready;             /**< CPU1状態受信済み */
+EXPORT volatile BOOL g_task_command_target_valid;           /**< 思考タスクの目標受信済み */
 
 /** =================================================================*
  * @brief  指令タスクと共有資源生成

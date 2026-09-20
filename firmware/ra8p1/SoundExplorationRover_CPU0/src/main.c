@@ -4,17 +4,18 @@
  * @author hino.a
  * @date   2026-08
  * ================================================================= */
-#include "hal_data.h"                                       /* FSP生成のHAL/BSPインスタンス、周辺機器設定、型定義 */
+#include "hal_data.h"                                       /* FSP生成HAL/BSPのインスタンスと型定義 */
 #include "tasks/task_infer.h"                               /* 非致命の音響推論タスク起動API */
 #include "tasks/task_registry.h"                            /* CPU0独立タスクの初期化API */
 #include "tasks/task_think.h"                               /* CPU0起動異常のLED表示API */
-#include <tk/tkernel.h>                                     /* μT-Kernelのタスク休止API、型定義、共通定義 */
+#include <tk/tkernel.h>                                     /* μT-Kernel型とタスク休止API */
 
 EXPORT INT usermain(void);                                  /* CPU0アプリケーション起動 */
 
 /** =================================================================*
  * @brief  CPU0アプリケーション起動
- * @details CPU1を起動し、μT-Kernel初期タスク上でCPU0タスク群を生成・開始して永久休止する。
+ * @details CPU1を起動し、μT-Kernel初期タスク上でCPU0タスク群を生成・開始する。
+ *          起動後は初期タスクを永久休止して、各タスクへ処理を委譲する。
  * @return μT-Kernelへ返す終了コード（通常は到達しない）。
  * ================================================================= */
 EXPORT INT usermain(void) {

@@ -8,9 +8,10 @@
 #include "hal_data.h"                                       /* FSPエラー型 */
 #include <tk/tkernel.h>                                     /* μT-Kernel型 */
 
+/**< BMI270から取得した3軸rawセンサー値 */
 typedef struct st_bmi270_raw_data {
-    H accel[3];
-    H gyro[3];
+    H accel[3];                                             /**< 3軸加速度raw値 */
+    H gyro[3];                                              /**< 3軸角速度raw値 */
 } bmi270_raw_data_t;
 
 EXPORT fsp_err_t bmi270_init(void);                         /* 初期化、raw accel/gyro出力開始 */

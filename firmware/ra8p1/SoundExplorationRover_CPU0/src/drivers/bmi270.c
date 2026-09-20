@@ -4,48 +4,48 @@
  * @details PORまたはソフトリセット後にBosch SensortecのMaximum FIFO設定イメージを転送する。
  *          設定イメージのライセンスはリポジトリ直下のTHIRD_PARTY_NOTICES.mdを参照。
  * ================================================================= */
-#include "bmi270.h"                                       /* BMI270公開API */
-#include "platform/i2c_bus.h"                             /* I2CバスAPI */
-#include "config/sensor_config.h"                         /* BMI270設定値 */
+#include "bmi270.h"                                         /* BMI270公開API */
+#include "platform/i2c_bus.h"                               /* I2CバスAPI */
+#include "config/sensor_config.h"                           /* BMI270設定値 */
 
-#define BMI270_ADDRESS_SDO_LOW              (0x68U)
-#define BMI270_ADDRESS_SDO_HIGH             (0x69U)
+#define BMI270_ADDRESS_SDO_LOW             (0x68U)          /**< BMI270アドレスSDOのLow */
+#define BMI270_ADDRESS_SDO_HIGH            (0x69U)          /**< BMI270アドレスSDOのHigh */
 
-#define BMI270_REG_CHIP_ID                  (0x00U)
-#define BMI270_REG_ACCEL_DATA               (0x0CU)
-#define BMI270_REG_INTERNAL_STATUS           (0x21U)
-#define BMI270_REG_ACCEL_CONFIG             (0x40U)
-#define BMI270_REG_ACCEL_RANGE              (0x41U)
-#define BMI270_REG_GYRO_CONFIG              (0x42U)
-#define BMI270_REG_GYRO_RANGE               (0x43U)
-#define BMI270_REG_INIT_CTRL                (0x59U)
-#define BMI270_REG_INIT_ADDR_0              (0x5BU)
-#define BMI270_REG_INIT_ADDR_1              (0x5CU)
-#define BMI270_REG_INIT_DATA                (0x5EU)
-#define BMI270_REG_POWER_CONFIG             (0x7CU)
-#define BMI270_REG_POWER_CONTROL            (0x7DU)
-#define BMI270_REG_COMMAND                  (0x7EU)
+#define BMI270_REG_CHIP_ID                 (0x00U)          /**< BMI270レジスタチップのID */
+#define BMI270_REG_ACCEL_DATA              (0x0CU)          /**< BMI270レジスタ加速度のデータ */
+#define BMI270_REG_INTERNAL_STATUS         (0x21U)          /**< BMI270レジスタ内部の状態 */
+#define BMI270_REG_ACCEL_CONFIG            (0x40U)          /**< BMI270レジスタ加速度の設定 */
+#define BMI270_REG_ACCEL_RANGE             (0x41U)          /**< BMI270レジスタ加速度のレンジ */
+#define BMI270_REG_GYRO_CONFIG             (0x42U)          /**< BMI270レジスタ角速度の設定 */
+#define BMI270_REG_GYRO_RANGE              (0x43U)          /**< BMI270レジスタ角速度のレンジ */
+#define BMI270_REG_INIT_CTRL               (0x59U)          /**< BMI270レジスタ初期化の制御 */
+#define BMI270_REG_INIT_ADDR_0             (0x5BU)          /**< BMI270レジスタ初期化アドレスの0 */
+#define BMI270_REG_INIT_ADDR_1             (0x5CU)          /**< BMI270レジスタ初期化アドレスの1 */
+#define BMI270_REG_INIT_DATA               (0x5EU)          /**< BMI270レジスタ初期化のデータ */
+#define BMI270_REG_POWER_CONFIG            (0x7CU)          /**< BMI270レジスタ電源の設定 */
+#define BMI270_REG_POWER_CONTROL           (0x7DU)          /**< BMI270レジスタ電源の制御 */
+#define BMI270_REG_COMMAND                 (0x7EU)          /**< BMI270レジスタの指令 */
 
-#define BMI270_CHIP_ID                      (0x24U)
-#define BMI270_COMMAND_SOFT_RESET           (0xB6U)
-#define BMI270_INTERNAL_STATUS_INIT_OK       (0x01U)
-#define BMI270_INTERNAL_STATUS_MESSAGE_MASK (0x0FU)
+#define BMI270_CHIP_ID                     (0x24U)          /**< BMI270チップのID */
+#define BMI270_COMMAND_SOFT_RESET          (0xB6U)          /**< BMI270指令ソフトのリセット */
+#define BMI270_INTERNAL_STATUS_INIT_OK     (0x01U)          /**< BMI270内部状態初期化の成功状態 */
+#define BMI270_INTERNAL_STATUS_MESSAGE_MASK (0x0FU)         /**< BMI270内部状態メッセージのマスク */
 
-#define BMI270_ACCEL_CONFIG_100HZ           (0xA8U)
-#define BMI270_ACCEL_RANGE_4G               (0x01U)
-#define BMI270_GYRO_CONFIG_100HZ            (0xA8U)
-#define BMI270_GYRO_RANGE_500DPS            (0x02U)
-#define BMI270_POWER_CONTROL_ACCEL_GYRO     (0x06U)
+#define BMI270_ACCEL_CONFIG_100HZ          (0xA8U)          /**< BMI270加速度設定の100hz */
+#define BMI270_ACCEL_RANGE_4G              (0x01U)          /**< BMI270加速度レンジの4G */
+#define BMI270_GYRO_CONFIG_100HZ           (0xA8U)          /**< BMI270角速度設定の100hz */
+#define BMI270_GYRO_RANGE_500DPS           (0x02U)          /**< BMI270角速度レンジの500dps */
+#define BMI270_POWER_CONTROL_ACCEL_GYRO    (0x06U)          /**< BMI270電源制御加速度の角速度 */
 
 /* INIT_ADDRはワード単位のため、設定イメージを偶数byteずつ転送する。 */
-#define BMI270_CONFIG_WRITE_CHUNK            (32U)
-#define BMI270_CONFIG_STARTUP_DELAY_MS       (30U)
+#define BMI270_CONFIG_WRITE_CHUNK          (32U)            /**< BMI270設定書込みの分割 */
+#define BMI270_CONFIG_STARTUP_DELAY_MS     (30U)            /**< BMI270設定起動の遅延[ms] */
 
-/**< BMI270初期化時に転送するBosch Sensortec Maximum FIFO設定イメージ */
 /*
  * Bosch Sensortec BMI270 SensorAPI bmi270_maximum_fifo_config_file。
  * Copyright (c) 2023 Bosch Sensortec GmbH. BSD-3-Clause.
  */
+/**< BMI270初期化時に転送するBosch Sensortec Maximum FIFO設定イメージ */
 LOCAL const UB bmi270_maximum_fifo_config_file[] = {
     0xc8, 0x2e, 0x00, 0x2e, 0x80, 0x2e, 0x1a, 0x00, 0xc8, 0x2e, 0x00, 0x2e, 0xc8, 0x2e, 0x00, 0x2e, 0xc8, 0x2e, 0x00,
     0x2e, 0xc8, 0x2e, 0x00, 0x2e, 0xc8, 0x2e, 0x00, 0x2e, 0xc8, 0x2e, 0x00, 0x2e, 0x90, 0x32, 0x21, 0x2e, 0x59, 0xf5,
@@ -67,14 +67,14 @@ LOCAL const UB bmi270_maximum_fifo_config_file[] = {
     0xf5, 0xeb, 0x2c, 0xe1, 0x6f
 };
 
-LOCAL UB bmi270_address;                                   /**< 検出済みBMI270 7bitアドレス */
-LOCAL BOOL bmi270_initialized;                             /**< 初期化完了状態 */
+LOCAL UB bmi270_address;                                    /**< 検出済みBMI270 7bitアドレス */
+LOCAL BOOL bmi270_initialized;                              /**< 初期化完了状態 */
 
-LOCAL fsp_err_t bmi270_write_register(UB register_address, UB value);
-LOCAL fsp_err_t bmi270_write_registers(UB register_address, const UB * p_data, UW length);
-LOCAL fsp_err_t bmi270_read_registers(UB register_address, UB * p_data, UW length);
-LOCAL fsp_err_t bmi270_load_config(void);
-LOCAL H bmi270_little_endian_i16(const UB * p_data);
+LOCAL fsp_err_t bmi270_write_register(UB register_address, UB value); /* BMI270レジスタ書込み */
+LOCAL fsp_err_t bmi270_write_registers(UB register_address, const UB * p_data, UW length); /* 連続書込み */
+LOCAL fsp_err_t bmi270_read_registers(UB register_address, UB * p_data, UW length); /* 連続読出し */
+LOCAL fsp_err_t bmi270_load_config(void);                   /* BMI270設定イメージ転送 */
+LOCAL H bmi270_little_endian_i16(const UB * p_data);        /* BMI270 little-endian値変換 */
 
 /** =================================================================*
  * @brief  BMI270の8bitレジスタ書込み
@@ -196,7 +196,8 @@ LOCAL fsp_err_t bmi270_load_config(void) {
 
 /** =================================================================*
  * @brief  BMI270初期化
- * @details I2Cアドレスを検出し、設定イメージ転送後に加速度・角速度出力を有効化する。
+ * @details I2Cアドレスを検出し、設定イメージを転送する。
+ *          転送後に加速度・角速度出力を有効化する。
  * @return FSPエラーコード
  * ================================================================= */
 EXPORT fsp_err_t bmi270_init(void) {

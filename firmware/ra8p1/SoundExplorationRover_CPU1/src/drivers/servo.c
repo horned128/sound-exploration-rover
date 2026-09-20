@@ -44,7 +44,7 @@ EXPORT volatile UH g_servo_pulse_us[SERVO_COUNT] = {
     SERVO_PULSE_CENTER_US,
 };
 
-LOCAL BOOL servo_running[SERVO_COUNT];                     /**< サーボPWM出力状態 */
+LOCAL BOOL servo_running[SERVO_COUNT];                      /**< サーボPWM出力状態 */
 /**< 各サーボ目標角度 */
 LOCAL H servo_target_deg[SERVO_COUNT] = {
     STEERING_CENTER_DEG,

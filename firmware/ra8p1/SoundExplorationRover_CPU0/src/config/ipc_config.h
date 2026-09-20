@@ -5,7 +5,7 @@
 #ifndef SEROV_CPU0_CONFIG_IPC_H
 #define SEROV_CPU0_CONFIG_IPC_H
 
-#define CPU0_IPC_RETRY_DELAY_MS            (1U)
-#define CPU0_IPC_SEND_RETRY_COUNT          (20U)
+#define CPU0_IPC_RETRY_DELAY_MS            (1U)             /**< IPC再試行の遅延[ms] */
+#define CPU0_IPC_SEND_RETRY_COUNT          (20U)            /**< IPC送信再試行の個数 */
 
 #endif /* SEROV_CPU0_CONFIG_IPC_H */

@@ -2,36 +2,38 @@
  * @file   obstacle_avoidance_controller.c
  * @brief  ToF・IMUによる方向保持付き障害物回避と有限回の切り返し
  * ================================================================= */
-#include "obstacle_avoidance_controller.h"                 /* 障害物回避判断API */
-#include "config/control_config.h"                         /* 距離、IMU、速度設定 */
-#include "config/sensor_config.h"                          /* センサー更新期限 */
+#include "obstacle_avoidance_controller.h"                  /* 障害物回避判断API */
+#include "config/control_config.h"                          /* 距離、IMU、速度設定 */
+#include "config/sensor_config.h"                           /* センサー更新期限 */
 
+/**< 障害物脱出シーケンスの段階 */
 typedef enum e_avoidance_escape_phase {
-    AVOIDANCE_ESCAPE_NONE = 0,
-    AVOIDANCE_ESCAPE_BACKUP,
-    AVOIDANCE_ESCAPE_STEER,
-    AVOIDANCE_ESCAPE_PIVOT,
-    AVOIDANCE_ESCAPE_BLOCKED,
+    AVOIDANCE_ESCAPE_NONE = 0,                              /**< 通常走行中 */
+    AVOIDANCE_ESCAPE_BACKUP,                                /**< 後退脱出中 */
+    AVOIDANCE_ESCAPE_STEER,                                 /**< 操舵脱出中 */
+    AVOIDANCE_ESCAPE_PIVOT,                                 /**< ピボット脱出中 */
+    AVOIDANCE_ESCAPE_BLOCKED,                               /**< 脱出不能で停止 */
 } avoidance_escape_phase_t;
 
+/**< 障害物回避の脱出段階・方向・進行監視状態 */
 typedef struct st_avoidance_controller {
-    avoidance_escape_phase_t phase;
-    B direction;
-    UB attempts;
-    UH backup_start_center_mm;
-    UW phase_ms;
-    UW clear_ms;
-    UW progress_ms;
-    W yaw_mdeg;
-    W progress_yaw_mdeg;
-    UW last_ms;
-    UW last_sample_ms;
-    UW last_update_count;
-    BOOL clock_valid;
-    BOOL sample_valid;
+    avoidance_escape_phase_t phase;                         /**< 現在の脱出段階 */
+    B direction;                                            /**< 回避方向（左負、右正） */
+    UB attempts;                                            /**< 切り返し試行回数 */
+    UH backup_start_center_mm;                              /**< 後退開始時の中央距離[mm] */
+    UW phase_ms;                                            /**< 段階開始からの経過時間[ms] */
+    UW clear_ms;                                            /**< 障害物クリア継続時間[ms] */
+    UW progress_ms;                                         /**< 進行観測からの経過時間[ms] */
+    W yaw_mdeg;                                             /**< 現在の相対ヨー角[mdeg] */
+    W progress_yaw_mdeg;                                    /**< 進行判定基準のヨー角[mdeg] */
+    UW last_ms;                                             /**< 前回制御時刻[ms] */
+    UW last_sample_ms;                                      /**< 前回センサー観測時刻[ms] */
+    UW last_update_count;                                   /**< 前回センサー更新回数 */
+    BOOL clock_valid;                                       /**< 制御時刻の有効状態 */
+    BOOL sample_valid;                                      /**< 最新センサー観測の有効状態 */
 } avoidance_controller_t;
 
-LOCAL avoidance_controller_t avoidance;                    /**< 回避方向、回頭量、脱出履歴 */
+LOCAL avoidance_controller_t avoidance;                     /**< 回避方向、回頭量、脱出履歴 */
 
 /** =================================================================*
  * @brief  Hの安全な絶対値
@@ -227,7 +229,8 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
     if (AVOIDANCE_ESCAPE_BLOCKED == avoidance.phase) {
         avoidance.clear_ms = (corridor_clear && new_sample) ? avoidance.clear_ms + elapsed_ms : 0U;
         if (avoidance.clear_ms < CPU0_SENSOR_REARM_CLEAR_MS) {
-            obstacle_avoidance_output_stop(CPU0_SENSOR_RULE_BLOCKED_STOP, CPU0_THINK_STATE_SENSOR_BLOCKED_STOP, p_output);
+            obstacle_avoidance_output_stop(CPU0_SENSOR_RULE_BLOCKED_STOP,
+                                           CPU0_THINK_STATE_SENSOR_BLOCKED_STOP, p_output);
             return;
         }
         obstacle_avoidance_controller_init();
@@ -280,7 +283,8 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
                                 (side_min_mm >= CPU0_SENSOR_ESCAPE_SIDE_MM);
         avoidance.clear_ms = (exit_clear && new_sample) ? avoidance.clear_ms + elapsed_ms : 0U;
         if (escape_trigger || (side_min_mm <= CPU0_SENSOR_ESCAPE_SIDE_MM)) {
-            /* 再接近時も回頭の向きと累積角を保ち、切り返しで少しずつ壁から向きを変える。 */
+            /* 再接近時も回頭の向きと累積角を保ち、切り返しで少しずつ */
+            /* 壁から向きを変える。 */
             obstacle_avoidance_start_backup(center_mm, FALSE, p_output);
             return;
         }
@@ -306,7 +310,8 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
         }
     }
 
-    /* 開けた進路を一定時間走るまでは成功履歴を消さず、短周期の再脱出にも上限を適用する。 */
+    /* 開けた進路を一定時間走るまでは成功履歴を消さず、短周期の再脱出にも */
+    /* 試行回数上限を適用する。 */
     BOOL const heading_clear = (0 == avoidance.direction) || (avoidance.yaw_mdeg >= CPU0_SENSOR_COMMIT_YAW_MDEG);
     avoidance.clear_ms = (corridor_clear && heading_clear && new_sample) ? avoidance.clear_ms + elapsed_ms : 0U;
     if (avoidance.clear_ms >= CPU0_SENSOR_REARM_CLEAR_MS) {
@@ -388,7 +393,8 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
     } else if (target_steer_w < -(W) CPU0_SENSOR_STEERING_MAX_DEG) {
         target_steer_w = -(W) CPU0_SENSOR_STEERING_MAX_DEG;
     }
-    /* 前向き3眼では壁と平行に近づくほど測距が伸びる。側面を見失って直進に戻さない。 */
+    /* 前向き3眼では壁と平行に近づくほど測距が伸びるため、側面を */
+    /* 見失っても直進へ戻さない。 */
     if ((0 != avoidance.direction) && (avoidance.yaw_mdeg < CPU0_SENSOR_COMMIT_YAW_MDEG) &&
         (target_steer_w * avoidance.direction < CPU0_SENSOR_COMMIT_STEERING_DEG)) {
         target_steer_w = avoidance.direction * CPU0_SENSOR_COMMIT_STEERING_DEG;

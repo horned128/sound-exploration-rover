@@ -2,11 +2,11 @@
  * @file   task_sensor.c
  * @brief  CPU0センサー取得タスク実装
  * ================================================================= */
-#include "task_sensor.h"                                     /* センサー取得タスクAPI */
+#include "task_sensor.h"                                    /* センサー取得タスクAPI */
 #include "services/odometry.h"                              /* オドメトリサービスAPI */
 #include "ipc/actuator_ipc_client.h"                        /* CPU1状態取得API */
-#include "config/sensor_config.h"                          /* センサー周期、再試行 */
-#include "config/task_config.h"                            /* センサータスク優先度 */
+#include "config/sensor_config.h"                           /* センサー周期、再試行 */
+#include "config/task_config.h"                             /* センサータスク優先度 */
 
 LOCAL void task_sensor_entry(INT stacd, void * exinf);      /* センサー取得タスク本体 */
 LOCAL void task_sensor_snapshot_publish(const sensor_snapshot_t * p_snapshot); /* 状態反映 */
@@ -35,33 +35,38 @@ EXPORT volatile BOOL g_task_sensor_test_pause;              /**< 既定FALSE、�
 LOCAL ID sensor_task_id;                                    /**< センサータスクID */
 LOCAL ID sensor_mutex_id;                                   /**< スナップショットmutex ID */
 LOCAL BOOL sensor_task_started;                             /**< センサータスク開始状態 */
-LOCAL sensor_snapshot_t sensor_snapshot;               /**< mutexで保護する最新値 */
+LOCAL sensor_snapshot_t sensor_snapshot;                    /**< mutexで保護する最新値 */
 
-EXPORT volatile UH g_task_sensor_tof_distance_mm[CPU0_SENSOR_TOF_COUNT]; /**< ToF距離 */
-EXPORT volatile H g_task_sensor_accel_mg[3];                 /**< IMU加速度 */
-EXPORT volatile H g_task_sensor_gyro_dps_x10[3];             /**< IMU角速度 */
-EXPORT volatile UW g_task_sensor_age_ms;                     /**< センサー値経過時間 */
-EXPORT volatile UW g_task_sensor_update_count;               /**< 正常更新回数 */
-EXPORT volatile UW g_task_sensor_error_flags;                /**< 現在のセンサー異常ビット */
-EXPORT volatile W g_task_sensor_last_error;                  /**< 現在のFSPエラー */
-EXPORT volatile UB g_task_sensor_valid_flags;                /**< ToF/IMU有効ビット */
-EXPORT volatile BOOL g_task_sensor_initialized;              /**< 全センサー初期化状態 */
-EXPORT volatile UB g_task_sensor_tof_range_status[CPU0_SENSOR_TOF_COUNT]; /**< ToF生Range Status */
-EXPORT volatile UB g_task_sensor_tof_result[CPU0_SENSOR_TOF_COUNT]; /**< ToF読出し結果分類 */
-EXPORT volatile UB g_task_sensor_failure_kind;               /**< 現在の失敗分類 */
-EXPORT volatile UB g_task_sensor_failure_device;             /**< 現在の失敗デバイス */
-EXPORT volatile UB g_task_sensor_failure_stage;              /**< 現在の失敗段階 */
-EXPORT volatile B g_task_sensor_failure_channel;             /**< 現在の失敗TCAチャネル */
-EXPORT volatile UW g_task_sensor_i2c_transfer_timeout_count; /**< I2C転送タイムアウト累積回数 */
-EXPORT volatile UW g_task_sensor_tof_data_ready_timeout_count[CPU0_SENSOR_TOF_COUNT]; /**< ToFデータ準備タイムアウト回数 */
-EXPORT volatile UW g_task_sensor_invalid_data_count[CPU0_SENSOR_TOF_COUNT]; /**< ToF測距無効回数 */
-EXPORT volatile UW g_task_sensor_hub_recovery_count;         /**< I2C障害後ハブ再初期化回数 */
+/**< ToF距離 */
+EXPORT volatile UH g_task_sensor_tof_distance_mm[CPU0_SENSOR_TOF_COUNT];
+EXPORT volatile H g_task_sensor_accel_mg[3];                /**< IMU加速度 */
+EXPORT volatile H g_task_sensor_gyro_dps_x10[3];            /**< IMU角速度 */
+EXPORT volatile UW g_task_sensor_age_ms;                    /**< センサー値経過時間 */
+EXPORT volatile UW g_task_sensor_update_count;              /**< 正常更新回数 */
+EXPORT volatile UW g_task_sensor_error_flags;               /**< 現在のセンサー異常ビット */
+EXPORT volatile W g_task_sensor_last_error;                 /**< 現在のFSPエラー */
+EXPORT volatile UB g_task_sensor_valid_flags;               /**< ToF/IMU有効ビット */
+EXPORT volatile BOOL g_task_sensor_initialized;             /**< 全センサー初期化状態 */
+/**< ToF生Range Status */
+EXPORT volatile UB g_task_sensor_tof_range_status[CPU0_SENSOR_TOF_COUNT];
+/**< ToF読出し結果分類 */
+EXPORT volatile UB g_task_sensor_tof_result[CPU0_SENSOR_TOF_COUNT];
+EXPORT volatile UB g_task_sensor_failure_kind;              /**< 現在の失敗分類 */
+EXPORT volatile UB g_task_sensor_failure_device;            /**< 現在の失敗デバイス */
+EXPORT volatile UB g_task_sensor_failure_stage;             /**< 現在の失敗段階 */
+EXPORT volatile B g_task_sensor_failure_channel;            /**< 現在の失敗TCAチャネル */
+EXPORT volatile UW g_task_sensor_i2c_transfer_timeout_count;/**< I2C転送タイムアウト累積回数 */
+/**< ToF準備timeout回数 */
+EXPORT volatile UW g_task_sensor_tof_data_ready_timeout_count[CPU0_SENSOR_TOF_COUNT];
+/**< ToF測距無効回数 */
+EXPORT volatile UW g_task_sensor_invalid_data_count[CPU0_SENSOR_TOF_COUNT];
+EXPORT volatile UW g_task_sensor_hub_recovery_count;        /**< I2C障害後ハブ再初期化回数 */
 
-EXPORT volatile W  g_task_sensor_odometry_x_mm = 0;
-EXPORT volatile W  g_task_sensor_odometry_y_mm = 0;
-EXPORT volatile H  g_task_sensor_odometry_theta_deg_x10 = 0;
-EXPORT volatile UW g_task_sensor_odometry_distance_mm = 0U;
-EXPORT volatile BOOL g_task_sensor_odometry_valid = FALSE;
+EXPORT volatile W  g_task_sensor_odometry_x_mm = 0;         /**< オドメトリX座標[mm] */
+EXPORT volatile W  g_task_sensor_odometry_y_mm = 0;         /**< オドメトリY座標[mm] */
+EXPORT volatile H  g_task_sensor_odometry_theta_deg_x10 = 0;/**< オドメトリ方位角×10[deg] */
+EXPORT volatile UW g_task_sensor_odometry_distance_mm = 0U; /**< オドメトリ累積距離[mm] */
+EXPORT volatile BOOL g_task_sensor_odometry_valid = FALSE;  /**< オドメトリ姿勢の有効状態 */
 
 /** =================================================================*
  * @brief  最新スナップショットをmutex下で公開しLive Watch値も更新
@@ -271,8 +276,9 @@ EXPORT void task_sensor_delete(void) {
  * @brief  最新センサースナップショットを取得
  * @param[out] p_snapshot 取得先
  * @return μT-Kernelエラーコード
- * @details タスクコンテキスト専用。取得側がmutex保持中に停止しても思考を止めないよう、
- *          ロック競合時は待たずにエラーを返す。呼出側は古い値で走行を継続しない。
+ * @details タスクコンテキスト専用。取得側がmutex保持中に停止しても、
+ *          思考タスクを止めないよう、ロック競合時は待たずにエラーを返す。
+ *          呼出側は古い値で走行を継続しない。
  * ================================================================= */
 EXPORT ER task_sensor_snapshot_get(sensor_snapshot_t * p_snapshot) {
     if (NULL == p_snapshot) {

@@ -6,11 +6,11 @@
 #include "config/task_config.h"                             /* 周期、優先度、スタックサイズ */
 #include "services/actuator_service.h"                      /* 実経過時間による駆動更新 */
 
-#define ACTUATOR_TICK_FLAG                 (1U)
+#define ACTUATOR_TICK_FLAG                 (1U)             /**< 周期イベントビット */
 
 LOCAL void task_actuator_entry(INT start_code, void * p_extended_information); /* タスク本体 */
 LOCAL void task_actuator_tick(void * p_extended_information); /* 周期通知 */
-LOCAL BOOL task_actuator_time_get(UD * p_now_ms);            /* 単調増加時刻の取得 */
+LOCAL BOOL task_actuator_time_get(UD * p_now_ms);           /* 単調増加時刻の取得 */
 
 LOCAL ID actuator_task_id;                                  /**< アクチュエータタスクID */
 LOCAL ID actuator_flag_id;                                  /**< 周期通知イベントフラグID */
@@ -20,7 +20,7 @@ EXPORT volatile UW g_task_actuator_update_count;            /**< 実時間更新
 EXPORT volatile UW g_task_actuator_period_last_ms;          /**< 直近の実更新間隔[ms] */
 EXPORT volatile UW g_task_actuator_period_min_ms;           /**< 最小実更新間隔[ms] */
 EXPORT volatile UW g_task_actuator_period_max_ms;           /**< 最大実更新間隔[ms] */
-EXPORT volatile UW g_task_actuator_late_count;               /**< 1 msを超えた更新間隔の回数 */
+EXPORT volatile UW g_task_actuator_late_count;              /**< 1 msを超えた更新間隔の回数 */
 EXPORT volatile UD g_task_actuator_elapsed_total_ms;        /**< 開始からの実経過時間[ms] */
 
 /**< 待機はフラグで行い、FSP操作はタスク文脈に限定する。 */
@@ -106,7 +106,8 @@ EXPORT app_fault_t task_actuator_start(void) {
 
 /** =================================================================*
  * @brief  アクチュエータ周期資源の解放
- * @details 通知元を先に停止し、出力停止後にフラグを解放する。途中生成失敗でも呼出し可能。
+ * @details 通知元を先に停止し、出力停止後にフラグを解放する。
+ *          途中生成失敗後も呼び出し可能とする。
  * ================================================================= */
 EXPORT void task_actuator_delete(void) {
     if (actuator_cycle_id > 0) {

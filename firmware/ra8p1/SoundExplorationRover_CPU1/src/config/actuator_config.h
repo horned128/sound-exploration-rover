@@ -5,6 +5,6 @@
 #ifndef SEROV_CPU1_CONFIG_ACTUATOR_H
 #define SEROV_CPU1_CONFIG_ACTUATOR_H
 
-#define ACTUATOR_COMMAND_TIMEOUT_MS        (1500U)
+#define ACTUATOR_COMMAND_TIMEOUT_MS        (1500U)          /**< アクチュエータ指令の期限[ms] */
 
 #endif /* SEROV_CPU1_CONFIG_ACTUATOR_H */

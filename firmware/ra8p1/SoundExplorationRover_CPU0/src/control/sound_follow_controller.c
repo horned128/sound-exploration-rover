@@ -3,37 +3,38 @@
  * @brief  停止聴取型の音源追従状態機械
  * ================================================================= */
 #include "sound_follow_controller.h"                        /* 音源追従の入力、出力、状態 */
-#include "config/control_config.h"                         /* 音量閾値、動作時間、走行値 */
+#include "config/control_config.h"                          /* 音量閾値、動作時間、走行値 */
 
+/**< 音源追従ステートマシンの内部状態とDoA履歴 */
 typedef struct st_sound_follow_context {
-    sound_follow_state_t state;
-    UW state_elapsed_ms;
-    UW link_stable_ms;
-    UW trigger_elapsed_ms;
-    UW quiet_elapsed_ms;
-    BOOL trigger_active;
-    UB doa_sample_count;
-    H desired_steering_deg;
-    H desired_left_rpm;
-    H desired_right_rpm;
-    H doa_samples_deg[CPU0_SOUND_DOA_SAMPLE_COUNT];
+    sound_follow_state_t state;                             /**< 現在の追従状態 */
+    UW state_elapsed_ms;                                    /**< 状態遷移からの経過時間[ms] */
+    UW link_stable_ms;                                      /**< 音響リンク安定時間[ms] */
+    UW trigger_elapsed_ms;                                  /**< 音源トリガからの経過時間[ms] */
+    UW quiet_elapsed_ms;                                    /**< 無音継続時間[ms] */
+    BOOL trigger_active;                                    /**< 音源トリガの有効状態 */
+    UB doa_sample_count;                                    /**< 蓄積済みDoAサンプル数 */
+    H desired_steering_deg;                                 /**< 内部操舵角目標[deg] */
+    H desired_left_rpm;                                     /**< 内部左車輪目標RPM */
+    H desired_right_rpm;                                    /**< 内部右車輪目標RPM */
+    H doa_samples_deg[CPU0_SOUND_DOA_SAMPLE_COUNT];         /**< DoA履歴[deg] */
 } sound_follow_context_t;
 
-LOCAL H sound_follow_angle_normalize(W angle_deg); /* 角度を-180～179度へ正規化 */
-LOCAL H sound_follow_relative_angle(UH doa_deg); /* DoAを車体座標へ変換 */
+LOCAL H sound_follow_angle_normalize(W angle_deg);          /* 角度を-180～179度へ正規化 */
+LOCAL H sound_follow_relative_angle(UH doa_deg);            /* DoAを車体座標へ変換 */
 LOCAL H sound_follow_angle_delta(H angle_deg, H reference_deg); /* 円周上の符号付き角度差 */
-LOCAL H sound_follow_abs_i16(H value);         /* int16_t絶対値 */
+LOCAL H sound_follow_abs_i16(H value);                      /* int16_t絶対値 */
 LOCAL BOOL sound_follow_observation_usable(const acoustic_observation_t * p_observation); /* DoA品質判定 */
 LOCAL BOOL sound_follow_observation_quiet(const acoustic_observation_t * p_observation); /* release条件判定 */
-LOCAL void sound_follow_detection_reset(void);             /* 音量・DoA履歴初期化 */
-LOCAL void sound_follow_doa_push(H angle_deg);       /* DoA履歴追加 */
-LOCAL BOOL sound_follow_doa_stable(H * p_mean_deg);  /* DoA安定性と平均算出 */
-LOCAL H sound_follow_steering_from_doa(H doa_deg); /* DoAから操舵角算出 */
-LOCAL void sound_follow_motion_from_doa(H doa_deg);  /* DoAから操舵・走行方向を決定 */
+LOCAL void sound_follow_detection_reset(void);              /* 音量・DoA履歴初期化 */
+LOCAL void sound_follow_doa_push(H angle_deg);              /* DoA履歴追加 */
+LOCAL BOOL sound_follow_doa_stable(H * p_mean_deg);         /* DoA安定性と平均算出 */
+LOCAL H sound_follow_steering_from_doa(H doa_deg);          /* DoAから操舵角算出 */
+LOCAL void sound_follow_motion_from_doa(H doa_deg);         /* DoAから操舵・走行方向を決定 */
 LOCAL void sound_follow_state_enter(sound_follow_state_t state); /* 状態遷移 */
 LOCAL void sound_follow_output_update(sound_follow_output_t * p_output); /* 状態から指令生成 */
 
-LOCAL sound_follow_context_t controller;                   /**< 音源追従状態 */
+LOCAL sound_follow_context_t controller;                    /**< 音源追従状態 */
 
 /** =================================================================*
  * @brief  角度を-180～179度へ正規化

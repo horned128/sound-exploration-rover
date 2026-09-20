@@ -156,7 +156,7 @@ class OdometryContext(ctypes.Structure):
 class SmoothAvoidanceInput(ctypes.Structure):
     _fields_ = [
         ("tof_distance_mm", ctypes.c_float * 3),
-        ("tof_valid", ctypes.c_bool * 3),
+        ("tof_valid", BOOL * 3),
         ("target_heading_deg", ctypes.c_float),
         ("current_steering_deg", ctypes.c_float),
         ("current_speed_scale", ctypes.c_float),
@@ -168,7 +168,7 @@ class SmoothAvoidanceOutput(ctypes.Structure):
     _fields_ = [
         ("steering_deg", ctypes.c_float),
         ("speed_scale", ctypes.c_float),
-        ("is_blocked", ctypes.c_bool),
+        ("is_blocked", BOOL),
         ("left_clearance_mm", ctypes.c_float),
         ("center_clearance_mm", ctypes.c_float),
         ("right_clearance_mm", ctypes.c_float),
@@ -180,18 +180,18 @@ class SafetyMotionCommand(ctypes.Structure):
         ("steering_deg", ctypes.c_int16),
         ("left_rpm", ctypes.c_int16),
         ("right_rpm", ctypes.c_int16),
-        ("actuator_enable", ctypes.c_bool),
-        ("emergency_stop", ctypes.c_bool),
+        ("actuator_enable", BOOL),
+        ("emergency_stop", BOOL),
     ]
 
 
 class SafetyArbiterStatus(ctypes.Structure):
     _fields_ = [
-        ("sensor_fresh", ctypes.c_bool),
-        ("tof_usable", ctypes.c_bool),
-        ("motion_allowed", ctypes.c_bool),
-        ("hard_stop_veto", ctypes.c_bool),
-        ("imu_safe", ctypes.c_bool),
+        ("sensor_fresh", BOOL),
+        ("tof_usable", BOOL),
+        ("motion_allowed", BOOL),
+        ("hard_stop_veto", BOOL),
+        ("imu_safe", BOOL),
     ]
 
 
@@ -290,17 +290,17 @@ def library() -> ctypes.CDLL:
     ]
     handle.smooth_avoidance_plan.restype = None
     handle.safety_arbiter_tof_usable.argtypes = [ctypes.POINTER(SensorSnapshot)]
-    handle.safety_arbiter_tof_usable.restype = ctypes.c_bool
+    handle.safety_arbiter_tof_usable.restype = BOOL
     handle.safety_arbiter_motion_allowed.argtypes = [
         ctypes.POINTER(SensorSnapshot),
-        ctypes.c_bool,
+        BOOL,
         ctypes.POINTER(SafetyArbiterStatus),
     ]
-    handle.safety_arbiter_motion_allowed.restype = ctypes.c_bool
+    handle.safety_arbiter_motion_allowed.restype = BOOL
     handle.safety_arbiter_arbitrate.argtypes = [
         ctypes.POINTER(SafetyMotionCommand),
         ctypes.POINTER(SensorSnapshot),
-        ctypes.c_bool,
+        BOOL,
         ctypes.POINTER(SafetyMotionCommand),
     ]
     handle.safety_arbiter_arbitrate.restype = None
@@ -317,7 +317,7 @@ def safety_arbiter_arbitrate_step(
     handle.safety_arbiter_arbitrate(
         ctypes.byref(command),
         ctypes.byref(snapshot),
-        ctypes.c_bool(sensor_fresh),
+        BOOL(sensor_fresh),
         ctypes.byref(arbitrated),
     )
     return arbitrated
@@ -331,7 +331,7 @@ def safety_arbiter_check_allowed(
     status = SafetyArbiterStatus()
     allowed = handle.safety_arbiter_motion_allowed(
         ctypes.byref(snapshot),
-        ctypes.c_bool(sensor_fresh),
+        BOOL(sensor_fresh),
         ctypes.byref(status),
     )
     return allowed, status

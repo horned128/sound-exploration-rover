@@ -2,7 +2,7 @@
  * @file   acoustic_feature_assembler.c
  * @brief  音響特徴量イベント再組立
  * ================================================================= */
-#include "services/acoustic_feature_assembler.h"           /* 特徴量packetと再組立状態 */
+#include "services/acoustic_feature_assembler.h"            /* 特徴量packetと再組立状態 */
 #include <string.h>                                         /* memcpy、memset */
 
 /** =================================================================*

@@ -2,37 +2,42 @@
  * @file   actuator_service.c
  * @brief  CPU1アクチュエータアプリケーション
  * ================================================================= */
-#include "actuator_service.h"                              /* CPU1アクチュエータアプリケーションAPI */
-#include "config/actuator_config.h"                        /* アクチュエータ安全設定 */
-#include "config/drive_config.h"                           /* 駆動目標の上限値 */
-#include "services/drive_service.h"                        /* 左右drive service API */
-#include "drivers/encoder.h"                               /* エンコーダ取得API */
-#include "drivers/servo.h"                                 /* サーボ制御API */
-#include "ipc/actuator_ipc_server.h"                       /* CPU0-CPU1間IPCサーバーAPI */
+#include "actuator_service.h"                               /* CPU1アクチュエータアプリケーションAPI */
+#include "config/actuator_config.h"                         /* アクチュエータ安全設定 */
+#include "config/drive_config.h"                            /* 駆動目標の上限値 */
+#include "services/drive_service.h"                         /* 左右drive service API */
+#include "drivers/encoder.h"                                /* エンコーダ取得API */
+#include "drivers/servo.h"                                  /* サーボ制御API */
+#include "ipc/actuator_ipc_server.h"                        /* CPU0-CPU1間IPCサーバーAPI */
 
-/**< 最後に発生したFSPエラー */
+/**< 最終FSPエラー */
 EXPORT volatile fsp_err_t g_actuator_service_last_error = FSP_SUCCESS;
-/**< アクチュエータ異常フラグ */
+/**< 異常フラグ */
 EXPORT volatile UH g_actuator_service_fault_flags = ACTUATOR_FAULT_NONE;
-EXPORT volatile UW g_actuator_service_applied_sequence;    /**< 最終適用指令sequence */
+EXPORT volatile UW g_actuator_service_applied_sequence;     /**< 最終適用指令sequence */
 
 #if DRIVE_MEASUREMENT_TEST_ENABLE
+/**< 速度計測モード */
 EXPORT volatile UB g_drive_measurement_mode = DRIVE_MEASUREMENT_MODE_NORMAL;
-EXPORT volatile UH g_drive_measurement_duty_permille = 0U;
+EXPORT volatile UH g_drive_measurement_duty_permille = 0U;  /**< 速度計測入力duty[0.1%] */
+/**< 上限適用後duty[0.1%] */
 EXPORT volatile UH g_drive_measurement_applied_duty_permille = 0U;
+/**< 速度計測状態 */
 EXPORT volatile UB g_drive_measurement_status = DRIVE_MEASUREMENT_STATUS_DISABLED;
+/**< 速度計測出力の許可状態 */
 EXPORT volatile BOOL g_drive_measurement_output_authorized = FALSE;
-EXPORT volatile W g_drive_measurement_stop_count_left = 0;
-EXPORT volatile W g_drive_measurement_stop_count_right = 0;
+EXPORT volatile W g_drive_measurement_stop_count_left = 0;  /**< 強制停止直前の左累積count */
+EXPORT volatile W g_drive_measurement_stop_count_right = 0; /**< 強制停止直前の右累積count */
+/**< 停止直前countの有効状態 */
 EXPORT volatile BOOL g_drive_measurement_stop_capture_valid = FALSE;
 #endif
 
-LOCAL UW g_command_elapsed_ms;                             /**< 最終指令受信からの経過時間 */
-LOCAL BOOL g_emergency_stop_latched;                       /**< 緊急停止ラッチ状態 */
-LOCAL BOOL g_initialized;                                  /**< アクチュエータ初期化完了状態 */
-LOCAL BOOL g_actuator_output_enabled;                      /**< 有効な通常指令を受信済み */
+LOCAL UW g_command_elapsed_ms;                              /**< 最終指令受信からの経過時間 */
+LOCAL BOOL g_emergency_stop_latched;                        /**< 緊急停止ラッチ状態 */
+LOCAL BOOL g_initialized;                                   /**< アクチュエータ初期化完了状態 */
+LOCAL BOOL g_actuator_output_enabled;                       /**< 有効な通常指令を受信済み */
 #if DRIVE_MEASUREMENT_TEST_ENABLE
-LOCAL UB g_drive_measurement_previous_mode;                /**< 前回適用した計測モード */
+LOCAL UB g_drive_measurement_previous_mode;                 /**< 前回適用した計測モード */
 #endif
 
 /** =================================================================*

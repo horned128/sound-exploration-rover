@@ -2,25 +2,25 @@
  * @file   vl53l1x.c
  * @brief  VL53L1X ToF距離センサー実装
  * ================================================================= */
-#include "vl53l1x.h"                                       /* VL53L1X API */
-#include "platform/i2c_bus.h"                              /* I2CバスAPI */
-#include "config/sensor_config.h"                          /* ToFアドレス、距離範囲 */
+#include "vl53l1x.h"                                        /* VL53L1X API */
+#include "platform/i2c_bus.h"                               /* I2CバスAPI */
+#include "config/sensor_config.h"                           /* ToFアドレス、距離範囲 */
 #include <string.h>                                         /* memcpy */
 
-#define VL53L1X_REG_MODEL_ID                (0x010FU)
-#define VL53L1X_REG_CONFIGURATION_START     (0x002DU)
-#define VL53L1X_REG_VHV_TIMEOUT              (0x0008U)
-#define VL53L1X_REG_VHV_INIT                 (0x000BU)
-#define VL53L1X_REG_GPIO_HV_MUX_CTRL         (0x0030U)
-#define VL53L1X_REG_GPIO_TIO_HV_STATUS       (0x0031U)
-#define VL53L1X_REG_RANGE_STATUS             (0x0089U)
-#define VL53L1X_REG_INTERRUPT_CLEAR          (0x0086U)
-#define VL53L1X_REG_MODE_START               (0x0087U)
-#define VL53L1X_REG_DISTANCE_MM              (0x0096U)
-#define VL53L1X_MODEL_ID                     (0xEACCU)
-#define VL53L1X_RANGE_STATUS_VALID           (9U)
+#define VL53L1X_REG_MODEL_ID               (0x010FU)        /**< VL53L1XレジスタモデルのID */
+#define VL53L1X_REG_CONFIGURATION_START    (0x002DU)        /**< VL53L1Xレジスタ設定の開始 */
+#define VL53L1X_REG_VHV_TIMEOUT            (0x0008U)        /**< VL53L1XレジスタVHVの期限時間 */
+#define VL53L1X_REG_VHV_INIT               (0x000BU)        /**< VL53L1XレジスタVHVの初期化 */
+#define VL53L1X_REG_GPIO_HV_MUX_CTRL       (0x0030U)        /**< VL53L1XレジスタGPIOHVMUXの制御 */
+#define VL53L1X_REG_GPIO_TIO_HV_STATUS     (0x0031U)        /**< VL53L1XレジスタGPIOTIOHVの状態 */
+#define VL53L1X_REG_RANGE_STATUS           (0x0089U)        /**< VL53L1Xレジスタレンジの状態 */
+#define VL53L1X_REG_INTERRUPT_CLEAR        (0x0086U)        /**< VL53L1Xレジスタ割込みのクリア */
+#define VL53L1X_REG_MODE_START             (0x0087U)        /**< VL53L1Xレジスタモードの開始 */
+#define VL53L1X_REG_DISTANCE_MM            (0x0096U)        /**< VL53L1Xレジスタのdistance[mm] */
+#define VL53L1X_MODEL_ID                   (0xEACCU)        /**< VL53L1XモデルのID */
+#define VL53L1X_RANGE_STATUS_VALID         (9U)             /**< VL53L1Xレンジ状態の有効状態 */
 
-/* ST VL53L1X Ultra Lite Driverの既定測距設定（0x002D～0x0087）。 */
+/**< ST VL53L1X Ultra Lite Driverの既定測距設定（0x002D～0x0087） */
 LOCAL UB const vl53l1x_default_configuration[] = {
     0x00U, 0x00U, 0x00U, 0x01U, 0x02U, 0x00U, 0x02U, 0x08U, 0x00U, 0x08U, 0x10U, 0x01U,
     0x01U, 0x00U, 0x00U, 0x00U, 0x00U, 0xFFU, 0x00U, 0x0FU, 0x00U, 0x00U, 0x00U, 0x00U,
@@ -34,8 +34,9 @@ LOCAL UB const vl53l1x_default_configuration[] = {
 
 LOCAL fsp_err_t vl53l1x_write_register(UH register_address, UB value); /* 8bitレジスタ書込み */
 LOCAL fsp_err_t vl53l1x_read_registers(UH register_address, UB * p_data, UW length); /* レジスタ連続読出し */
-LOCAL fsp_err_t vl53l1x_wait_data_ready(BOOL * p_timed_out); /* 新しい測距結果待ち */
-LOCAL fsp_err_t vl53l1x_read_measurement(vl53l1x_reading_t * p_reading, BOOL * p_timed_out); /* 生測距結果取得 */
+LOCAL fsp_err_t vl53l1x_wait_data_ready(BOOL * p_timed_out);/* 新しい測距結果待ち */
+LOCAL fsp_err_t vl53l1x_read_measurement(vl53l1x_reading_t * p_reading,
+                                          BOOL * p_timed_out); /* 生測距結果取得 */
 
 /** =================================================================*
  * @brief  VL53L1Xの8bitレジスタへ書込み
@@ -224,8 +225,8 @@ EXPORT fsp_err_t vl53l1x_read_distance(vl53l1x_reading_t * p_reading) {
         return err;
     }
 
-    /* 遠方・反射なし（Signal Fail(4) / Wrap Target(7) / Out of Bounds(5) / 4000mm超）は
-     * 障害物が存在しないクリアな空間とみなし、最大距離(4000mm)として正常扱いとする。 */
+    /* 遠方・反射なし（Signal Fail(4) / Wrap Target(7) / Out of Bounds(5) / */
+    /* 4000mm超）は障害物がないクリア空間とみなし、最大距離として扱う。 */
     if ((4U == p_reading->range_status) || (7U == p_reading->range_status) ||
         (5U == p_reading->range_status) || (p_reading->distance_mm > CPU0_TOF_MAX_VALID_MM)) {
         p_reading->distance_mm = CPU0_TOF_MAX_VALID_MM;

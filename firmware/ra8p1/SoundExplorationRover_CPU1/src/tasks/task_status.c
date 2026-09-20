@@ -14,7 +14,7 @@ IMPORT bsp_leds_t g_bsp_leds;                               /**< BSPが管理す
 LOCAL void task_status_entry(INT start_code, void * p_extended_information); /* タスク本体 */
 LOCAL void task_status_led_write(bsp_io_level_t level);     /* 状態LED出力 */
 
-#define STATUS_TICK_FLAG                   (1U)
+#define STATUS_TICK_FLAG                   (1U)             /**< 状態通知タスクの周期イベントビット */
 
 LOCAL void task_status_tick(void * p_extended_information); /* 周期通知 */
 LOCAL BOOL task_status_time_get(UD * p_now_ms);             /* 単調増加時刻取得 */
@@ -247,8 +247,10 @@ LOCAL void task_status_entry(INT start_code, void * p_extended_information) {
                 g_task_status_snapshot_count++;
             }
             while (telemetry_word_index < ACTUATOR_IPC_STATUS_WORD_COUNT) {
-                /* FIFO満杯時は同じ語を次の起床で再試行し、途中のsnapshotを上書きしない。 */
-                fsp_err_t const send_err = actuator_ipc_server_send_status_word(&telemetry_status, telemetry_word_index);
+                /* FIFO満杯時は同じ語を次の起床で再試行し、途中のsnapshotを */
+                /* 上書きしない。 */
+                fsp_err_t const send_err =
+                    actuator_ipc_server_send_status_word(&telemetry_status, telemetry_word_index);
                 if (FSP_SUCCESS == send_err) {
                     telemetry_word_index++;
                     if (telemetry_word_index >= ACTUATOR_IPC_STATUS_WORD_COUNT) {
@@ -262,7 +264,8 @@ LOCAL void task_status_entry(INT start_code, void * p_extended_information) {
             }
         }
     }
-    /* 診断タスクの異常を記録して通知を停止。駆動出力は1 msタスクの所有を維持する。 */
+    /* 診断タスクの異常を記録して通知を停止する。駆動出力は */
+    /* 1 msタスクの所有を維持する。 */
     (void) tk_stp_cyc(status_cycle_id);
     task_status_led_write(BSP_IO_LEVEL_HIGH);
     tk_ext_tsk();

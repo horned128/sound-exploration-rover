@@ -4,15 +4,16 @@
  * ================================================================= */
 #ifndef SEROV_CPU0_SENSOR_LIVENESS_H
 #define SEROV_CPU0_SENSOR_LIVENESS_H
-#include <tk/tkernel.h>                                    /* 基本型 */
+#include <tk/tkernel.h>                                     /* 基本型 */
 
+/**< センサー更新の進行と鮮度を判定する監視状態 */
 typedef struct st_sensor_liveness {
-    UD last_seen_ms;
-    UD last_progress_ms;
-    UW last_count;
-    UW age_ms;
-    BOOL initialized;
-    BOOL progress_seen;
+    UD last_seen_ms;                                        /**< 最後に観測した時刻[ms] */
+    UD last_progress_ms;                                    /**< 最後に更新進行を観測した時刻[ms] */
+    UW last_count;                                          /**< 最後に観測した更新回数 */
+    UW age_ms;                                              /**< 更新進行からの経過時間[ms] */
+    BOOL initialized;                                       /**< 監視状態の初期化完了 */
+    BOOL progress_seen;                                     /**< 初回以降の更新進行観測済み */
 } sensor_liveness_t;
 
 /** =================================================================*

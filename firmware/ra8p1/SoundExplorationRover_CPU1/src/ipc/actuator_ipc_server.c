@@ -4,10 +4,10 @@
  * ================================================================= */
 #include "actuator_ipc_server.h"                            /* CPU1側IPCサーバーAPIとメッセージ型 */
 
-LOCAL actuator_command_t g_staging_command;                /**< 受信中の指令 */
-LOCAL actuator_command_t g_committed_command;              /**< 適用待ちの確定指令 */
-LOCAL volatile BOOL g_command_pending;                     /**< 新しい指令の有無 */
-LOCAL volatile BOOL g_rx_fault_pending;                    /**< IPC受信異常の有無 */
+LOCAL actuator_command_t g_staging_command;                 /**< 受信中の指令 */
+LOCAL actuator_command_t g_committed_command;               /**< 適用待ちの確定指令 */
+LOCAL volatile BOOL g_command_pending;                      /**< 新しい指令の有無 */
+LOCAL volatile BOOL g_rx_fault_pending;                     /**< IPC受信異常の有無 */
 
 /** =================================================================*
  * @brief  CPU1状態IPCワード送信

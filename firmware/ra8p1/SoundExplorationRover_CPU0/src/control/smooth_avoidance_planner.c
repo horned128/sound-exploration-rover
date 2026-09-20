@@ -2,17 +2,37 @@
  * @file   smooth_avoidance_planner.c
  * @brief  曲率制限付き滑らか障害物回避プランナ実装（ポテンシャル法純関数）
  * ================================================================= */
-#include "smooth_avoidance_planner.h"
-#include <math.h>
+#include "smooth_avoidance_planner.h"                       /* 滑らか回避プランナAPI */
+#include <math.h>                                           /* 三角関数・平方根 */
 
 #ifndef M_PI
-#define M_PI (3.14159265358979323846f)
+#define M_PI                               (3.14159265358979323846f) /**< 滑らか回避の角度計算用円周率 */
 #endif
 
-#define DEG_TO_RAD(d) ((d) * (float)(M_PI / 180.0f))
-#define RAD_TO_DEG(r) ((r) * (float)(180.0f / M_PI))
+#define DEG_TO_RAD(d) ((d) * (float)(M_PI / 180.0f))        /**< 回避操舵角をラジアンへ変換 */
+#define RAD_TO_DEG(r) ((r) * (float)(180.0f / M_PI))        /**< 回避計算結果を操舵角へ変換 */
 
-static float clampf(float val, float min_val, float max_val) {
+/**< ToF各センサーの車体中心基準Xオフセット[mm] */
+LOCAL float const smooth_planner_sensor_x[3] = {
+    SMOOTH_PLANNER_TOF_LEFT_X_MM,
+    SMOOTH_PLANNER_TOF_CENTER_X_MM,
+    SMOOTH_PLANNER_TOF_RIGHT_X_MM,
+};
+/**< ToF各センサーの車体中心基準Yオフセット[mm] */
+LOCAL float const smooth_planner_sensor_y[3] = {
+    SMOOTH_PLANNER_TOF_LEFT_Y_MM,
+    SMOOTH_PLANNER_TOF_CENTER_Y_MM,
+    SMOOTH_PLANNER_TOF_RIGHT_Y_MM,
+};
+
+/** =================================================================*
+ * @brief  浮動小数点値を範囲内へクランプ
+ * @param[in] val 入力値
+ * @param[in] min_val 下限
+ * @param[in] max_val 上限
+ * @return クランプ後の値
+ * ================================================================= */
+LOCAL float smooth_planner_clampf(float val, float min_val, float max_val) {
     if (val < min_val) {
         return min_val;
     }
@@ -22,7 +42,14 @@ static float clampf(float val, float min_val, float max_val) {
     return val;
 }
 
-static float rate_limit(float target, float current, float max_change) {
+/** =================================================================*
+ * @brief  変化量を制限して目標値へ近づける
+ * @param[in] target 目標値
+ * @param[in] current 現在値
+ * @param[in] max_change 1周期の最大変化量
+ * @return 制限適用後の値
+ * ================================================================= */
+LOCAL float smooth_planner_rate_limit(float target, float current, float max_change) {
     float const delta = target - current;
     if (delta > max_change) {
         return current + max_change;
@@ -33,8 +60,15 @@ static float rate_limit(float target, float current, float max_change) {
     return target;
 }
 
-void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
-                           smooth_avoidance_output_t * p_output) {
+/** =================================================================*
+ * @brief  滑らかな操舵角と速度スケールを算出
+ * @details ToFの斥力と目標方位の引力を合成し、操舵角・速度の変化率を制限する。
+ *          全チャネル無効またはハード停止距離未満では走行速度をゼロにする。
+ * @param[in] p_input 観測値と直前の出力
+ * @param[out] p_output 回避計画結果
+ * ================================================================= */
+EXPORT void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
+                                  smooth_avoidance_output_t * p_output) {
     if ((NULL == p_input) || (NULL == p_output)) {
         return;
     }
@@ -44,29 +78,17 @@ void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
     float const max_accel_step = SMOOTH_PLANNER_MAX_ACCEL_PER_SEC * dt;
 
     /* 有効ToFチャネルの確認と幾何クリアランス計算 */
-    bool any_valid = false;
-    bool hard_stop_triggered = false;
+    BOOL any_valid = FALSE;
+    BOOL hard_stop_triggered = FALSE;
     float d[3];
 
-    /* 各ToFのオフセット (PLAN.md 0-D-1) */
-    static const float sensor_x[3] = {
-        SMOOTH_PLANNER_TOF_LEFT_X_MM,
-        SMOOTH_PLANNER_TOF_CENTER_X_MM,
-        SMOOTH_PLANNER_TOF_RIGHT_X_MM
-    };
-    static const float sensor_y[3] = {
-        SMOOTH_PLANNER_TOF_LEFT_Y_MM,
-        SMOOTH_PLANNER_TOF_CENTER_Y_MM,
-        SMOOTH_PLANNER_TOF_RIGHT_Y_MM
-    };
-
-    for (int i = 0; i < 3; i++) {
+    for (UW i = 0U; i < 3U; i++) {
         if (p_input->tof_valid[i]) {
-            any_valid = true;
+            any_valid = TRUE;
             d[i] = p_input->tof_distance_mm[i];
             /* 250mm未満の近接障害物は即時ハード停止 (I1) */
             if (d[i] < SMOOTH_PLANNER_HARD_STOP_MM) {
-                hard_stop_triggered = true;
+                hard_stop_triggered = TRUE;
             }
         } else {
             /* 無効時は遠方障害物なしとみなす (A-3: 0mmを入れない) */
@@ -76,24 +98,29 @@ void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
 
     /* 全センサ無効時は安全停止 (S6) */
     if (!any_valid) {
-        hard_stop_triggered = true;
+        hard_stop_triggered = TRUE;
     }
 
     /* 幾何クリアランス記録 (車体中心原点からの距離) */
-    p_output->left_clearance_mm = sqrtf((sensor_x[0] + d[0]) * (sensor_x[0] + d[0]) + sensor_y[0] * sensor_y[0]);
+    p_output->left_clearance_mm =
+        sqrtf((smooth_planner_sensor_x[0] + d[0]) * (smooth_planner_sensor_x[0] + d[0]) +
+              smooth_planner_sensor_y[0] * smooth_planner_sensor_y[0]);
     p_output->center_clearance_mm = d[1];
-    p_output->right_clearance_mm = sqrtf((sensor_x[2] + d[2]) * (sensor_x[2] + d[2]) + sensor_y[2] * sensor_y[2]);
+    p_output->right_clearance_mm =
+        sqrtf((smooth_planner_sensor_x[2] + d[2]) * (smooth_planner_sensor_x[2] + d[2]) +
+              smooth_planner_sensor_y[2] * smooth_planner_sensor_y[2]);
 
     if (hard_stop_triggered) {
-        p_output->is_blocked = true;
+        p_output->is_blocked = TRUE;
         p_output->speed_scale = 0.0f;
         /* 停止時も操舵角は急変させずレート制限を適用して維持 */
-        p_output->steering_deg = rate_limit(p_input->current_steering_deg,
-                                            p_input->current_steering_deg, max_steer_step);
+        p_output->steering_deg = smooth_planner_rate_limit(p_input->current_steering_deg,
+                                                           p_input->current_steering_deg,
+                                                           max_steer_step);
         return;
     }
 
-    p_output->is_blocked = false;
+    p_output->is_blocked = FALSE;
 
     /* 1. 引力ベクトル (Goal Attraction) */
     /* 目標方位角 [-180, +180] */
@@ -116,21 +143,24 @@ void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
     /* 左ToF (y = -90mm): 近づくと右(+y)へ押す */
     if (p_input->tof_valid[0] && (d[0] < d_inf)) {
         float const strength = (d_inf - d[0]) / (d_inf - d_min);
-        rep_y += strength * 1.5f;   /* 右への斥力 */
-        rep_x -= strength * 0.5f;   /* 減速方向 */
+        /* 左側障害物は右方向へ押し、前方成分で減速する。 */
+        rep_y += strength * 1.5f;
+        rep_x -= strength * 0.5f;
     }
 
     /* 右ToF (y = +90mm): 近づくと左(-y)へ押す */
     if (p_input->tof_valid[2] && (d[2] < d_inf)) {
         float const strength = (d_inf - d[2]) / (d_inf - d_min);
-        rep_y -= strength * 1.5f;   /* 左への斥力 */
-        rep_x -= strength * 0.5f;   /* 減速方向 */
+        /* 右側障害物は左方向へ押し、前方成分で減速する。 */
+        rep_y -= strength * 1.5f;
+        rep_x -= strength * 0.5f;
     }
 
     /* 中央ToF (y = 0mm): 正面障害物は空いている側へ大きく旋回を誘起 */
     if (p_input->tof_valid[1] && (d[1] < d_inf)) {
         float const strength = (d_inf - d[1]) / (d_inf - d_min);
-        rep_x -= strength * 1.8f;   /* 前方からの強い減速・後押し */
+        /* 正面障害物は強い減速成分として加える。 */
+        rep_x -= strength * 1.8f;
 
         /* 左右クリアランス差による側方回避モーメント */
         float const left_d = p_input->tof_valid[0] ? d[0] : SMOOTH_PLANNER_FAR_DISTANCE_MM;
@@ -147,7 +177,8 @@ void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
             } else if (fabsf(p_input->current_steering_deg) > 1.0f) {
                 side_bias = (p_input->current_steering_deg > 0.0f) ? 1.0f : -1.0f;
             } else {
-                side_bias = 1.0f; /* 既定で右回避 */
+                /* 左右差がない場合は、既定の右回避を選ぶ。 */
+                side_bias = 1.0f;
             }
         }
         rep_y += strength * 1.5f * side_bias;
@@ -167,19 +198,19 @@ void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
     }
 
     /* クランプ: [-45, +45] (I2) */
-    target_steer_deg = clampf(target_steer_deg,
-                              -SMOOTH_PLANNER_MAX_STEERING_DEG,
-                              SMOOTH_PLANNER_MAX_STEERING_DEG);
+    target_steer_deg = smooth_planner_clampf(target_steer_deg,
+                                             -SMOOTH_PLANNER_MAX_STEERING_DEG,
+                                             SMOOTH_PLANNER_MAX_STEERING_DEG);
 
     /* レート制限 (I3) */
-    p_output->steering_deg = rate_limit(target_steer_deg,
-                                        p_input->current_steering_deg,
-                                        max_steer_step);
+    p_output->steering_deg = smooth_planner_rate_limit(target_steer_deg,
+                                                       p_input->current_steering_deg,
+                                                       max_steer_step);
 
     /* 4. 速度スケール算出 */
     /* 前方最小距離による基本速度 */
     float min_front_d = SMOOTH_PLANNER_FAR_DISTANCE_MM;
-    for (int i = 0; i < 3; i++) {
+    for (UW i = 0U; i < 3U; i++) {
         if (p_input->tof_valid[i] && (d[i] < min_front_d)) {
             min_front_d = d[i];
         }
@@ -193,7 +224,8 @@ void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
         float const ratio = (min_front_d - SMOOTH_PLANNER_HARD_STOP_MM) /
                             (SMOOTH_PLANNER_RECOVER_CLEAR_MM - SMOOTH_PLANNER_HARD_STOP_MM);
         target_speed = SMOOTH_PLANNER_MIN_SPEED_SCALE +
-                       (1.0f - SMOOTH_PLANNER_MIN_SPEED_SCALE) * clampf(ratio, 0.0f, 1.0f);
+                       (1.0f - SMOOTH_PLANNER_MIN_SPEED_SCALE) *
+                       smooth_planner_clampf(ratio, 0.0f, 1.0f);
     }
 
     /* 急旋回時の減速 (スリップ防止) */
@@ -204,10 +236,10 @@ void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
     }
 
     /* 走行時デッドゾーン回避: 停止意図でない限り0を通さない (4-3-2, I9) */
-    target_speed = clampf(target_speed, SMOOTH_PLANNER_MIN_SPEED_SCALE, 1.0f);
+    target_speed = smooth_planner_clampf(target_speed, SMOOTH_PLANNER_MIN_SPEED_SCALE, 1.0f);
 
     /* 速度レート制限 (I4) */
-    p_output->speed_scale = rate_limit(target_speed,
-                                       p_input->current_speed_scale,
-                                       max_accel_step);
+    p_output->speed_scale = smooth_planner_rate_limit(target_speed,
+                                                      p_input->current_speed_scale,
+                                                      max_accel_step);
 }

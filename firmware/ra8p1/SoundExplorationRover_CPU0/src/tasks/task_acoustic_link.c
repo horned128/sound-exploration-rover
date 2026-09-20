@@ -2,40 +2,42 @@
  * @file   task_acoustic_link.c
  * @brief  ReSpeaker音響フロントエンドとのUSB CDCリンク
  * ================================================================= */
-#include "task_acoustic_link.h"                                  /* CPU0音響リンクタスクAPI */
-#include "config/control_config.h"                         /* 自律走行モード */
-#include "config/task_config.h"                            /* USB受信周期、優先度、バッファ長 */
-#include "config/sensor_config.h"                          /* センサー安全判定値 */
-#include "ipc/actuator_ipc_client.h"                       /* CPU1実出力状態取得API */
-#include "services/acoustic_feature_assembler.h"           /* 特徴量イベント再組立 */
-#include "services/odometry.h"                             /* オドメトリ位置姿勢 */
-#include "task_command.h"                                     /* 最新指令状態取得API */
-#include "task_infer.h"                                       /* 完成特徴量を推論タスクへ通知 */
-#include "task_sensor.h"                                      /* 最新I2Cセンサー状態取得API */
-#include "task_think.h"                                       /* 思考タスクへの異常通知 */
+#include "task_acoustic_link.h"                             /* CPU0音響リンクタスクAPI */
+#include "config/control_config.h"                          /* 自律走行モード */
+#include "config/task_config.h"                             /* USB受信周期、優先度、バッファ長 */
+#include "config/sensor_config.h"                           /* センサー安全判定値 */
+#include "ipc/actuator_ipc_client.h"                        /* CPU1実出力状態取得API */
+#include "services/acoustic_feature_assembler.h"            /* 特徴量イベント再組立 */
+#include "services/odometry.h"                              /* オドメトリ位置姿勢 */
+#include "task_command.h"                                   /* 最新指令状態取得API */
+#include "task_infer.h"                                     /* 完成特徴量を推論タスクへ通知 */
+#include "task_sensor.h"                                    /* 最新I2Cセンサー状態取得API */
+#include "task_think.h"                                     /* 思考タスクへの異常通知 */
 #include <string.h>                                         /* memset */
 
-#define CPU0_AUDIO_SET_LINE_CODING         (USB_CDC_SET_LINE_CODING | USB_HOST_TO_DEV | USB_CLASS | USB_INTERFACE)
-#define CPU0_AUDIO_SET_CONTROL_LINE_STATE \
+#define CPU0_AUDIO_SET_LINE_CODING         /**< USBホストから受けるLine Coding要求値 */ \
+    (USB_CDC_SET_LINE_CODING | USB_HOST_TO_DEV | USB_CLASS | USB_INTERFACE)
+#define CPU0_AUDIO_SET_CONTROL_LINE_STATE                   /**< USB制御線状態要求の判定値 */ \
     (USB_CDC_SET_CONTROL_LINE_STATE | USB_HOST_TO_DEV | USB_CLASS | USB_INTERFACE)
-#define CPU0_AUDIO_GET_LINE_CODING         (USB_CDC_GET_LINE_CODING | USB_DEV_TO_HOST | USB_CLASS | USB_INTERFACE)
-#define CPU0_AUDIO_LINE_CODING_LENGTH      (7U)
+#define CPU0_AUDIO_GET_LINE_CODING         /**< USBデバイスから返すLine Coding要求値 */ \
+    (USB_CDC_GET_LINE_CODING | USB_DEV_TO_HOST | USB_CLASS | USB_INTERFACE)
+#define CPU0_AUDIO_LINE_CODING_LENGTH      (7U)             /**< USB Line Codingデータ長[byte] */
 
-LOCAL void task_acoustic_link_entry(INT stacd, void * exinf);      /* 音響リンクタスク本体 */
-LOCAL UW task_acoustic_link_monotonic_ms(void);              /* カーネル単調時刻取得 */
-LOCAL void task_acoustic_link_link_reset(void);                    /* 音響リンク状態初期化 */
-LOCAL void task_acoustic_link_observation_reset(void);             /* 旧音響観測無効化 */
-LOCAL void task_acoustic_link_feature_reset(void);                 /* 旧特徴量イベント無効化 */
-LOCAL void task_acoustic_link_bus_recovery(void);                  /* USBバスリセット・再列挙リカバリ */
-LOCAL fsp_err_t task_acoustic_link_control_start(void);            /* CDC class request開始 */
+LOCAL void task_acoustic_link_entry(INT stacd, void * exinf); /* 音響リンクタスク本体 */
+LOCAL UW task_acoustic_link_monotonic_ms(void);             /* カーネル単調時刻取得 */
+LOCAL void task_acoustic_link_link_reset(void);             /* 音響リンク状態初期化 */
+LOCAL void task_acoustic_link_observation_reset(void);      /* 旧音響観測無効化 */
+LOCAL void task_acoustic_link_feature_reset(void);          /* 旧特徴量イベント無効化 */
+LOCAL void task_acoustic_link_bus_recovery(void);           /* USBバスリセット・再列挙リカバリ */
+LOCAL fsp_err_t task_acoustic_link_control_start(void);     /* CDC class request開始 */
 LOCAL void task_acoustic_link_control_complete(const usb_event_info_t * p_event_info); /* CDC class request完了 */
-LOCAL fsp_err_t task_acoustic_link_read_start(void);               /* USB Bulk IN開始 */
+LOCAL fsp_err_t task_acoustic_link_read_start(void);        /* USB Bulk IN開始 */
 LOCAL fsp_err_t task_acoustic_link_actuator_telemetry_start(void); /* CPU1診断Bulk OUT開始 */
-LOCAL fsp_err_t task_acoustic_link_pose_telemetry_start(void);     /* オドメトリ診断Bulk OUT開始 */
-LOCAL fsp_err_t task_acoustic_link_telemetry_start(void);          /* USB Bulk OUT開始 */
-LOCAL void task_acoustic_link_receive(UW length);            /* USB受信データ処理 */
+LOCAL fsp_err_t task_acoustic_link_pose_telemetry_start(void); /* オドメトリ診断Bulk OUT開始 */
+LOCAL fsp_err_t task_acoustic_link_telemetry_start(void);   /* USB Bulk OUT開始 */
+LOCAL void task_acoustic_link_receive(UW length);           /* USB受信データ処理 */
 LOCAL void task_acoustic_link_frame_handle(const acoustic_frame_t * p_frame); /* 正常フレーム反映 */
-LOCAL BOOL task_acoustic_link_sequence_accept(UW sequence);  /* sequence新旧判定 */
+LOCAL BOOL task_acoustic_link_sequence_accept(UW sequence); /* sequence新旧判定 */
 
 /**< 音響リンク状態を保護するμT-Kernel mutex設定 */
 LOCAL T_CMTX const acoustic_link_mutex_config = {
@@ -53,40 +55,40 @@ LOCAL T_CTSK const acoustic_link_task_config = {
     .bufptr = NULL,
 };
 
-LOCAL ID acoustic_link_task_id;                                    /**< 音響リンクタスクID */
-LOCAL ID acoustic_link_mutex_id;                                   /**< 音響リンク状態保護mutex ID */
-LOCAL BOOL acoustic_link_task_started;                             /**< 音響リンクタスク開始状態 */
-LOCAL BOOL audio_usb_open;                                 /**< USBドライバopen状態 */
-LOCAL BOOL audio_read_pending;                             /**< Bulk IN要求実行中 */
-LOCAL BOOL audio_write_pending;                            /**< Bulk OUT要求実行中 */
-LOCAL UW audio_write_started_at_ms;                        /**< Bulk OUT要求開始時刻 */
-LOCAL BOOL audio_actuator_telemetry_pending;               /**< CPU1診断送信待ち */
-LOCAL BOOL audio_pose_telemetry_pending;                   /**< オドメトリ診断送信待ち */
-LOCAL BOOL audio_control_pending;                          /**< CDC class request実行中 */
-LOCAL BOOL audio_sequence_valid;                           /**< sequence初回受信済み */
-LOCAL BOOL audio_boot_id_valid;                            /**< boot ID初回受信済み */
-LOCAL UB audio_device_address;                        /**< CDCデバイスアドレス */
-LOCAL UW audio_now_ms;                               /**< 音響リンクタスク単調時刻 */
-LOCAL UW audio_last_recovery_ms;                     /**< 最終リカバリ実行時刻 */
-LOCAL UW audio_continuous_error_count;               /**< 連続USBエラー回数 */
-LOCAL UW audio_configured_at_ms;                     /**< USB列挙時刻 */
-LOCAL UW audio_observation_at_ms;                    /**< 最終観測受信時刻 */
-LOCAL UW audio_last_sequence;                        /**< 最終受信sequence */
-LOCAL UW audio_observation_sequence;                 /**< 最終観測sequence */
-LOCAL UW audio_telemetry_sequence;                   /**< 診断送信sequence */
-LOCAL UW audio_actuator_telemetry_sequence;          /**< CPU1診断送信sequence */
-LOCAL UW audio_pose_telemetry_sequence;              /**< オドメトリ診断送信sequence */
-LOCAL UW audio_last_telemetry_ms;                    /**< 最終診断送信要求時刻 */
-LOCAL UW audio_actuator_status_at_ms;                /**< CPU1状態最終更新時刻 */
-LOCAL UW audio_actuator_status_sequence;             /**< CPU1状態最終sequence */
-LOCAL UW audio_boot_id;                              /**< ESP32 boot ID */
-LOCAL BOOL audio_actuator_status_sequence_valid;           /**< CPU1状態sequence受信済み */
-LOCAL acoustic_protocol_parser_t audio_parser;             /**< CDCストリームパーサー */
-LOCAL acoustic_hello_t audio_hello;                        /**< 最新HELLO */
-LOCAL acoustic_health_t audio_health;                      /**< 最新HEALTH */
+LOCAL ID acoustic_link_task_id;                             /**< 音響リンクタスクID */
+LOCAL ID acoustic_link_mutex_id;                            /**< 音響リンク状態保護mutex ID */
+LOCAL BOOL acoustic_link_task_started;                      /**< 音響リンクタスク開始状態 */
+LOCAL BOOL audio_usb_open;                                  /**< USBドライバopen状態 */
+LOCAL BOOL audio_read_pending;                              /**< Bulk IN要求実行中 */
+LOCAL BOOL audio_write_pending;                             /**< Bulk OUT要求実行中 */
+LOCAL UW audio_write_started_at_ms;                         /**< Bulk OUT要求開始時刻 */
+LOCAL BOOL audio_actuator_telemetry_pending;                /**< CPU1診断送信待ち */
+LOCAL BOOL audio_pose_telemetry_pending;                    /**< オドメトリ診断送信待ち */
+LOCAL BOOL audio_control_pending;                           /**< CDC class request実行中 */
+LOCAL BOOL audio_sequence_valid;                            /**< sequence初回受信済み */
+LOCAL BOOL audio_boot_id_valid;                             /**< boot ID初回受信済み */
+LOCAL UB audio_device_address;                              /**< CDCデバイスアドレス */
+LOCAL UW audio_now_ms;                                      /**< 音響リンクタスク単調時刻 */
+LOCAL UW audio_last_recovery_ms;                            /**< 最終リカバリ実行時刻 */
+LOCAL UW audio_continuous_error_count;                      /**< 連続USBエラー回数 */
+LOCAL UW audio_configured_at_ms;                            /**< USB列挙時刻 */
+LOCAL UW audio_observation_at_ms;                           /**< 最終観測受信時刻 */
+LOCAL UW audio_last_sequence;                               /**< 最終受信sequence */
+LOCAL UW audio_observation_sequence;                        /**< 最終観測sequence */
+LOCAL UW audio_telemetry_sequence;                          /**< 診断送信sequence */
+LOCAL UW audio_actuator_telemetry_sequence;                 /**< CPU1診断送信sequence */
+LOCAL UW audio_pose_telemetry_sequence;                     /**< オドメトリ診断送信sequence */
+LOCAL UW audio_last_telemetry_ms;                           /**< 最終診断送信要求時刻 */
+LOCAL UW audio_actuator_status_at_ms;                       /**< CPU1状態最終更新時刻 */
+LOCAL UW audio_actuator_status_sequence;                    /**< CPU1状態最終sequence */
+LOCAL UW audio_boot_id;                                     /**< ESP32 boot ID */
+LOCAL BOOL audio_actuator_status_sequence_valid;            /**< CPU1状態sequence受信済み */
+LOCAL acoustic_protocol_parser_t audio_parser;              /**< CDCストリームパーサー */
+LOCAL acoustic_hello_t audio_hello;                         /**< 最新HELLO */
+LOCAL acoustic_health_t audio_health;                       /**< 最新HEALTH */
 LOCAL acoustic_feature_assembler_t audio_feature_assembler; /**< 特徴量再組立状態 */
-LOCAL acoustic_feature_patch_t audio_feature_patch;        /**< 最新完成特徴量パッチ */
-LOCAL BOOL audio_feature_ready;                            /**< 完成特徴量保持状態 */
+LOCAL acoustic_feature_patch_t audio_feature_patch;         /**< 最新完成特徴量パッチ */
+LOCAL BOOL audio_feature_ready;                             /**< 完成特徴量保持状態 */
 /**< CDC仮想UART設定 (115200bps, 1 stop bit, no parity, 8 data bits - 7 bytes packed) */
 LOCAL UB audio_cdc_line_coding[CPU0_AUDIO_LINE_CODING_LENGTH] = {
     0x00, 0xC2, 0x01, 0x00, /* 115200 bps (little-endian) */
@@ -94,30 +96,36 @@ LOCAL UB audio_cdc_line_coding[CPU0_AUDIO_LINE_CODING_LENGTH] = {
     0x00,                   /* no parity */
     0x08                    /* 8 data bits */
 };
-LOCAL UB audio_control_dummy;                         /**< data無しcontrol転送用 */
-LOCAL UB audio_rx_buffer[CPU0_AUDIO_USB_RX_SIZE];     /**< USB Bulk INバッファ */
+LOCAL UB audio_control_dummy;                               /**< data無しcontrol転送用 */
+LOCAL UB audio_rx_buffer[CPU0_AUDIO_USB_RX_SIZE];           /**< USB Bulk INバッファ */
 /**< USB Bulk OUTバッファ */
-LOCAL UB audio_tx_buffer[ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE];
+LOCAL UB audio_tx_buffer[ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE]; /**< USB送信用フレームバッファ */
 
-EXPORT volatile BOOL g_task_acoustic_link_usb_configured;                  /**< USB列挙状態 */
-EXPORT volatile task_acoustic_link_usb_state_t g_task_acoustic_link_usb_state;     /**< CDC初期化段階 */
-EXPORT volatile usb_status_t g_task_acoustic_link_last_event;              /**< 最終USBイベント */
-EXPORT volatile UB g_task_acoustic_link_device_address;               /**< CDCアドレス */
-EXPORT volatile UW g_task_acoustic_link_event_count;                 /**< USBイベント数 */
-EXPORT volatile UW g_task_acoustic_link_transfer_busy_count;         /**< USB転送BUSY回数 */
-EXPORT volatile BOOL g_task_acoustic_link_hello_received;                  /**< HELLO受信状態 */
-EXPORT volatile UW g_task_acoustic_link_frame_count;                 /**< 正常フレーム数 */
-EXPORT volatile UW g_task_acoustic_link_crc_error_count;             /**< CRC異常数 */
-EXPORT volatile UW g_task_acoustic_link_format_error_count;          /**< 形式異常数 */
-EXPORT volatile UW g_task_acoustic_link_sequence_drop_count;         /**< 逆行sequence数 */
-EXPORT volatile UW g_task_acoustic_link_feature_complete_count;      /**< 特徴量イベント完成数 */
-EXPORT volatile UW g_task_acoustic_link_feature_drop_count;          /**< 特徴量イベント破棄数 */
-EXPORT volatile UW g_task_acoustic_link_feature_generation;          /**< 最新特徴量世代 */
-EXPORT volatile UW g_task_acoustic_link_observation_age_ms;          /**< 観測経過時間 */
-EXPORT volatile UW g_task_acoustic_link_telemetry_send_count;        /**< 診断送信完了数 */
-EXPORT volatile UW g_task_acoustic_link_telemetry_busy_count;        /**< 診断送信BUSY数 */
-EXPORT volatile acoustic_observation_t g_task_acoustic_link_observation;   /**< 最新音響観測 */
-EXPORT volatile fsp_err_t g_task_acoustic_link_last_error;                 /**< 最終USBエラー */
+EXPORT volatile BOOL g_task_acoustic_link_usb_configured;   /**< USB列挙状態 */
+/**< CDC初期化段階 */
+EXPORT volatile task_acoustic_link_usb_state_t g_task_acoustic_link_usb_state;
+/**< 最終USBイベント */
+EXPORT volatile usb_status_t g_task_acoustic_link_last_event;
+EXPORT volatile UB g_task_acoustic_link_device_address;     /**< CDCアドレス */
+EXPORT volatile UW g_task_acoustic_link_event_count;        /**< USBイベント数 */
+EXPORT volatile UW g_task_acoustic_link_transfer_busy_count;/**< USB転送BUSY回数 */
+EXPORT volatile BOOL g_task_acoustic_link_hello_received;   /**< HELLO受信状態 */
+EXPORT volatile UW g_task_acoustic_link_frame_count;        /**< 正常フレーム数 */
+EXPORT volatile UW g_task_acoustic_link_crc_error_count;    /**< CRC異常数 */
+EXPORT volatile UW g_task_acoustic_link_format_error_count; /**< 形式異常数 */
+EXPORT volatile UW g_task_acoustic_link_sequence_drop_count;/**< 逆行sequence数 */
+/**< 特徴量イベント完成数 */
+EXPORT volatile UW g_task_acoustic_link_feature_complete_count;
+EXPORT volatile UW g_task_acoustic_link_feature_drop_count; /**< 特徴量イベント破棄数 */
+EXPORT volatile UW g_task_acoustic_link_feature_generation; /**< 最新特徴量世代 */
+EXPORT volatile UW g_task_acoustic_link_observation_age_ms; /**< 観測経過時間 */
+/**< 診断送信完了数 */
+EXPORT volatile UW g_task_acoustic_link_telemetry_send_count;
+/**< 診断送信BUSY数 */
+EXPORT volatile UW g_task_acoustic_link_telemetry_busy_count;
+/**< 最新音響観測 */
+EXPORT volatile acoustic_observation_t g_task_acoustic_link_observation;
+EXPORT volatile fsp_err_t g_task_acoustic_link_last_error;  /**< 最終USBエラー */
 
 /** =================================================================*
  * @brief  カーネルの単調時刻を32bitミリ秒で取得
@@ -303,7 +311,8 @@ LOCAL fsp_err_t task_acoustic_link_control_start(void) {
         p_data = audio_cdc_line_coding;
     } else if (CPU0_AUDIO_USB_STATE_SET_CONTROL_LINE_STATE == g_task_acoustic_link_usb_state) {
         setup.request_type = CPU0_AUDIO_SET_CONTROL_LINE_STATE;
-        setup.request_value = 0x0003U; /* DTR=1, RTS=1 */
+        /* CDCホストへDTR/RTSの両方を有効として通知する。 */
+        setup.request_value = 0x0003U;
     } else if (CPU0_AUDIO_USB_STATE_GET_LINE_CODING == g_task_acoustic_link_usb_state) {
         setup.request_type = CPU0_AUDIO_GET_LINE_CODING;
         setup.request_length = CPU0_AUDIO_LINE_CODING_LENGTH;
@@ -339,7 +348,8 @@ LOCAL void task_acoustic_link_control_complete(const usb_event_info_t * p_event_
         return;
     }
 
-    if ((USB_CDC_SET_LINE_CODING == request) && (CPU0_AUDIO_USB_STATE_SET_LINE_CODING == g_task_acoustic_link_usb_state)) {
+    if ((USB_CDC_SET_LINE_CODING == request) &&
+        (CPU0_AUDIO_USB_STATE_SET_LINE_CODING == g_task_acoustic_link_usb_state)) {
         g_task_acoustic_link_usb_state = CPU0_AUDIO_USB_STATE_SET_CONTROL_LINE_STATE;
     } else if ((USB_CDC_SET_CONTROL_LINE_STATE == request) &&
                (CPU0_AUDIO_USB_STATE_SET_CONTROL_LINE_STATE == g_task_acoustic_link_usb_state)) {
@@ -605,14 +615,16 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
         return FSP_SUCCESS;
     }
 
-    static task_command_snapshot_t s_command_snapshot;
+    /* USBテレメトリの送信中も再利用する最新CPU0指令スナップショット。 */
+    LOCAL task_command_snapshot_t s_command_snapshot;
     ER const snapshot_err = task_command_snapshot_get(&s_command_snapshot);
     if (E_OK != snapshot_err) {
         g_task_acoustic_link_telemetry_busy_count++;
         return FSP_ERR_USB_BUSY;
     }
 
-    static sensor_snapshot_t s_sensor_snapshot;
+    /* センサー取得失敗時も診断値を組み立てられる再利用バッファ。 */
+    LOCAL sensor_snapshot_t s_sensor_snapshot;
     memset(&s_sensor_snapshot, 0, sizeof(s_sensor_snapshot));
     s_sensor_snapshot.age_ms = UINT32_MAX;
     s_sensor_snapshot.last_error = (W) FSP_ERR_NOT_OPEN;
@@ -649,7 +661,8 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
         flags |= ACOUSTIC_TELEMETRY_FLAG_COMMAND_STALE;
     }
 
-    static task_infer_result_t s_infer_result;
+    /* 推論結果をUSBテレメトリへ変換する再利用バッファ。 */
+    LOCAL task_infer_result_t s_infer_result;
     memset(&s_infer_result, 0, sizeof(s_infer_result));
     BOOL const infer_ready = (E_OK == task_infer_result_get(&s_infer_result));
 
@@ -689,7 +702,8 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
         threshold_x1000 = (UH) ((th > 2.0F) ? 2000U : (th < 0.0F) ? 0U : (UW) (th * 1000.0F + 0.5F));
     }
 
-    static acoustic_rover_telemetry_t s_telemetry;
+    /* CPU0状態・センサー・推論結果を一つのwire形式へまとめる作業領域。 */
+    LOCAL acoustic_rover_telemetry_t s_telemetry;
     memset(&s_telemetry, 0, sizeof(s_telemetry));
     s_telemetry.schema_version = 2U;
     s_telemetry.think_state = (UB) g_task_think_state;
@@ -724,7 +738,8 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
     s_telemetry.infer_target_peak_bin = target_peak_bin;
     s_telemetry.infer_current_peak_bin = current_peak_bin;
     s_telemetry.infer_similarity_permille = similarity_permille;
-    s_telemetry.autonomy_mode = (UB) 2; /* 2: Synthesized */
+    /* 音響リンクが合成した自律走行状態として通知する。 */
+    s_telemetry.autonomy_mode = (UB) 2;
     s_telemetry.sensor_rule = (UB) g_task_think_sensor_rule;
     s_telemetry.sensor_valid_flags = s_sensor_snapshot.valid_flags;
     s_telemetry.sensor_reserved =
@@ -951,7 +966,8 @@ LOCAL void task_acoustic_link_entry(INT stacd, void * exinf) {
             g_task_acoustic_link_last_error = event_err;
         }
 
-        /* 自動リカバリ判定: 通信途絶または連続転送失敗検知時にUSBバスリセット・再列挙を実行 */
+        /* 通信途絶または連続転送失敗を検知した場合は、USBバスを */
+        /* リセットして再列挙する。 */
         if (g_task_acoustic_link_usb_configured && ((audio_now_ms - audio_last_recovery_ms) >= 3000U)) {
             BOOL trigger_recovery = FALSE;
             if (audio_continuous_error_count >= 5U) {

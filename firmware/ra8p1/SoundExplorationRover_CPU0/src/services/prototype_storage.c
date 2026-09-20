@@ -4,31 +4,33 @@
  * ================================================================= */
 #include "services/prototype_storage.h"                     /* 永続化データ型と結果コード */
 #include "hal_data.h"                                       /* FSP MRAMとCPU制御レジスタ */
-#include <stddef.h>                                          /* offsetof: CRC範囲 */
-#include <string.h>                                          /* record初期化とコピー */
+#include <stddef.h>                                         /* offsetof: CRC範囲 */
+#include <string.h>                                         /* record初期化とコピー */
 
-#define CPU0_PROTOTYPE_STORAGE_MAGIC             (0x53525650U)
-#define CPU0_PROTOTYPE_STORAGE_COMMIT             (0x434F4D54U)
+#define CPU0_PROTOTYPE_STORAGE_MAGIC       (0x53525650U)    /**< 見本保存の識別値 */
+#define CPU0_PROTOTYPE_STORAGE_COMMIT      (0x434F4D54U)    /**< 見本保存の確定 */
 /* v4の32 KiB領域だけを読み、旧領域の内容は保存データとして扱わない。 */
-#define CPU0_PROTOTYPE_STORAGE_VERSION            (4U)
-#define CPU0_PROTOTYPE_STORAGE_SLOT_BYTES         (16384U)
-#define CPU0_PROTOTYPE_STORAGE_SLOT_COUNT         (2U)
-#define CPU0_PROTOTYPE_STORAGE_REGION_BYTES       (32768U)
-#define CPU0_PROTOTYPE_STORAGE_PROGRAM_BYTES      (32U)
-#define CPU0_PROTOTYPE_STORAGE_RECORD_HEADER_BYTES (8U)
-#define CPU0_PROTOTYPE_STORAGE_RECORD_FOOTER_BYTES (8U)
-#define CPU0_PROTOTYPE_STORAGE_RECORD_RESERVED_BYTES \
+#define CPU0_PROTOTYPE_STORAGE_VERSION     (4U)             /**< 見本保存の版 */
+#define CPU0_PROTOTYPE_STORAGE_SLOT_BYTES  (16384U)         /**< 見本保存のスロット[byte] */
+#define CPU0_PROTOTYPE_STORAGE_SLOT_COUNT  (2U)             /**< 見本保存スロットの個数 */
+#define CPU0_PROTOTYPE_STORAGE_REGION_BYTES (32768U)        /**< 見本保存の領域[byte] */
+#define CPU0_PROTOTYPE_STORAGE_PROGRAM_BYTES (32U)          /**< 見本保存の書込み[byte] */
+#define CPU0_PROTOTYPE_STORAGE_RECORD_HEADER_BYTES (8U)     /**< 見本保存レコードのヘッダ[byte] */
+#define CPU0_PROTOTYPE_STORAGE_RECORD_FOOTER_BYTES (8U)     /**< 見本保存レコードのフッタ[byte] */
+#define CPU0_PROTOTYPE_STORAGE_RECORD_RESERVED_BYTES        /**< MRAMレコードの予約領域サイズ */ \
     (CPU0_PROTOTYPE_STORAGE_SLOT_BYTES - CPU0_PROTOTYPE_STORAGE_RECORD_HEADER_BYTES - \
      sizeof(prototype_storage_data_t) - CPU0_PROTOTYPE_STORAGE_RECORD_FOOTER_BYTES)
 
+/**< MRAMの1スロットに格納する検証付き保存レコード */
 typedef struct st_prototype_storage_record {
-    UW magic;
-    UH format_version;
-    UH payload_bytes;
-    prototype_storage_data_t data;
+    UW magic;                                               /**< 保存レコードの識別値 */
+    UH format_version;                                      /**< 保存データ形式の版 */
+    UH payload_bytes;                                       /**< payloadのバイト数 */
+    prototype_storage_data_t data;                          /**< 背景モデルと見本のpayload */
+    /**< スロット末尾までを埋める予約領域 */
     UB reserved[CPU0_PROTOTYPE_STORAGE_RECORD_RESERVED_BYTES];
-    UW crc32;
-    UW commit;
+    UW crc32;                                               /**< magicからpayload末尾までのCRC32 */
+    UW commit;                                              /**< 書込み完了を示す確定マーカー */
 } prototype_storage_record_t;
 
 _Static_assert(CPU0_PROTOTYPE_STORAGE_RECORD_RESERVED_BYTES > 0U,
@@ -41,25 +43,27 @@ _Static_assert(offsetof(prototype_storage_record_t, commit) ==
                    (CPU0_PROTOTYPE_STORAGE_SLOT_BYTES - sizeof(UW)),
                "prototype storage commit marker must be written last");
 
-IMPORT UB __prototype_storage_start[];
-IMPORT UB __prototype_storage_end[];
+IMPORT UB __prototype_storage_start[];                      /**< MRAM見本保存領域の開始アドレス */
+IMPORT UB __prototype_storage_end[];                        /**< MRAM見本保存領域の終了アドレス */
 
-LOCAL BOOL storage_initialized;
+LOCAL BOOL storage_initialized;                             /**< MRAM保存サービス初期化状態 */
+/**< MRAM読出しレコード */
 LOCAL prototype_storage_record_t storage_records[CPU0_PROTOTYPE_STORAGE_SLOT_COUNT];
-LOCAL prototype_storage_record_t storage_write_record __attribute__((aligned(32)));
-LOCAL UB storage_blank_record[CPU0_PROTOTYPE_STORAGE_SLOT_BYTES] __attribute__((aligned(32)));
+LOCAL prototype_storage_record_t storage_write_record __attribute__((aligned(32))); /**< MRAM書込みレコード */
+LOCAL UB storage_blank_record[CPU0_PROTOTYPE_STORAGE_SLOT_BYTES] __attribute__((aligned(32))); /**< 空レコード */
 #if (0 == _RA_CORE) && (1 == BSP_MULTICORE_PROJECT) && !BSP_TZ_NONSECURE_BUILD
-LOCAL UB storage_secondary_wait_state;
+LOCAL UB storage_secondary_wait_state;                      /**< CPU1停止状態の保存値 */
 #endif
 
-LOCAL UW prototype_storage_address(void);
-LOCAL UW prototype_storage_crc32(const UB * p_data, UW length);
-LOCAL BOOL prototype_storage_record_valid(const prototype_storage_record_t * p_record);
-LOCAL void prototype_storage_records_read(void);
-LOCAL UW prototype_storage_latest_slot(BOOL * p_found);
-LOCAL BOOL prototype_storage_secondary_stall(void);
-LOCAL void prototype_storage_secondary_resume(void);
-LOCAL fsp_err_t prototype_storage_write_units(const void * p_source, UW destination, UW byte_count);
+LOCAL UW prototype_storage_address(void);                   /* MRAM保存領域アドレス取得 */
+LOCAL UW prototype_storage_crc32(const UB * p_data, UW length); /* MRAMレコードCRC32算出 */
+LOCAL BOOL prototype_storage_record_valid(const prototype_storage_record_t * p_record); /* record判定 */
+LOCAL void prototype_storage_records_read(void);            /* MRAMレコード読出し */
+LOCAL UW prototype_storage_latest_slot(BOOL * p_found);     /* 最新MRAM保存スロット取得 */
+LOCAL BOOL prototype_storage_secondary_stall(void);         /* CPU1停止要求 */
+LOCAL void prototype_storage_secondary_resume(void);        /* CPU1停止解除 */
+LOCAL fsp_err_t prototype_storage_write_units(const void * p_source, UW destination,
+                                              UW byte_count); /* MRAM単位書込み */
 
 /** =================================================================*
  * @brief  リンカ予約領域の先頭アドレス

@@ -3,7 +3,7 @@
  * @brief  CPU0-CPU1間IPCクライアント実装
  * ================================================================= */
 #include "actuator_ipc_client.h"                            /* CPU0側IPCクライアントAPIとメッセージ型 */
-#include "config/ipc_config.h"                             /* CPU0のIPC再送待ち時間 */
+#include "config/ipc_config.h"                              /* CPU0のIPC再送待ち時間 */
 #include <tk/tkernel.h>                                     /* μT-Kernelのタスク遅延API */
 
 /**< CPU1へ送るサーボ目標角メッセージID */
@@ -14,13 +14,15 @@ LOCAL actuator_ipc_message_id_t const servo_target_message_ids[ACTUATOR_SERVO_CO
     ACTUATOR_IPC_COMMAND_RL_TARGET_DEG,
 };
 
-LOCAL actuator_status_t g_staging_status;                  /**< 受信中のCPU1状態 */
-LOCAL actuator_status_t g_committed_status;                /**< 確定したCPU1状態 */
-LOCAL volatile BOOL g_status_valid;                        /**< CPU1状態受信済み */
+LOCAL actuator_status_t g_staging_status;                   /**< 受信中のCPU1状態 */
+LOCAL actuator_status_t g_committed_status;                 /**< 確定したCPU1状態 */
+LOCAL volatile BOOL g_status_valid;                         /**< CPU1状態受信済み */
 
-EXPORT volatile UW g_actuator_ipc_client_send_overflow_retry_count; /**< IPC送信overflow再試行回数 */
-EXPORT volatile UW g_actuator_ipc_client_last_tx_message_id;        /**< 最終IPC送信メッセージID */
-EXPORT volatile fsp_err_t g_actuator_ipc_client_last_tx_error;      /**< 最終IPC送信ワードのエラー */
+/**< IPC送信overflow再試行回数 */
+EXPORT volatile UW g_actuator_ipc_client_send_overflow_retry_count;
+EXPORT volatile UW g_actuator_ipc_client_last_tx_message_id;/**< 最終IPC送信メッセージID */
+/**< 最終IPC送信ワードのエラー */
+EXPORT volatile fsp_err_t g_actuator_ipc_client_last_tx_error;
 
 /** =================================================================*
  * @brief  IPCワード送信

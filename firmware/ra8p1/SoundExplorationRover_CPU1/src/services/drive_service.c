@@ -7,15 +7,15 @@
 #include "drivers/bts7960.h"                                /* BTS7960正逆転PWM出力API */
 #include "drivers/encoder.h"                                /* 左右モーター回転数取得API */
 
-EXPORT volatile H g_drive_left_duty_permille = 0;            /**< 左モーターの現在デューティ[0.1%] */
-EXPORT volatile H g_drive_right_duty_permille = 0;           /**< 右モーターの現在デューティ[0.1%] */
+EXPORT volatile H g_drive_left_duty_permille = 0;           /**< 左モーターの現在デューティ[0.1%] */
+EXPORT volatile H g_drive_right_duty_permille = 0;          /**< 右モーターの現在デューティ[0.1%] */
 
-LOCAL H g_left_target_rpm;                                   /**< 左モーター目標回転数[RPM] */
-LOCAL H g_right_target_rpm;                                  /**< 右モーター目標回転数[RPM] */
-LOCAL H g_left_target_duty_permille;                         /**< 左モーター目標デューティ[0.1%] */
-LOCAL H g_right_target_duty_permille;                        /**< 右モーター目標デューティ[0.1%] */
-LOCAL UW g_drive_update_elapsed_ms;                          /**< PWM更新周期の経過時間[ms] */
-LOCAL UW g_speed_feedback_elapsed_ms;                        /**< 目標変更後の速度帰還待機時間[ms] */
+LOCAL H g_left_target_rpm;                                  /**< 左モーター目標回転数[RPM] */
+LOCAL H g_right_target_rpm;                                 /**< 右モーター目標回転数[RPM] */
+LOCAL H g_left_target_duty_permille;                        /**< 左モーター目標デューティ[0.1%] */
+LOCAL H g_right_target_duty_permille;                       /**< 右モーター目標デューティ[0.1%] */
+LOCAL UW g_drive_update_elapsed_ms;                         /**< PWM更新周期の経過時間[ms] */
+LOCAL UW g_speed_feedback_elapsed_ms;                       /**< 目標変更後の速度帰還待機時間[ms] */
 
 /** =================================================================*
  * @brief  目標回転数から符号付きデューティへ変換

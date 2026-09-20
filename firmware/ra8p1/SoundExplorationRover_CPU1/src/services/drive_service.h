@@ -9,19 +9,19 @@
 #include "config/drive_config.h"                            /* 計測用機能のコンパイル設定 */
 #include <tk/tkernel.h>                                     /* μT-Kernel基本型と公開範囲マクロ */
 
-EXPORT fsp_err_t drive_service_init(void);                   /* 車体駆動サービス初期化 */
+EXPORT fsp_err_t drive_service_init(void);                  /* 車体駆動サービス初期化 */
 EXPORT fsp_err_t drive_service_set_target_rpm(H left_rpm, H right_rpm); /* 左右目標回転数設定 */
-EXPORT fsp_err_t drive_service_update(UW elapsed_ms);             /* 車体駆動実時間更新 */
-EXPORT fsp_err_t drive_service_stop(void);                   /* 車体駆動サービス安全停止 */
-EXPORT H drive_service_left_target_rpm_get(void);            /* 左モーター目標回転数取得 */
-EXPORT H drive_service_right_target_rpm_get(void);           /* 右モーター目標回転数取得 */
+EXPORT fsp_err_t drive_service_update(UW elapsed_ms);       /* 車体駆動実時間更新 */
+EXPORT fsp_err_t drive_service_stop(void);                  /* 車体駆動サービス安全停止 */
+EXPORT H drive_service_left_target_rpm_get(void);           /* 左モーター目標回転数取得 */
+EXPORT H drive_service_right_target_rpm_get(void);          /* 右モーター目標回転数取得 */
 
 #if DRIVE_MEASUREMENT_TEST_ENABLE
-EXPORT fsp_err_t drive_service_set_test_duty_permille(UH magnitude_permille);
+EXPORT fsp_err_t drive_service_set_test_duty_permille(UH magnitude_permille); /* 計測用duty設定 */
                                                                /* 計測用前進デューティ設定 */
 #endif
 
-IMPORT volatile H g_drive_left_duty_permille;                /**< 左モーターの現在デューティ[0.1%] */
-IMPORT volatile H g_drive_right_duty_permille;               /**< 右モーターの現在デューティ[0.1%] */
+IMPORT volatile H g_drive_left_duty_permille;               /**< 左モーターの現在デューティ[0.1%] */
+IMPORT volatile H g_drive_right_duty_permille;              /**< 右モーターの現在デューティ[0.1%] */
 
 #endif /* SEROV_CPU1_SERVICE_DRIVE_H */

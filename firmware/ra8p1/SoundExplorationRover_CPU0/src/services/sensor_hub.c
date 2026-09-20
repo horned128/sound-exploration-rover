@@ -2,23 +2,24 @@
  * @file   sensor_hub.c
  * @brief  ToF 3台とBMI270をまとめるCPU0センサー層実装
  * ================================================================= */
-#include "sensor_hub.h"                                    /* センサー共通API */
-#include "drivers/bmi270.h"                                /* BMI270 rawデータAPI */
-#include "drivers/tca9548a.h"                              /* I2CマルチプレクサAPI */
-#include "drivers/vl53l1x.h"                               /* ToF API */
-#include "platform/i2c_bus.h"                              /* I2CバスAPI */
-#include "config/sensor_config.h"                          /* センサー設定値 */
+#include "sensor_hub.h"                                     /* センサー共通API */
+#include "drivers/bmi270.h"                                 /* BMI270 rawデータAPI */
+#include "drivers/tca9548a.h"                               /* I2CマルチプレクサAPI */
+#include "drivers/vl53l1x.h"                                /* ToF API */
+#include "platform/i2c_bus.h"                               /* I2CバスAPI */
+#include "config/sensor_config.h"                           /* センサー設定値 */
 
-#define CPU0_SENSOR_TOF_HOLD_MAX_FRAMES     (3U)
+#define CPU0_SENSOR_TOF_HOLD_MAX_FRAMES    (3U)             /**< センサーToF保持最大のフレーム数 */
 LOCAL BOOL sensor_hub_initialized;                          /**< 全センサー初期化状態 */
 LOCAL BOOL sensor_hub_filter_valid[CPU0_SENSOR_TOF_COUNT];  /**< ToFフィルタ初期値状態 */
-LOCAL UH sensor_hub_filtered_distance_mm[CPU0_SENSOR_TOF_COUNT]; /**< ToF平滑化値 */
+/**< ToF平滑化値 */
+LOCAL UH sensor_hub_filtered_distance_mm[CPU0_SENSOR_TOF_COUNT];
 LOCAL UW sensor_hub_tof_drop_count[CPU0_SENSOR_TOF_COUNT];  /**< 連続測定失敗回数 */
-LOCAL sensor_diagnostics_t sensor_hub_diagnostics;     /**< 最終センサー診断 */
+LOCAL sensor_diagnostics_t sensor_hub_diagnostics;          /**< 最終センサー診断 */
 
-LOCAL UB sensor_hub_tof_channel(tof_position_t position); /* ToF位置からTCAチャネル取得 */
-LOCAL UB sensor_hub_tof_valid_flag(tof_position_t position); /* ToF位置のvalid bit取得 */
-LOCAL UW sensor_hub_tof_error_flag(tof_position_t position); /* ToF位置のerror bit取得 */
+LOCAL UB sensor_hub_tof_channel(tof_position_t position);   /* ToF位置からTCAチャネル取得 */
+LOCAL UB sensor_hub_tof_valid_flag(tof_position_t position);/* ToF位置のvalid bit取得 */
+LOCAL UW sensor_hub_tof_error_flag(tof_position_t position);/* ToF位置のerror bit取得 */
 LOCAL sensor_failure_device_t sensor_hub_tof_device(tof_position_t position); /* ToF device取得 */
 LOCAL sensor_failure_stage_t sensor_hub_tof_select_stage(tof_position_t position); /* ToF選択stage取得 */
 LOCAL sensor_failure_stage_t sensor_hub_tof_init_stage(tof_position_t position); /* ToF初期化stage取得 */
@@ -368,11 +369,13 @@ EXPORT fsp_err_t sensor_hub_poll(sensor_snapshot_t * p_snapshot) {
             sensor_hub_tof_drop_count[index]++;
             if ((sensor_hub_tof_drop_count[index] <= CPU0_SENSOR_TOF_HOLD_MAX_FRAMES) &&
                 sensor_hub_filter_valid[index]) {
-                /* 一時的なドロップ（3フレーム以内）は直前のフィルタ値をホールドして有効扱いを維持 */
+                /* 一時的なドロップ（3フレーム以内）は直前値を保持し、 */
+                /* 測距値を有効扱いのまま制御へ渡す。 */
                 p_snapshot->tof_distance_mm[index] = sensor_hub_filtered_distance_mm[index];
                 p_snapshot->valid_flags |= sensor_hub_tof_valid_flag(position);
             } else {
-                /* 連続ドロップまたは初期値なし: 0mmではなくクリア距離(4000mm)を代入し、エラーフラグをセット */
+                /* 連続ドロップまたは初期値なしは、0mmではなくクリア距離を使い、 */
+                /* 制御側が異常を判定できるようエラーフラグをセットする。 */
                 sensor_hub_filter_valid[index] = FALSE;
                 p_snapshot->tof_distance_mm[index] = CPU0_TOF_MAX_VALID_MM;
                 p_snapshot->error_flags |= sensor_hub_tof_error_flag(position);

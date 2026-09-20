@@ -46,7 +46,7 @@ int main(void)
     /* Exercise smooth_avoidance_plan under ASan/UBSan */
     smooth_avoidance_input_t planner_input = {
         .tof_distance_mm = {1000.0f, 1000.0f, 1000.0f},
-        .tof_valid = {true, true, true},
+        .tof_valid = {TRUE, TRUE, TRUE},
         .target_heading_deg = 30.0f,
         .current_steering_deg = 0.0f,
         .current_speed_scale = 0.5f,
@@ -68,19 +68,19 @@ int main(void)
         .steering_deg = 20,
         .left_rpm = 100,
         .right_rpm = 100,
-        .actuator_enable = true,
-        .emergency_stop = false,
+        .actuator_enable = TRUE,
+        .emergency_stop = FALSE,
     };
     safety_motion_command_t arb = {0};
     snapshot.tof_distance_mm[CPU0_TOF_CENTER] = 1000U;
     snapshot.gyro_dps_x10[2] = 0;
-    safety_arbiter_arbitrate(&req, &snapshot, true, &arb);
+    safety_arbiter_arbitrate(&req, &snapshot, TRUE, &arb);
     assert(arb.actuator_enable);
     assert(arb.left_rpm == 100);
 
     /* Exercise veto when front obstacle < 250mm */
     snapshot.tof_distance_mm[CPU0_TOF_CENTER] = 200U;
-    safety_arbiter_arbitrate(&req, &snapshot, true, &arb);
+    safety_arbiter_arbitrate(&req, &snapshot, TRUE, &arb);
     assert(!arb.actuator_enable);
     assert(arb.left_rpm == 0);
     assert(!arb.emergency_stop);

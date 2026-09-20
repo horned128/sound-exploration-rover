@@ -2,9 +2,9 @@
  * @file   main.c
  * @brief  RA8P1 Cortex-M33向けμT-Kernel 3.0アプリケーション入口
  * ================================================================= */
-#include "tasks/task_registry.h"                                  /* CPU1独立タスクの初期化API */
-#include "tasks/task_status.h"                                /* CPU1起動異常のLED表示API */
-#include <tk/tkernel.h>                                      /* μT-Kernelのタスク休止API、型定義 */
+#include "tasks/task_registry.h"                            /* CPU1独立タスクの初期化API */
+#include "tasks/task_status.h"                              /* CPU1起動異常のLED表示API */
+#include <tk/tkernel.h>                                     /* μT-Kernelのタスク休止API、型定義 */
 
 EXPORT INT usermain(void);                                  /* CPU1アプリケーション起動 */
 

@@ -6,7 +6,7 @@
 #include "drivers/bts7960.h"                                /* BTS7960正逆転PWMドライバAPI */
 #include "config/pin_config.h"                              /* BTS7960のFSP資源・出力ピン対応 */
 
-LOCAL BOOL bts7960_pwm_running;                              /**< PWM開始状態 */
+LOCAL BOOL bts7960_pwm_running;                             /**< PWM開始状態 */
 
 /** =================================================================*
  * @brief  BTS7960 PWM資源初期化

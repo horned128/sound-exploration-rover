@@ -3,17 +3,16 @@
  * @brief  固定乱数32→16エンコーダとRLS 16→32デコーダ
  * ================================================================= */
 #include "services/background_model.h"                      /* 背景モデル公開API */
+#include <math.h>                                           /* MSE標準偏差 */
+#include <string.h>                                         /* 状態初期化 */
 
-#include <math.h>                                            /* sqrtf: MSE標準偏差 */
-#include <string.h>                                          /* memset: 初期化 */
-
-LOCAL UW background_model_lcg_next(UW state);                /* 固定乱数系列の1ステップ */
-LOCAL float background_model_lcg_uniform(UW * p_state);      /* [-1,1]の固定乱数 */
-LOCAL float background_model_hard_sigmoid(float value);      /* clip(0.2x+0.5,0,1) */
+LOCAL UW background_model_lcg_next(UW state);               /* 固定乱数系列の1ステップ */
+LOCAL float background_model_lcg_uniform(UW * p_state);     /* [-1,1]の固定乱数 */
+LOCAL float background_model_hard_sigmoid(float value);     /* clip(0.2x+0.5,0,1) */
 LOCAL void background_model_hidden(const background_model_state_t * p_state,
                                    const B * p_frame,
                                    float * p_hidden);
-LOCAL void background_model_input_normalize(const B * p_frame, float * p_input);
+LOCAL void background_model_input_normalize(const B * p_frame, float * p_input); /* 背景モデル入力正規化 */
 
 /** =================================================================*
  * @brief  32-bit LCGを1ステップ進める

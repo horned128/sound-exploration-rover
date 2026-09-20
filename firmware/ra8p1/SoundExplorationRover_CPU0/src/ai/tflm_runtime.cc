@@ -5,15 +5,16 @@
  * @date   2026-09
  * ================================================================= */
 #include "ai/tflm_runtime.h"                                /* アプリへ公開するC API */
-#include <cstring>                                         /* テンソルのコピー */
-#include <new>                                             /* 静的領域へのplacement new */
-#include "flatbuffers/verifier.h"                          /* モデルバッファの境界検証 */
+#include <cstring>                                          /* テンソルのコピー */
+#include <new>                                              /* 静的領域へのplacement new */
+#include "flatbuffers/verifier.h"                           /* モデルバッファの境界検証 */
 #include "tensorflow/lite/micro/micro_interpreter.h"        /* TFLMインタプリタ */
-#include "tensorflow/lite/micro/micro_mutable_op_resolver.h" /* 使用演算の明示登録 */
-#include "tensorflow/lite/schema/schema_generated.h"       /* TFLiteモデル形式 */
+/* 使用演算を明示登録するためのリゾルバ型 */
+#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
+#include "tensorflow/lite/schema/schema_generated.h"        /* TFLiteモデル形式 */
 
 using RuntimeResolver = tflite::MicroMutableOpResolver<1>;
-alignas(16) LOCAL UB s_arena[TFLM_RUNTIME_ARENA_BYTES];       /**< CPU0専有アリーナ */
+alignas(16) LOCAL UB s_arena[TFLM_RUNTIME_ARENA_BYTES];     /**< CPU0専有アリーナ */
 /**< インタプリタの静的構築領域 */
 alignas(tflite::MicroInterpreter) LOCAL UB s_interpreter_storage[sizeof(tflite::MicroInterpreter)];
 /**< 演算表の静的構築領域 */

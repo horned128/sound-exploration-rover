@@ -4,22 +4,24 @@
  * @details 前進を正、後進を負として累積カウントと推定回転数を更新する。
  * ================================================================= */
 #include "encoder.h"                                        /* エンコーダAPI */
-#include "config/drive_config.h"                           /* エンコーダ設定 */
-#include "config/pin_config.h"                             /* エンコーダGPIO */
+#include "config/drive_config.h"                            /* エンコーダ設定 */
+#include "config/pin_config.h"                              /* エンコーダGPIO */
 
-EXPORT volatile W g_encoder_left_count = 0;            /**< 左代表モーター累積カウント（前進正） */
-EXPORT volatile W g_encoder_left_rpm_x10 = 0;                  /**< 左代表モーター推定回転数の10倍（前進正） */
-EXPORT volatile W g_encoder_right_count = 0;           /**< 右代表モーター累積カウント（前進正） */
-EXPORT volatile W g_encoder_right_rpm_x10 = 0;                 /**< 右代表モーター推定回転数の10倍（前進正） */
+/**< 左代表モーター累積カウント（前進正） */
+EXPORT volatile W g_encoder_left_count = 0;
+EXPORT volatile W g_encoder_left_rpm_x10 = 0;               /**< 左推定RPM×10（前進正） */
+/**< 右代表モーター累積カウント（前進正） */
+EXPORT volatile W g_encoder_right_count = 0;
+EXPORT volatile W g_encoder_right_rpm_x10 = 0;              /**< 右推定RPM×10（前進正） */
 
-LOCAL UB g_left_encoder_previous_ab;                  /**< 左エンコーダ前回A/B状態 */
-LOCAL UB g_right_encoder_previous_ab;                 /**< 右エンコーダ前回A/B状態 */
-LOCAL BOOL g_speed_sample_started;                         /**< 初回カウント基準の取得完了 */
+LOCAL UB g_left_encoder_previous_ab;                        /**< 左エンコーダ前回A/B状態 */
+LOCAL UB g_right_encoder_previous_ab;                       /**< 右エンコーダ前回A/B状態 */
+LOCAL BOOL g_speed_sample_started;                          /**< 初回カウント基準の取得完了 */
 EXPORT volatile UW g_encoder_sample_elapsed_ms;             /**< 最後の速度窓の実経過時間[ms] */
 EXPORT volatile UW g_encoder_sample_count;                  /**< 速度窓の更新回数 */
-LOCAL UW g_speed_elapsed_ms;                         /**< 速度算出周期の経過時間（単位: ms） */
-LOCAL W g_left_speed_previous_count;                 /**< 左速度算出時の前回カウント */
-LOCAL W g_right_speed_previous_count;                /**< 右速度算出時の前回カウント */
+LOCAL UW g_speed_elapsed_ms;                                /**< 速度算出周期の経過時間（単位: ms） */
+LOCAL W g_left_speed_previous_count;                        /**< 左速度算出時の前回カウント */
+LOCAL W g_right_speed_previous_count;                       /**< 右速度算出時の前回カウント */
 
 /**< A/B相の遷移量テーブル（4逓倍） */
 LOCAL B const encoder_transition_delta[16] = {

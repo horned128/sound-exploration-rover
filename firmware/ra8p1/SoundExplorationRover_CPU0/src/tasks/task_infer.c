@@ -2,29 +2,32 @@
  * @file   task_infer.c
  * @brief  CPU0音響背景学習と現場見本照合
  * ================================================================= */
-#include "task_infer.h"                                    /* 推論タスク公開API */
-
-#include "config/task_config.h"                            /* 推論タスク優先度・スタック */
-#include "services/background_model.h"                     /* 固定乱数AEとRLSデコーダ */
-#include "task_acoustic_link.h"                            /* 完成特徴量パッチ取得 */
+#include "task_infer.h"                                     /* 推論タスク公開API */
+#include "config/task_config.h"                             /* 推論タスク優先度・スタック */
+#include "services/background_model.h"                      /* 固定乱数AEとRLSデコーダ */
+#include "task_acoustic_link.h"                             /* 完成特徴量パッチ取得 */
 #include <string.h>                                         /* 結果・背景デコーダコピー */
 
-#define CPU0_INFER_EVENT_FEATURE_READY     (1UL << 0)
-#define CPU0_INFER_EVENT_MASK              ((UINT) CPU0_INFER_EVENT_FEATURE_READY)
+#define CPU0_INFER_EVENT_FEATURE_READY     (1UL << 0)       /**< 完成特徴量の推論開始イベントビット */
+#define CPU0_INFER_EVENT_MASK              /**< 推論タスクが待つイベントビット全体 */ \
+    ((UINT) CPU0_INFER_EVENT_FEATURE_READY)
 
-LOCAL void task_infer_entry(INT stacd, void * exinf);
-LOCAL void task_infer_resources_delete(void);
-LOCAL void task_infer_result_clear(task_infer_result_t * p_result);
-LOCAL void task_infer_feature_process(void);
+LOCAL void task_infer_entry(INT stacd, void * exinf);       /* 音響推論タスク本体 */
+LOCAL void task_infer_resources_delete(void);               /* 音響推論資源解放 */
+LOCAL void task_infer_result_clear(task_infer_result_t * p_result); /* 音響推論結果初期化 */
+LOCAL void task_infer_feature_process(void);                /* 完成特徴量推論処理 */
 
+/**< 音響推論結果を保護するmutex設定 */
 LOCAL T_CMTX const infer_mutex_config = {
     .mtxatr = TA_INHERIT,
     .ceilpri = 0,
 };
+/**< 音響特徴量完成を通知するイベント設定 */
 LOCAL T_CFLG const infer_event_config = {
     .flgatr = TA_TFIFO | TA_WSGL,
     .iflgptn = 0U,
 };
+/**< 音響推論タスクの生成設定 */
 LOCAL T_CTSK const infer_task_config = {
     .exinf = NULL,
     .tskatr = TA_HLNG | TA_RNG3,
@@ -34,26 +37,27 @@ LOCAL T_CTSK const infer_task_config = {
     .bufptr = NULL,
 };
 
-LOCAL ID infer_task_id;
-LOCAL ID infer_mutex_id;
-LOCAL ID infer_event_id;
-LOCAL BOOL infer_task_started;
-LOCAL BOOL infer_result_ready;
-LOCAL BOOL infer_storage_valid;
-LOCAL UB infer_target_peak_bin;
+LOCAL ID infer_task_id;                                     /**< 音響推論タスクID */
+LOCAL ID infer_mutex_id;                                    /**< 音響推論mutex ID */
+LOCAL ID infer_event_id;                                    /**< 音響推論イベントフラグID */
+LOCAL BOOL infer_task_started;                              /**< 音響推論タスク起動状態 */
+LOCAL BOOL infer_result_ready;                              /**< 音響推論結果の準備状態 */
+LOCAL BOOL infer_storage_valid;                             /**< 現場見本保存データの有効状態 */
+LOCAL UB infer_target_peak_bin;                             /**< 現場見本の代表ピークbin */
+/**< 現場見本照合用bin重み */
 LOCAL float infer_bin_weights[CPU0_ACOUSTIC_FEATURE_BIN_COUNT];
-LOCAL UW infer_last_feature_generation;
-LOCAL prototype_storage_data_t infer_storage_data;
-LOCAL background_model_state_t infer_background_model;
-LOCAL acoustic_feature_patch_t infer_feature_patch;
-LOCAL task_infer_result_t infer_result;
+LOCAL UW infer_last_feature_generation;                     /**< 最後に処理した特徴量世代 */
+LOCAL prototype_storage_data_t infer_storage_data;          /**< 推論タスクが保持する現場見本 */
+LOCAL background_model_state_t infer_background_model;      /**< 推論タスクが保持する背景モデル */
+LOCAL acoustic_feature_patch_t infer_feature_patch;         /**< 推論対象の完成特徴量 */
+LOCAL task_infer_result_t infer_result;                     /**< 最新の音響推論結果 */
 
-EXPORT volatile BOOL g_task_infer_available;
-EXPORT volatile UW g_task_infer_feature_generation;
-EXPORT volatile UW g_task_infer_inference_count;
-EXPORT volatile UW g_task_infer_failure_count;
-EXPORT volatile UW g_task_infer_match_count;
-EXPORT volatile ER g_task_infer_last_kernel_error;
+EXPORT volatile BOOL g_task_infer_available;                /**< 音響推論機能の利用可能状態 */
+EXPORT volatile UW g_task_infer_feature_generation;         /**< 最後に処理した特徴量世代 */
+EXPORT volatile UW g_task_infer_inference_count;            /**< 音響推論実行回数 */
+EXPORT volatile UW g_task_infer_failure_count;              /**< 音響推論失敗回数 */
+EXPORT volatile UW g_task_infer_match_count;                /**< 音響見本一致回数 */
+EXPORT volatile ER g_task_infer_last_kernel_error;          /**< 音響推論タスクの最終Kernelエラー */
 
 /** =================================================================*
  * @brief  公開結果を安全側の未判定状態へ初期化
@@ -107,6 +111,7 @@ EXPORT void task_infer_start_optional(void) {
     g_task_infer_match_count = 0U;
     g_task_infer_last_kernel_error = E_OK;
 
+    /* 任意機能の資源は依存順に生成し、途中失敗時は同じ順序の逆順で解放する。 */
     infer_mutex_id = tk_cre_mtx(&infer_mutex_config);
     if (infer_mutex_id <= 0) {
         g_task_infer_last_kernel_error = (ER) infer_mutex_id;
@@ -136,11 +141,18 @@ EXPORT void task_infer_start_optional(void) {
     g_task_infer_available = TRUE;
 }
 
+/** =================================================================*
+ * @brief  任意音響推論タスク停止
+ * ================================================================= */
 EXPORT void task_infer_stop(void) {
     task_infer_resources_delete();
     g_task_infer_available = FALSE;
 }
 
+/** =================================================================*
+ * @brief  音響特徴量完成イベント通知
+ * @return μT-Kernelエラーコード
+ * ================================================================= */
 EXPORT ER task_infer_notify_feature_ready(void) {
     if (infer_event_id <= 0) {
         return E_NOEXS;
@@ -218,6 +230,11 @@ EXPORT ER task_infer_background_export(prototype_storage_data_t * p_data) {
     return tk_unl_mtx(infer_mutex_id);
 }
 
+/** =================================================================*
+ * @brief  最新の音響推論結果取得
+ * @param[out] p_result 推論結果出力
+ * @return μT-Kernelエラーコード
+ * ================================================================= */
 EXPORT ER task_infer_result_get(task_infer_result_t * p_result) {
     if (NULL == p_result) {
         return E_PAR;
@@ -237,6 +254,12 @@ EXPORT ER task_infer_result_get(task_infer_result_t * p_result) {
     return tk_unl_mtx(infer_mutex_id);
 }
 
+/** =================================================================*
+ * @brief  保存済み現場見本取得
+ * @param[out] p_data 保存データ出力
+ * @param[out] p_storage_valid 保存データ有効フラグ
+ * @return μT-Kernelエラーコード
+ * ================================================================= */
 EXPORT ER task_infer_prototype_get(prototype_storage_data_t * p_data, BOOL * p_storage_valid) {
     if ((NULL == p_data) || (NULL == p_storage_valid)) {
         return E_PAR;
@@ -253,6 +276,11 @@ EXPORT ER task_infer_prototype_get(prototype_storage_data_t * p_data, BOOL * p_s
     return tk_unl_mtx(infer_mutex_id);
 }
 
+/** =================================================================*
+ * @brief  現場見本テレメトリ取得
+ * @param[out] p_telemetry テレメトリ出力
+ * @return μT-Kernelエラーコード
+ * ================================================================= */
 EXPORT ER task_infer_prototype_telemetry_get(task_infer_prototype_telemetry_t * p_telemetry) {
     if (NULL == p_telemetry) {
         return E_PAR;
@@ -293,7 +321,8 @@ LOCAL void task_infer_feature_process(void) {
         return;
     }
 
-    static task_infer_result_t next;
+    /* タスクスタックを圧迫せず、mutex保護下で完成結果を公開する作業領域。 */
+    LOCAL task_infer_result_t next;
     task_infer_result_clear(&next);
     next.feature_generation = generation;
     BOOL active_mse_found = FALSE;
@@ -334,6 +363,11 @@ LOCAL void task_infer_feature_process(void) {
     (void) tk_unl_mtx(infer_mutex_id);
 }
 
+/** =================================================================*
+ * @brief  音響特徴量完成イベント待ちタスク
+ * @param[in] stacd μT-Kernel起動コード（未使用）
+ * @param[in] exinf μT-Kernel拡張情報（未使用）
+ * ================================================================= */
 LOCAL void task_infer_entry(INT stacd, void * exinf) {
     (void) stacd;
     (void) exinf;

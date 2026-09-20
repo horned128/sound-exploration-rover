@@ -6,26 +6,28 @@
  *          疑似オープンドレイン（出力Low / 入力+内部Pull-up High）および
  *          スレーブクロックストレッチングに対応。
  * ================================================================= */
-#include "platform/i2c_bus.h"                              /* I2CバスAPI */
-#include "config/sensor_config.h"                          /* I2C有効化設定 */
+#include "platform/i2c_bus.h"                               /* I2CバスAPI */
+#include "config/sensor_config.h"                           /* I2C有効化設定 */
 
 #if (CPU0_SENSOR_I2C_ENABLED != 0U)
 #include "r_ioport.h"                                       /* GPIO直接制御API */
 #include "common_data.h"                                    /* g_ioport_ctrl */
 
 /* ピン割り当て: J24-10 (P512破損) から J23-8 (P312 / D7) へ移設 */
-#define I2C_BUS_SDA_PIN                     BSP_IO_PORT_05_PIN_11  /* Arduino J24-9 */
-#define I2C_BUS_SCL_PIN                     BSP_IO_PORT_03_PIN_12  /* Arduino J23-8 (D7) */
+#define I2C_BUS_SDA_PIN                    BSP_IO_PORT_05_PIN_11 /**< CPU0センサーI2CのSDAピン */
+#define I2C_BUS_SCL_PIN                    BSP_IO_PORT_03_PIN_12 /**< CPU0センサーI2CのSCLピン */
 
 /* 疑似オープンドレイン制御用ピン設定 */
-#define I2C_PIN_CFG_LOW                     ((uint32_t) IOPORT_CFG_PORT_DIRECTION_OUTPUT | \
-                                             (uint32_t) IOPORT_CFG_PORT_OUTPUT_LOW | \
-                                             (uint32_t) IOPORT_CFG_DRIVE_MID)
+#define I2C_PIN_CFG_LOW                     /**< I2C Low出力時のピン設定 */ \
+    ((uint32_t) IOPORT_CFG_PORT_DIRECTION_OUTPUT | \
+     (uint32_t) IOPORT_CFG_PORT_OUTPUT_LOW | \
+     (uint32_t) IOPORT_CFG_DRIVE_MID)
 
-#define I2C_PIN_CFG_HIGH                    ((uint32_t) IOPORT_CFG_PORT_DIRECTION_INPUT | \
-                                             (uint32_t) IOPORT_CFG_PULLUP_ENABLE)
+#define I2C_PIN_CFG_HIGH                    /**< I2C High解放時のピン設定 */ \
+    ((uint32_t) IOPORT_CFG_PORT_DIRECTION_INPUT | \
+     (uint32_t) IOPORT_CFG_PULLUP_ENABLE)
 
-LOCAL BOOL i2c_bus_open;                             /**< I2Cバスopen状態 */
+LOCAL BOOL i2c_bus_open;                                    /**< I2Cバスopen状態 */
 
 /** =================================================================*
  * @brief  I2Cクロック半周期ディレイ（約100kHz動作）
@@ -126,7 +128,8 @@ LOCAL fsp_err_t i2c_write_byte(UB byte) {
     }
 
     /* 9クロック目: スレーブACK検出 */
-    i2c_sda_high(); /* SDA解放 */
+    /* ACK後はSDAを解放し、次のクロックで状態を受け取る。 */
+    i2c_sda_high();
     i2c_delay();
     if (FSP_SUCCESS != i2c_scl_high()) {
         return FSP_ERR_TIMEOUT;
@@ -150,7 +153,8 @@ LOCAL fsp_err_t i2c_write_byte(UB byte) {
  * ================================================================= */
 LOCAL fsp_err_t i2c_read_byte(UB * p_byte, BOOL ack) {
     UB val = 0U;
-    i2c_sda_high(); /* SDAを入力解放 */
+    /* 送信完了後はSDAを入力へ戻し、スレーブのACKを待つ。 */
+    i2c_sda_high();
 
     for (UW bit = 0U; bit < 8U; bit++) {
         i2c_delay();
@@ -378,20 +382,41 @@ EXPORT fsp_err_t i2c_bus_write_read(UB address, const UB * p_write, UW write_len
 
 #else
 
+/** =================================================================*
+ * @brief  I2Cバス状態クリア（未使用構成）
+ * ================================================================= */
 EXPORT void i2c_bus_clear(void) {
 }
 
+/** =================================================================*
+ * @brief  I2Cマスターコールバック（未使用構成）
+ * @param[in] p_args FSPコールバック情報
+ * ================================================================= */
 EXPORT void i2c_bus_callback(i2c_master_callback_args_t * p_args) {
     (void) p_args;
 }
 
+/** =================================================================*
+ * @brief  I2Cバス初期化（未使用構成）
+ * @return I2C未使用を示すFSPエラー
+ * ================================================================= */
 EXPORT fsp_err_t i2c_bus_init(void) {
     return FSP_ERR_NOT_OPEN;
 }
 
+/** =================================================================*
+ * @brief  I2Cバス終了（未使用構成）
+ * ================================================================= */
 EXPORT void i2c_bus_deinit(void) {
 }
 
+/** =================================================================*
+ * @brief  I2C書込み（未使用構成）
+ * @param[in] address 7bitスレーブアドレス
+ * @param[in] p_data 送信データ
+ * @param[in] length 送信バイト数
+ * @return I2C未使用を示すFSPエラー
+ * ================================================================= */
 EXPORT fsp_err_t i2c_bus_write(UB address, const UB * p_data, UW length) {
     (void) address;
     (void) p_data;
@@ -399,6 +424,13 @@ EXPORT fsp_err_t i2c_bus_write(UB address, const UB * p_data, UW length) {
     return FSP_ERR_NOT_OPEN;
 }
 
+/** =================================================================*
+ * @brief  I2C読出し（未使用構成）
+ * @param[in] address 7bitスレーブアドレス
+ * @param[out] p_data 受信データ
+ * @param[in] length 受信バイト数
+ * @return I2C未使用を示すFSPエラー
+ * ================================================================= */
 EXPORT fsp_err_t i2c_bus_read(UB address, UB * p_data, UW length) {
     (void) address;
     (void) p_data;
@@ -406,6 +438,15 @@ EXPORT fsp_err_t i2c_bus_read(UB address, UB * p_data, UW length) {
     return FSP_ERR_NOT_OPEN;
 }
 
+/** =================================================================*
+ * @brief  I2C書込み後読出し（未使用構成）
+ * @param[in] address 7bitスレーブアドレス
+ * @param[in] p_write 送信データ
+ * @param[in] write_length 送信バイト数
+ * @param[out] p_read 受信データ
+ * @param[in] read_length 受信バイト数
+ * @return I2C未使用を示すFSPエラー
+ * ================================================================= */
 EXPORT fsp_err_t i2c_bus_write_read(UB address, const UB * p_write, UW write_length,
                                     UB * p_read, UW read_length) {
     (void) address;

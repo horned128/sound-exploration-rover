@@ -20,18 +20,19 @@
 #include "task_sensor.h"                                    /* 最新I2Cセンサー状態取得API */
 #include <string.h>                                         /* 学習バッファ初期化 */
 
-#define CPU0_THINK_EVENT_CLEAR_IPC_SEND    (1UL << 31)
-#define CPU0_THINK_EVENT_MASK              ((UINT) (APP_FAULT_ALL_MASK | CPU0_THINK_EVENT_CLEAR_IPC_SEND))
-#define CPU0_THINK_LEARNING_SAMPLE_COUNT   (5U)
+#define CPU0_THINK_EVENT_CLEAR_IPC_SEND    (1UL << 31)      /**< IPC送信異常の回復通知イベントビット */
+#define CPU0_THINK_EVENT_MASK              /**< 思考タスクが待つイベントビット全体 */ \
+    ((UINT) (APP_FAULT_ALL_MASK | CPU0_THINK_EVENT_CLEAR_IPC_SEND))
+#define CPU0_THINK_LEARNING_SAMPLE_COUNT   (5U)             /**< 思考学習サンプルの個数 */
 
 IMPORT bsp_leds_t g_bsp_leds;                               /**< BSPのLED構成情報 */
 
-LOCAL void task_think_entry(INT stacd, void * exinf);      /* 思考タスク本体 */
+LOCAL void task_think_entry(INT stacd, void * exinf);       /* 思考タスク本体 */
 LOCAL ER task_think_publish_target(const sound_follow_output_t * p_output); /* 追従指令の4輪展開 */
 LOCAL ER task_think_publish_motion(H steering_deg, H left_rpm, H right_rpm, BOOL actuator_enable,
-                                   BOOL emergency_stop); /* 共通走行指令の4輪展開 */
+                                   BOOL emergency_stop);   /* 共通走行指令の4輪展開 */
 /* 音源追従の近接安全判定 */
-LOCAL BOOL task_think_sound_motion_allowed(const sensor_snapshot_t * p_snapshot);
+LOCAL BOOL task_think_sound_motion_allowed(const sensor_snapshot_t * p_snapshot); /* 音源追従走行可否判定 */
 LOCAL void task_think_led_write(BOOL blue_on, BOOL green_on); /* 2LED一括更新 */
 LOCAL void task_think_learning_capture(const task_acoustic_link_snapshot_t * p_snapshot,
                                        BOOL observation_usable); /* 新規特徴量パッチの学習 */
@@ -40,10 +41,10 @@ LOCAL UW learning_button_press_ms;                          /**< SW1継続押下
 LOCAL BOOL learning_button_handled;                         /**< 同一押下の多重切替防止 */
 LOCAL UW learning_last_feature_generation;                  /**< 最後に収集した特徴量世代 */
 LOCAL prototype_storage_data_t storage_data;                /**< 読込済みまたは保存対象プロトタイプ */
-LOCAL prototype_storage_data_t storage_candidate;           /**< 保存時だけ使う作業コピー。思考タスクのスタックを消費しない。 */
+LOCAL prototype_storage_data_t storage_candidate;           /**< 保存処理用の作業コピー */
 LOCAL UW task_think_fault_code(UW fault_flags);             /* LED表示用異常番号 */
 /* 状態LED更新 */
-LOCAL void task_think_led_update(UW state_elapsed_ms, UW heartbeat_elapsed_ms, UW fault_elapsed_ms);
+LOCAL void task_think_led_update(UW state_elapsed_ms, UW heartbeat_elapsed_ms, UW fault_elapsed_ms); /* LED更新 */
 
 /**< 他タスクからの異常通知を集約するイベントフラグ設定 */
 LOCAL T_CFLG const think_fault_flag_config = {
@@ -61,8 +62,8 @@ LOCAL T_CTSK const think_task_config = {
     .bufptr = NULL,
 };
 
-LOCAL sensor_liveness_t sensor_liveness;                  /**< 思考側のセンサー更新監視 */
-LOCAL UW sensor_now_ms;                                    /**< センサー鮮度判定と共通の実時刻[ms] */
+LOCAL sensor_liveness_t sensor_liveness;                    /**< 思考側のセンサー更新監視 */
+LOCAL UW sensor_now_ms;                                     /**< センサー鮮度判定と共通の実時刻[ms] */
 EXPORT volatile UW g_task_think_sensor_watchdog_ms;         /**< 更新進行を観測してからの時間[ms] */
 EXPORT volatile BOOL g_task_think_sensor_fresh;             /**< 更新期限内か */
 EXPORT volatile ER g_task_think_sensor_clock_error;         /**< 実時間取得の異常 */
@@ -85,27 +86,29 @@ LOCAL BOOL task_think_sensor_fresh(const sensor_snapshot_t * p_snapshot, ER snap
     return g_task_think_sensor_fresh;
 }
 
-LOCAL ID think_task_id;                                    /**< 思考タスクID */
-LOCAL ID think_fault_flag_id;                              /**< CPU0異常イベントフラグID */
-LOCAL BOOL think_task_started;                             /**< 思考タスク開始状態 */
+LOCAL ID think_task_id;                                     /**< 思考タスクID */
+LOCAL ID think_fault_flag_id;                               /**< CPU0異常イベントフラグID */
+LOCAL BOOL think_task_started;                              /**< 思考タスク開始状態 */
 
-EXPORT volatile sound_follow_state_t g_task_think_state;             /**< 現在の思考状態 */
-EXPORT volatile UW g_task_think_cycle_count;                 /**< 思考周期実行回数 */
-EXPORT volatile UW g_task_think_observation_sequence;        /**< 最終判断観測sequence */
-EXPORT volatile UW g_task_think_observation_watchdog_ms;     /**< 観測更新停止時間 */
-EXPORT volatile BOOL g_task_think_link_ready;                      /**< 音響リンク判断 */
-EXPORT volatile BOOL g_task_think_new_observation;                 /**< 新規観測判断 */
-EXPORT volatile H g_task_think_steering_deg;                 /**< 操舵判断値 */
-EXPORT volatile H g_task_think_left_rpm;                     /**< 左RPM判断値 */
-EXPORT volatile H g_task_think_right_rpm;                    /**< 右RPM判断値 */
-EXPORT volatile BOOL g_task_think_actuator_enable;                 /**< 出力許可判断 */
-EXPORT volatile BOOL g_task_think_emergency_stop;                  /**< 非常停止判断 */
-EXPORT volatile obstacle_avoidance_rule_t g_task_think_sensor_rule;       /**< 選択センサー走行ルール */
-EXPORT volatile UW g_task_think_fault_flags;                       /**< CPU0異常ラッチ */
+EXPORT volatile sound_follow_state_t g_task_think_state;    /**< 現在の思考状態 */
+EXPORT volatile UW g_task_think_cycle_count;                /**< 思考周期実行回数 */
+EXPORT volatile UW g_task_think_observation_sequence;       /**< 最終判断観測sequence */
+EXPORT volatile UW g_task_think_observation_watchdog_ms;    /**< 観測更新停止時間 */
+EXPORT volatile BOOL g_task_think_link_ready;               /**< 音響リンク判断 */
+EXPORT volatile BOOL g_task_think_new_observation;          /**< 新規観測判断 */
+EXPORT volatile H g_task_think_steering_deg;                /**< 操舵判断値 */
+EXPORT volatile H g_task_think_left_rpm;                    /**< 左RPM判断値 */
+EXPORT volatile H g_task_think_right_rpm;                   /**< 右RPM判断値 */
+EXPORT volatile BOOL g_task_think_actuator_enable;          /**< 出力許可判断 */
+EXPORT volatile BOOL g_task_think_emergency_stop;           /**< 非常停止判断 */
+/**< 選択センサー走行ルール */
+EXPORT volatile obstacle_avoidance_rule_t g_task_think_sensor_rule;
+EXPORT volatile UW g_task_think_fault_flags;                /**< CPU0異常ラッチ */
 EXPORT volatile BOOL g_task_think_learning_mode;            /**< 現場学習モード */
 EXPORT volatile UB g_task_think_learning_samples;           /**< 収集済み音響見本数 */
 EXPORT volatile BOOL g_task_think_storage_valid;            /**< 有効なMRAMプロトタイプ有無 */
-EXPORT volatile prototype_storage_result_t g_task_think_storage_result; /**< 直近MRAM処理結果 */
+/**< 直近MRAM処理結果 */
+EXPORT volatile prototype_storage_result_t g_task_think_storage_result;
 
 /** =================================================================*
  * @brief  音源追従で前進してよいToF状態か判定
@@ -236,7 +239,8 @@ LOCAL void task_think_learning_capture(const task_acoustic_link_snapshot_t * p_s
         return;
     }
 
-    static task_infer_result_t result;
+    /* 同じfeature_generationを二重保存しないための推論結果保持領域。 */
+    LOCAL task_infer_result_t result;
     if ((E_OK != task_infer_result_get(&result)) || (result.feature_generation == learning_last_feature_generation)) {
         return;
     }
@@ -491,7 +495,8 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
                             UB const peak_bin = acoustic_identifier_find_peak_bin((const B *) storage_candidate.samples,
                                                                                   storage_candidate.sample_count);
                             storage_candidate.target_peak_bin = peak_bin;
-                            static float bin_weights[CPU0_ACOUSTIC_FEATURE_BIN_COUNT];
+                            /* 保存前の見本群から周波数binごとの重みを再計算する領域。 */
+                            LOCAL float bin_weights[CPU0_ACOUSTIC_FEATURE_BIN_COUNT];
                             acoustic_identifier_build_weights(peak_bin, bin_weights);
                             float threshold = 0.0F;
                             if (acoustic_identifier_leave_one_out_threshold((const B *) storage_candidate.samples,
@@ -519,13 +524,15 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             learning_button_press_ms = 0U;
             learning_button_handled = FALSE;
         }
-        static sensor_snapshot_t sensor_snapshot;
+        /* センサー取得結果を以降の安全判定と制御へ渡す再利用バッファ。 */
+        LOCAL sensor_snapshot_t sensor_snapshot;
         memset(&sensor_snapshot, 0, sizeof(sensor_snapshot));
         ER const sensor_snapshot_err = task_sensor_snapshot_get(&sensor_snapshot);
         BOOL const sensor_fresh = task_think_sensor_fresh(&sensor_snapshot, sensor_snapshot_err);
 
         /* --- 音響リンクと推論 --- */
-        static task_acoustic_link_snapshot_t snapshot;
+        /* USB音響リンクの最新状態を思考周期内で参照するスナップショット。 */
+        LOCAL task_acoustic_link_snapshot_t snapshot;
         memset(&snapshot, 0, sizeof(snapshot));
         ER const snapshot_err = task_acoustic_link_snapshot_get(&snapshot);
         BOOL const observation_usable =
@@ -556,7 +563,8 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         }
 
         /* --- 音響識別タスクの最新結果取得とマッチング判定窓の更新 --- */
-        static task_infer_result_t infer_result;
+        /* 最新推論結果を音源一致判定へ渡す再利用バッファ。 */
+        LOCAL task_infer_result_t infer_result;
         memset(&infer_result, 0, sizeof(infer_result));
         if (E_OK == task_infer_result_get(&infer_result)) {
             if (infer_result.feature_generation != last_infer_generation) {
@@ -579,7 +587,8 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
 
         /* --- S3: 音源追従コントローラを先に実行し、目標操舵角を取得 --- */
         BOOL const match_required = (0U != CPU0_SOUND_REQUIRE_IDENTIFIER_MATCH) && g_task_think_storage_valid;
-        static sound_follow_input_t input;
+        /* 音源追従コントローラへ渡す入力を思考周期ごとに更新する領域。 */
+        LOCAL sound_follow_input_t input;
         input = (sound_follow_input_t){
             .link_ready = link_ready,
             .new_observation = new_observation,
@@ -589,13 +598,15 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             .match_required = match_required,
             .target_sound_matched = target_sound_matched,
         };
-        static sound_follow_output_t sf_output;
+        /* 音源追従コントローラの出力を回避制御へ引き渡す領域。 */
+        LOCAL sound_follow_output_t sf_output;
         memset(&sf_output, 0, sizeof(sf_output));
         sound_follow_state_t const previous_state = g_task_think_state;
         sound_follow_controller_step(&input, CPU0_THINK_PERIOD_MS, &sf_output);
 
         /* --- S3: 回避コントローラにtarget_steering_degとして音源方向を渡す --- */
-        static obstacle_avoidance_output_t oa_output;
+        /* ToF回避コントローラの判断結果を安全調停へ渡す領域。 */
+        LOCAL obstacle_avoidance_output_t oa_output;
         memset(&oa_output, 0, sizeof(oa_output));
         obstacle_avoidance_controller_step(sensor_fresh ? &sensor_snapshot : NULL,
                                            (APP_FAULT_NONE != g_task_think_fault_flags) || g_task_think_learning_mode,
@@ -603,7 +614,8 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         g_task_think_sensor_rule = oa_output.rule;
 
         /* --- S4: 連続走行マージ（音源引力とToF斥力を合成した回避走行指令を採用） --- */
-        static sound_follow_output_t output;
+        /* 追従・回避・停止の優先順位を反映した最終要求値。 */
+        LOCAL sound_follow_output_t output;
         memset(&output, 0, sizeof(output));
         BOOL const tracking_active = (CPU0_THINK_STATE_MOVE_STEP == sf_output.state);
         BOOL const avoidance_active = (oa_output.rule == CPU0_SENSOR_RULE_BACKUP) ||
@@ -661,7 +673,8 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         }
 
         /* --- S3: safety_arbiter 経由で安全クランプしてから発行 --- */
-        static safety_motion_command_t sa_requested;
+        /* 安全調停前の要求値を明示的に分離して監視可能にする領域。 */
+        LOCAL safety_motion_command_t sa_requested;
         sa_requested = (safety_motion_command_t){
             .steering_deg   = output.steering_deg,
             .left_rpm       = output.left_rpm,
@@ -669,7 +682,8 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             .actuator_enable = output.actuator_enable,
             .emergency_stop = output.emergency_stop,
         };
-        static safety_motion_command_t sa_arbitrated;
+        /* ToF・生存性・IMUの安全条件を適用した出力値。 */
+        LOCAL safety_motion_command_t sa_arbitrated;
         memset(&sa_arbitrated, 0, sizeof(sa_arbitrated));
         safety_arbiter_arbitrate(&sa_requested, &sensor_snapshot, sensor_fresh, &sa_arbitrated);
 

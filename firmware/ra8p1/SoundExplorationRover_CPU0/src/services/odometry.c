@@ -2,22 +2,22 @@
  * @file   odometry.c
  * @brief  車輪エンコーダとジャイロによるオドメトリ計算・位置推定実装
  * ================================================================= */
-#include "services/odometry.h"
-#include "../../../common/ipc_message.h"
-#include "hal_data.h"
-#include <math.h>
-#include <stdlib.h>
+#include "services/odometry.h"                              /* オドメトリAPI */
+#include "../../../common/ipc_message.h"                    /* CPU間テレメトリ型 */
+#include "hal_data.h"                                       /* FSP生成のHAL/BSP型 */
+#include <math.h>                                           /* 三角関数 */
+#include <stdlib.h>                                         /* abs */
 
 #ifndef M_PI
-#define M_PI                               (3.14159265358979323846f)
+#define M_PI                               (3.14159265358979323846f) /**< オドメトリ角度計算用円周率 */
 #endif
 
-#define DEG_TO_RAD(d)                      ((d) * (M_PI / 180.0f))
-#define RAD_TO_DEG(r)                      ((r) * (180.0f / M_PI))
+#define DEG_TO_RAD(d)                      ((d) * (M_PI / 180.0f)) /**< 方位角をラジアンへ変換 */
+#define RAD_TO_DEG(r)                      ((r) * (180.0f / M_PI)) /**< ラジアン結果を方位角へ変換 */
 
-LOCAL odometry_context_t s_odometry_ctx;
-LOCAL odometry_pose_t    s_latest_pose;
-LOCAL BOOL               s_service_initialized = FALSE;
+LOCAL odometry_context_t s_odometry_ctx;                    /**< オドメトリ内部状態 */
+LOCAL odometry_pose_t    s_latest_pose;                     /**< 最新オドメトリ姿勢 */
+LOCAL BOOL               s_service_initialized = FALSE;     /**< オドメトリサービス初期化状態 */
 
 /** =================================================================*
  * @brief  24 bit値の符号拡張付き剰余差分計算

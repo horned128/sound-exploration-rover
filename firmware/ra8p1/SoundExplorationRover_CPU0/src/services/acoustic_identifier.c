@@ -2,10 +2,9 @@
  * @file   acoustic_identifier.c
  * @brief  能動フレーム要約による現場音響照合
  * ================================================================= */
-#include "services/acoustic_identifier.h"                  /* 能動フレーム要約と照合型 */
-
-#include <math.h>                                            /* sqrtf: フレーム内母標準偏差 */
-#include <string.h>                                          /* memset: 要約初期化 */
+#include "services/acoustic_identifier.h"                   /* 能動フレーム要約と照合型 */
+#include <math.h>                                           /* フレーム内標準偏差 */
+#include <string.h>                                         /* 要約初期化 */
 
 LOCAL B acoustic_identifier_int8_round(float value, B minimum); /* 仕様どおりのint8丸め */
 

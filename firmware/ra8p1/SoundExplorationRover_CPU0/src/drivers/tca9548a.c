@@ -2,9 +2,9 @@
  * @file   tca9548a.c
  * @brief  TCA9548A I2Cマルチプレクサ実装
  * ================================================================= */
-#include "tca9548a.h"                                      /* TCA9548A API */
-#include "platform/i2c_bus.h"                              /* I2CバスAPI */
-#include "config/sensor_config.h"                          /* TCA9548Aアドレス */
+#include "tca9548a.h"                                       /* TCA9548A API */
+#include "platform/i2c_bus.h"                               /* I2CバスAPI */
+#include "config/sensor_config.h"                           /* TCA9548Aアドレス */
 
 /** =================================================================*
  * @brief  指定チャネルだけをI2Cバスへ排他的に接続
