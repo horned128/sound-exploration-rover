@@ -19,10 +19,12 @@ CONTROLLER_SOURCES = (
     CPU0_SOURCE_ROOT / "control/sound_follow_controller.c",
     CPU0_SOURCE_ROOT / "control/obstacle_avoidance_controller.c",
     CPU0_SOURCE_ROOT / "control/smooth_avoidance_planner.c",
+    CPU0_SOURCE_ROOT / "control/control_mlp_planner.c",
     CPU0_SOURCE_ROOT / "control/safety_arbiter.c",
     CPU0_SOURCE_ROOT / "services/acoustic_identifier.c",
     CPU0_SOURCE_ROOT / "services/background_model.c",
     CPU0_SOURCE_ROOT / "services/odometry.c",
+    SHIM_ROOT / "tflm_runtime_shim.c",
 )
 
 FEATURE_PROTOCOL_SOURCES = (

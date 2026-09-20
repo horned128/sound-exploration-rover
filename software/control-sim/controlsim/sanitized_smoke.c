@@ -1,5 +1,6 @@
 #include "control/obstacle_avoidance_controller.h"
 #include "control/smooth_avoidance_planner.h"
+#include "control/control_mlp_planner.h"
 #include "control/safety_arbiter.h"
 #include <assert.h>
 
@@ -84,6 +85,27 @@ int main(void)
     assert(!arb.actuator_enable);
     assert(arb.left_rpm == 0);
     assert(!arb.emergency_stop);
+
+    /* Exercise control_mlp_planner under ASan/UBSan */
+    assert(control_mlp_planner_init());
+    assert(control_mlp_planner_is_ready());
+    control_mlp_output_t mlp_out = {0};
+    snapshot.tof_distance_mm[CPU0_TOF_LEFT] = 1200U;
+    snapshot.tof_distance_mm[CPU0_TOF_CENTER] = 1200U;
+    snapshot.tof_distance_mm[CPU0_TOF_RIGHT] = 1200U;
+    control_mlp_planner_step(&snapshot, 15.0f, &mlp_out);
+    assert(!mlp_out.fallback_required);
+
+    /* Exercise failsafe fallback when front distance <= 150mm */
+    snapshot.tof_distance_mm[CPU0_TOF_CENTER] = 120U;
+    control_mlp_planner_step(&snapshot, 0.0f, &mlp_out);
+    assert(mlp_out.fallback_required);
+    assert(mlp_out.is_blocked);
+    assert(mlp_out.speed_scale == 0.0f);
+
+    /* Exercise reset */
+    control_mlp_planner_reset();
+    assert(!control_mlp_planner_is_ready());
 
     return 0;
 }
