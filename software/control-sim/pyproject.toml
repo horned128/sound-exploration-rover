@@ -2,11 +2,12 @@
 name = "control-sim"
 version = "0.1.0"
 description = "Off-target regression tests for Sound Exploration Rover control code"
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "matplotlib>=3.8",
-    "numpy>=1.26",
+    "numpy>=1.26,<3",
     "pytest>=8.0",
+    "tensorflow>=2.18,<2.21",
 ]
 
 [tool.pytest.ini_options]

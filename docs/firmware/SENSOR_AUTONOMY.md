@@ -228,3 +228,22 @@ Live Watchでは、次を追加します。
 6. 低速のまま接地し、距離閾値と左右速度差を実機に合わせて調整する。
 
 VL53L1Xの初期化にはSTのUltra Lite Driverの既定設定を使用しています。[ST UM2510](https://www.st.com/resource/en/user_manual/um2510-a-guide-to-using-the-vl53l1x-ultra-lite-driver-stmicroelectronics.pdf)を参照してください。BMI270のraw accel/gyro初期化は[Bosch BMI270 Sensor API](https://github.com/boschsensortec/BMI270_SensorAPI)のI2C初期化・sensor enableの手順に対応しています。
+
+## 7. TFLM 制御 MLP（Policy Distillation）による滑らかな連続回避
+
+従来のポテンシャル場＋反発ベクトル法によるルールベース回避に加え、RA8P1 CPU0 上の TFLM（TensorFlow Lite for Microcontrollers）と 96 KiB 静的テンソルアリーナを活用した **完全 int8 量子化 障害物回避制御 MLP** が統合されています。
+
+### 7.1 特徴と動作
+- **切替設定**: [`config/control_config.h`](file:///Users/hino/.gemini/antigravity/worktrees/sound-exploration-rover/tflm_obstacle_avoidance_mlp/firmware/ra8p1/SoundExplorationRover_CPU0/src/config/control_config.h) の `#define CPU0_USE_CONTROL_MLP (1U)` で有効化（0: 従来ルールベース, 1: MLP制御）。
+- **推論仕様**: 10入力（ToF 3ch距離・有効フラグ、目標方位sin/cos、前回速度、IMUヨーレート）→ int8 MLP → 2出力（目標舵角、前進速度倍率）。
+- **多層防御安全機構**:
+  1. **Level 1**: [`safety_arbiter.c`](file:///Users/hino/.gemini/antigravity/worktrees/sound-exploration-rover/tflm_obstacle_avoidance_mlp/firmware/ra8p1/SoundExplorationRover_CPU0/src/control/safety_arbiter.c) による物理停止（ToF $\le 250\,\text{mm}$ またはセンサー異常で即時ハードウェア遮断）。
+  2. **Level 2**: 至近袋小路時のルールベース脱出動作（バック・ピボット旋回）の最優先実行。
+  3. **Level 3**: MLP による通常領域（$250 < \text{ToF} \le 4000\,\text{mm}$）での連続障害物回避および音源追従。
+  4. **Level 4**: 最大 $90^\circ/\text{s}$ のスルーレート制限。
+- **実機駆動保証**:
+  - `CPU0_SENSOR_MIN_FORWARD_RPM (85 RPM)` を下限とする始動トルク保証により、低速時・旋回時のモーター静止摩擦によるスタックを防止。
+  - 舵角に応じた左右差動配分（内輪減速・外輪増速）を適用。
+
+詳細設計・学習ワークフロー・ホスト検証記録は [TFLM 障害物回避制御 MLP 設計書](edgeai/control_mlp_avoidance.md) を参照してください。
+

@@ -179,6 +179,16 @@ class SmoothAvoidanceOutput(ctypes.Structure):
     ]
 
 
+class ControlMlpOutput(ctypes.Structure):
+    _fields_ = [
+        ("steering_deg", ctypes.c_float),
+        ("speed_scale", ctypes.c_float),
+        ("is_blocked", BOOL),
+        ("emergency_stop", BOOL),
+        ("fallback_required", BOOL),
+    ]
+
+
 class SafetyMotionCommand(ctypes.Structure):
     _fields_ = [
         ("steering_deg", ctypes.c_int16),
@@ -308,6 +318,18 @@ def library() -> ctypes.CDLL:
         ctypes.POINTER(SafetyMotionCommand),
     ]
     handle.safety_arbiter_arbitrate.restype = None
+    handle.control_mlp_planner_init.argtypes = []
+    handle.control_mlp_planner_init.restype = BOOL
+    handle.control_mlp_planner_reset.argtypes = []
+    handle.control_mlp_planner_reset.restype = None
+    handle.control_mlp_planner_is_ready.argtypes = []
+    handle.control_mlp_planner_is_ready.restype = BOOL
+    handle.control_mlp_planner_step.argtypes = [
+        ctypes.POINTER(SensorSnapshot),
+        ctypes.c_float,
+        ctypes.POINTER(ControlMlpOutput),
+    ]
+    handle.control_mlp_planner_step.restype = None
     return handle
 
 
@@ -347,6 +369,17 @@ def smooth_avoidance_plan_step(
     handle = library()
     output = SmoothAvoidanceOutput()
     handle.smooth_avoidance_plan(ctypes.byref(input_val), ctypes.byref(output))
+    return output
+
+
+def control_mlp_plan_step(
+    snapshot: SensorSnapshot | None,
+    target_heading_deg: float = 0.0,
+) -> ControlMlpOutput:
+    handle = library()
+    output = ControlMlpOutput()
+    p_snap = ctypes.byref(snapshot) if snapshot is not None else None
+    handle.control_mlp_planner_step(p_snap, ctypes.c_float(target_heading_deg), ctypes.byref(output))
     return output
 
 

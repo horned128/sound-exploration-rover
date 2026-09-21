@@ -7,10 +7,12 @@
 #include "config/pin_config.h"                              /* LEDの役割設定 */
 #include "config/sensor_config.h"                           /* センサー安全判定値 */
 #include "config/task_config.h"                             /* 思考周期と優先度 */
+#include "control/control_mlp_planner.h"                     /* TFLM制御MLPプランナ */
 #include "control/obstacle_avoidance_controller.h"          /* ToF・IMU走行判断 */
 #include "control/safety_arbiter.h"                         /* 安全調停・ToF veto集約 */
 #include "control/sensor_liveness.h"                        /* 取得タスクと独立した更新監視 */
 #include "control/sound_follow_controller.h"                /* 音源追従状態機械 */
+#include <math.h>                                           /* roundf */
 #include "hal_data.h"                                       /* BSP LED情報、ピンAPI */
 #include "services/acoustic_identifier.h"                   /* 見本leave-one-outしきい値算出 */
 #include "services/prototype_storage.h"                     /* Code MRAMプロトタイプ保存 */
@@ -160,6 +162,9 @@ EXPORT app_fault_t task_think_create(void) {
 #if (CPU0_SENSOR_I2C_ENABLED != 0U)
     obstacle_avoidance_controller_init();
 #endif
+#if (CPU0_USE_CONTROL_MLP != 0U)
+    (void) control_mlp_planner_init();
+#endif
 
     think_fault_flag_id = tk_cre_flg(&think_fault_flag_config);
     if (think_fault_flag_id <= 0) {
@@ -211,6 +216,10 @@ EXPORT void task_think_delete(void) {
         (void) tk_del_flg(think_fault_flag_id);
         think_fault_flag_id = 0;
     }
+
+#if (CPU0_USE_CONTROL_MLP != 0U)
+    control_mlp_planner_reset();
+#endif
 }
 
 /** =================================================================*
@@ -716,6 +725,14 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
                                            sensor_now_ms, sf_output.steering_deg, &oa_output);
         g_task_think_sensor_rule = oa_output.rule;
 
+#if (CPU0_USE_CONTROL_MLP != 0U)
+        LOCAL control_mlp_output_t mlp_output;
+        memset(&mlp_output, 0, sizeof(mlp_output));
+        control_mlp_planner_step(sensor_fresh ? &sensor_snapshot : NULL,
+                                 (float) sf_output.steering_deg,
+                                 &mlp_output);
+#endif
+
         /* --- S4: 連続走行マージ（音源引力とToF斥力を合成した回避走行指令を採用） --- */
         /* 追従・回避・停止の優先順位を反映した最終要求値。 */
         LOCAL sound_follow_output_t output;
@@ -726,6 +743,63 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
                                       (oa_output.rule == CPU0_SENSOR_RULE_PIVOT_LEFT) ||
                                       (oa_output.rule == CPU0_SENSOR_RULE_PIVOT_RIGHT);
 
+#if (CPU0_USE_CONTROL_MLP != 0U)
+        if (!mlp_output.fallback_required && !avoidance_active && !oa_output.emergency_stop && !sf_output.emergency_stop &&
+            !g_task_think_learning_mode && (APP_FAULT_NONE == g_task_think_fault_flags)) {
+            /* TFLM 制御MLP による連続回避・追従計画 */
+            output.state = sf_output.state;
+            output.steering_deg = (H) roundf(mlp_output.steering_deg);
+            output.emergency_stop = FALSE;
+
+            if (mlp_output.is_blocked || (mlp_output.speed_scale <= 0.01f)) {
+                output.left_rpm = 0;
+                output.right_rpm = 0;
+                output.actuator_enable = FALSE;
+            } else if (tracking_active) {
+                /* 始動トルク下限（85 RPM）を確保し、モーター不感帯・静止摩擦による停止を防止 */
+                W const rpm_range = (W) CPU0_SENSOR_FORWARD_RPM - CPU0_SENSOR_MIN_FORWARD_RPM;
+                H const base_rpm = (H) (CPU0_SENSOR_MIN_FORWARD_RPM +
+                                        (H) roundf(mlp_output.speed_scale * (float) rpm_range));
+
+                /* 旋回舵角に応じた左右差動配分（外輪増速・内輪下限ガード） */
+                W const steer_mag = (mlp_output.steering_deg < 0.0f) ?
+                                    (W) (-mlp_output.steering_deg) : (W) (mlp_output.steering_deg);
+                W const inner_slowdown = (steer_mag * 25) / CPU0_SENSOR_STEERING_MAX_DEG;
+                H inner_rpm = (H) (((W) base_rpm * (100 - inner_slowdown)) / 100);
+                if (inner_rpm < CPU0_SENSOR_MIN_FORWARD_RPM) {
+                    inner_rpm = (H) CPU0_SENSOR_MIN_FORWARD_RPM;
+                }
+                W const outer_boost = (steer_mag * 10) / CPU0_SENSOR_STEERING_MAX_DEG;
+                H outer_rpm = (H) (((W) base_rpm * (100 + outer_boost)) / 100);
+                if (outer_rpm > 130) {
+                    outer_rpm = 130;
+                }
+
+                if (mlp_output.steering_deg < 0.0f) {
+                    /* 左旋回: 左が内輪、右が外輪 */
+                    output.left_rpm = inner_rpm;
+                    output.right_rpm = outer_rpm;
+                } else if (mlp_output.steering_deg > 0.0f) {
+                    /* 右旋回: 右が内輪、左が外輪 */
+                    output.left_rpm = outer_rpm;
+                    output.right_rpm = inner_rpm;
+                } else {
+                    /* 直進 */
+                    output.left_rpm = base_rpm;
+                    output.right_rpm = base_rpm;
+                }
+                output.actuator_enable = TRUE;
+            } else if (CPU0_THINK_STATE_STEER_PREP == sf_output.state) {
+                output.left_rpm = 0;
+                output.right_rpm = 0;
+                output.actuator_enable = TRUE;
+            } else {
+                output.left_rpm = 0;
+                output.right_rpm = 0;
+                output.actuator_enable = FALSE;
+            }
+        } else
+#endif
         if (oa_output.emergency_stop || sf_output.emergency_stop) {
             /* 緊急停止要求 */
             output = sf_output;

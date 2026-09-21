@@ -7,5 +7,6 @@
     "**/Release": true,
     "**/build": true,
     "**/managed_components": true
-  }
+  },
+  "cmake.sourceDirectory": "/Users/hino/.gemini/antigravity/worktrees/sound-exploration-rover/tflm_obstacle_avoidance_mlp/firmware/esp32s3"
 }

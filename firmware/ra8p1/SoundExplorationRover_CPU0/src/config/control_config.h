@@ -95,4 +95,9 @@
 #define CPU0_SOUND_REQUIRE_IDENTIFIER_MATCH (1U)            /**< 音響必須識別の一致 */
 #define CPU0_SOUND_IDENTIFIER_TIMEOUT_MS   (1000U)          /**< 音響識別の期限[ms] */
 
+/* TFLM完全int8障害物回避制御MLP（Policy Distillation）の有効化設定 */
+#ifndef CPU0_USE_CONTROL_MLP
+#define CPU0_USE_CONTROL_MLP               (1U)             /**< TFLM制御MLP障害物回避の有効化(0: ルールベース, 1: MLP) */
+#endif
+
 #endif /* SEROV_CPU0_CONFIG_CONTROL_H */
