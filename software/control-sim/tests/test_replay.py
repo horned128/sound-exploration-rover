@@ -33,15 +33,16 @@ def test_monitor_line_is_converted_and_triggers_pivot_escape() -> None:
     assert snapshot.tof_distance_mm[:] == [1000, 250, 1000]
     assert snapshot.update_count == 42
     assert outputs[0].actuator_enable
-    # 近接障害物検知直後は、壁につっかえないようまず直進後退（BACKUP）を開始
+    # 近接障害物検知直後は、停車したままX字操舵を整定する。
     assert outputs[0].steering_deg == 0
     assert outputs[0].left_rpm == 0
     assert outputs[0].right_rpm == 0
+    assert outputs[0].is_spin_turn
     assert not outputs[0].emergency_stop
 
     # 同一時刻のログを複製しても時間もクリアランスも進んでいない。
     extended_outputs = replay_obstacle_avoidance([line] * 17)
-    assert all(output.rule == 9 and output.left_rpm == 0 for output in extended_outputs)
+    assert all(output.rule in (7, 8) and output.left_rpm == 0 for output in extended_outputs)
 
 
 def test_malformed_trace_is_rejected_or_explicitly_skipped() -> None:
@@ -63,12 +64,11 @@ def test_recorded_wall_loop_does_not_claim_escape_without_heading_progress() -> 
     source = Path(__file__).parent / "fixtures/wall_loop_20260915.jsonl"
     outputs = replay_obstacle_avoidance(source)
     assert len(outputs) == 72
-    first_backup = next(i for i, output in enumerate(outputs) if output.rule == 9)
-    assert all(output.steering_deg < 0 for output in outputs[:first_backup])
-    # The historical world stops gaining clearance before the new 750 mm
-    # target. Replaying it must time out, not invent a successful trajectory.
-    assert all(output.rule in (9, 5) for output in outputs[first_backup:])
-    assert outputs[-1].rule == 5 and not outputs[-1].actuator_enable
+    first_escape = next(i for i, output in enumerate(outputs) if output.rule in (7, 8))
+    assert all(output.actuator_enable for output in outputs[:first_escape])
+    # 有効な回頭量がなくても、クリアランス不足や試行回数だけでは停止しない。
+    assert all(output.rule in (7, 8) for output in outputs[first_escape:])
+    assert outputs[-1].rule in (7, 8) and outputs[-1].actuator_enable
 
 
 def test_replay_uses_cpu_time_and_does_not_advance_on_duplicate_packets() -> None:
@@ -79,4 +79,4 @@ def test_replay_uses_cpu_time_and_does_not_advance_on_duplicate_packets() -> Non
         })
     outputs = replay_obstacle_avoidance([line(t) for t in (0, 0, 0, 250, 500)])
     assert all(output.left_rpm == 0 for output in outputs[:4])
-    assert outputs[-1].left_rpm == -100
+    assert outputs[-1].left_rpm == -outputs[-1].right_rpm

@@ -62,3 +62,4 @@ skills-lock.json
 # Tmp
 **/tmp
 AGENTS.md
+software/rover-monitor/logs/rover-monitor-*.jsonl

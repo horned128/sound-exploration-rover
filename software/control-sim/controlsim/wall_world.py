@@ -75,13 +75,19 @@ def run_wall_approach(
             snapshot = sensor_snapshot(
                 left_mm=round(filtered[0]), center_mm=round(filtered[1]), right_mm=round(filtered[2])
             )
-            snapshot.gyro_dps_x10[2] = round(math.degrees(yaw_rate) * 10)
+            # Match the current vehicle wiring: a positive simulated heading
+            # rate is reported as a negative BMI270 Z rate.
+            snapshot.gyro_dps_x10[2] = round(-math.degrees(yaw_rate) * 10)
             output = controller_step(snapshot, now_ms)
 
         target_velocity = (output.left_rpm + output.right_rpm) / 200 * speed_mm_s if output.actuator_enable else 0
         velocity = ramp(velocity, target_velocity, 40)
         steering = ramp(steering, output.steering_deg, 10)
-        yaw_rate = math.radians(turn_rate_dps) * math.tan(math.radians(steering)) * velocity / speed_mm_s
+        if output.actuator_enable and output.is_spin_turn:
+            target_yaw_rate = math.radians(turn_rate_dps) * (output.left_rpm - output.right_rpm) / 200
+        else:
+            target_yaw_rate = math.radians(turn_rate_dps) * math.tan(math.radians(steering)) * velocity / speed_mm_s
+        yaw_rate = ramp(yaw_rate, target_yaw_rate, math.radians(5))
         heading += yaw_rate * 0.05
         x += velocity * math.cos(heading) * 0.05
         y += velocity * math.sin(heading) * 0.05

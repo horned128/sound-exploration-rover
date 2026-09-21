@@ -16,6 +16,8 @@
 #include "hal_data.h"                                       /* BSP LED情報、ピンAPI */
 #include "services/acoustic_identifier.h"                   /* 見本leave-one-outしきい値算出 */
 #include "services/prototype_storage.h"                     /* Code MRAMプロトタイプ保存 */
+#include "services/odometry.h"                              /* 車輪・IMUオドメトリ */
+#include "services/sound_source_localizer.h"                /* bearing-only音源位置推定 */
 #include "task_acoustic_link.h"                             /* 最新音響状態取得API */
 #include "task_command.h"                                   /* 最新アクチュエータ目標更新API */
 #include "task_infer.h"                                     /* 音響判定結果取得と保存データ更新 */
@@ -35,6 +37,7 @@ LOCAL ER task_think_publish_motion(H steering_deg, BOOL is_spin_turn, H left_rpm
                                    BOOL actuator_enable, BOOL emergency_stop); /* 4輪目標展開 */
 /* 音源追従の近接安全判定 */
 LOCAL BOOL task_think_sound_motion_allowed(const sensor_snapshot_t * p_snapshot); /* 音源追従走行可否判定 */
+LOCAL H task_think_spin_breakaway_rpm_update(BOOL is_spin_turn, BOOL moving, H gyro_z_dps_x10); /* スピンターン始動探索 */
 LOCAL void task_think_led_write(BOOL blue_on, BOOL green_on); /* 2LED一括更新 */
 LOCAL void task_think_learning_capture(const task_acoustic_link_snapshot_t * p_snapshot,
                                        BOOL observation_usable); /* 新規特徴量パッチの学習 */
@@ -108,6 +111,29 @@ EXPORT volatile H g_task_think_left_rpm;                    /**< 左RPM判断値
 EXPORT volatile H g_task_think_right_rpm;                   /**< 右RPM判断値 */
 EXPORT volatile BOOL g_task_think_actuator_enable;          /**< 出力許可判断 */
 EXPORT volatile BOOL g_task_think_emergency_stop;           /**< 非常停止判断 */
+EXPORT volatile UH g_task_think_raw_doa_deg;                /**< XVF3800 raw DoA[deg] */
+EXPORT volatile UH g_task_think_filtered_doa_deg;           /**< ESP32S3循環平均DoA[deg] */
+EXPORT volatile UB g_task_think_doa_confidence;             /**< DoA品質[0..100] */
+EXPORT volatile W g_task_think_rover_x_mm;                  /**< 推定車体X座標[mm] */
+EXPORT volatile W g_task_think_rover_y_mm;                  /**< 推定車体Y座標[mm] */
+EXPORT volatile W g_task_think_rover_heading_mrad;          /**< 推定車体方位[mrad] */
+EXPORT volatile W g_task_think_source_x_mm;                 /**< 推定音源X座標[mm] */
+EXPORT volatile W g_task_think_source_y_mm;                 /**< 推定音源Y座標[mm] */
+EXPORT volatile UW g_task_think_source_range_mm;            /**< 推定音源距離[mm] */
+EXPORT volatile H g_task_think_source_bearing_deg;          /**< 音源目標方位（右正）[deg] */
+EXPORT volatile UB g_task_think_source_confidence;          /**< 音源位置品質[0..100] */
+EXPORT volatile UB g_task_think_localization_observation_count; /**< 位置推定観測数 */
+EXPORT volatile UH g_task_think_localization_residual_mm;   /**< 方位線残差RMS[mm] */
+EXPORT volatile UH g_task_think_localization_crossing_deg;  /**< 方位交差角[deg] */
+EXPORT volatile UH g_task_think_localization_baseline_mm;   /**< 方位観測の最大基線[mm] */
+EXPORT volatile UH g_task_think_source_position_shift_mm;   /**< 前回推定からの位置変化[mm] */
+EXPORT volatile BOOL g_task_think_localization_geometry_valid; /**< 今回の推定幾何有効 */
+EXPORT volatile BOOL g_task_think_source_position_valid;    /**< 音源位置推定有効 */
+EXPORT volatile BOOL g_task_think_navigation_target_valid;  /**< 音源目標保持期限内 */
+EXPORT volatile BOOL g_task_think_arrival_candidate;        /**< 音源到着候補 */
+EXPORT volatile sound_arrival_state_t g_task_think_arrival_state; /**< 到着判定段階 */
+EXPORT volatile UB g_task_think_arrival_confirm_count;      /**< 到着確認観測数 */
+EXPORT volatile UW g_task_think_autonomous_backup_count;    /**< 自律両輪後退検出数 */
 /**< 選択センサー走行ルール */
 EXPORT volatile obstacle_avoidance_rule_t g_task_think_sensor_rule;
 EXPORT volatile UW g_task_think_fault_flags;                /**< CPU0異常ラッチ */
@@ -119,10 +145,10 @@ EXPORT volatile prototype_storage_result_t g_task_think_storage_result;
 
 /** =================================================================*
  * @brief  音源追従で前進してよいToF状態か判定
- * @details センサー取得失敗、更新期限超過、ToF無効、またはいずれかの測距が
- *          ハード停止距離未満なら走行を許可しない。
+ * @details センサー取得失敗、更新期限超過、またはToF無効なら走行を許可しない。
+ *          距離閾値による即時停止と正面衝突候補の連続確認は回避制御側で扱う。
  * @param[in] p_snapshot 最新センサースナップショット
- * @return 3台のToFが有効かつ近接障害物なしならtrue
+ * @return 3台のToFが有効かつ期限内ならtrue
  * ================================================================= */
 LOCAL BOOL task_think_sound_motion_allowed(const sensor_snapshot_t * p_snapshot) {
     return (BOOL) safety_arbiter_tof_usable(p_snapshot);
@@ -151,6 +177,29 @@ EXPORT app_fault_t task_think_create(void) {
     g_task_think_right_rpm = 0;
     g_task_think_actuator_enable = FALSE;
     g_task_think_emergency_stop = TRUE;
+    g_task_think_raw_doa_deg = ACOUSTIC_PROTOCOL_DOA_INVALID;
+    g_task_think_filtered_doa_deg = ACOUSTIC_PROTOCOL_DOA_INVALID;
+    g_task_think_doa_confidence = 0U;
+    g_task_think_rover_x_mm = 0;
+    g_task_think_rover_y_mm = 0;
+    g_task_think_rover_heading_mrad = 0;
+    g_task_think_source_x_mm = 0;
+    g_task_think_source_y_mm = 0;
+    g_task_think_source_range_mm = 0U;
+    g_task_think_source_bearing_deg = 0;
+    g_task_think_source_confidence = 0U;
+    g_task_think_localization_observation_count = 0U;
+    g_task_think_localization_residual_mm = 0U;
+    g_task_think_localization_crossing_deg = 0U;
+    g_task_think_localization_baseline_mm = 0U;
+    g_task_think_source_position_shift_mm = 0U;
+    g_task_think_localization_geometry_valid = FALSE;
+    g_task_think_source_position_valid = FALSE;
+    g_task_think_navigation_target_valid = FALSE;
+    g_task_think_arrival_candidate = FALSE;
+    g_task_think_arrival_state = CPU0_SOUND_ARRIVAL_SEARCH;
+    g_task_think_arrival_confirm_count = 0U;
+    g_task_think_autonomous_backup_count = 0U;
     g_task_think_sensor_rule = CPU0_SENSOR_RULE_SAFE_STOP;
     g_task_think_fault_flags = APP_FAULT_NONE;
     g_task_think_learning_mode = FALSE;
@@ -159,6 +208,7 @@ EXPORT app_fault_t task_think_create(void) {
     g_task_think_storage_result = CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
     learning_command_pending = TASK_THINK_LEARNING_COMMAND_NONE;
     sound_follow_controller_init();
+    sound_source_localizer_init();
 #if (CPU0_SENSOR_I2C_ENABLED != 0U)
     obstacle_avoidance_controller_init();
 #endif
@@ -386,7 +436,7 @@ EXPORT ER task_think_clear_fault(app_fault_t fault) {
 
 /** =================================================================*
  * @brief  追従指令の4輪展開
- * @details 通常時は前後輪を逆相操舵し、その場旋回時はハの字へ展開する。
+ * @details 通常時は前後輪を逆相操舵し、最小並進回頭時はX字へ展開する。
  * @param[in] p_output 音源追従状態機械の出力
  * @return μT-Kernelエラーコード
  * ================================================================= */
@@ -399,11 +449,57 @@ LOCAL ER task_think_publish_target(const sound_follow_output_t * p_output) {
                                      p_output->right_rpm, p_output->actuator_enable, p_output->emergency_stop);
 }
 
+LOCAL H s_spin_current_rpm = CPU0_SPIN_RAMP_START_RPM;
+LOCAL BOOL s_spin_breakaway_detected = FALSE;
+
+/** =================================================================*
+ * @brief  始動トルク探索型スピンターンRPM決定（Breakaway & Hold）
+ * @details 6輪ロッカーボギー機構の対角突っ張り・車輪浮き・空転・ストールを防ぐため、
+ *          低RPMから徐々にランプアップし、ジャイロによる回転開始検知時のRPMをホールドする。
+ * @param[in] is_spin_turn スピンターン状態
+ * @param[in] moving 回転要求あり
+ * @param[in] gyro_z_dps_x10 最新鉛直ジャイロ角速度[0.1dps]
+ * @return 適用するスピンターン目標RPM絶対値
+ * ================================================================= */
+LOCAL H task_think_spin_breakaway_rpm_update(BOOL is_spin_turn, BOOL moving, H gyro_z_dps_x10) {
+    if (!is_spin_turn || !moving) {
+        s_spin_current_rpm = CPU0_SPIN_RAMP_START_RPM;
+        s_spin_breakaway_detected = FALSE;
+        return 0;
+    }
+
+    H const abs_gyro = (gyro_z_dps_x10 < 0) ? (H) -gyro_z_dps_x10 : gyro_z_dps_x10;
+
+    /* ジャイロが変化している（実際に回転している: >= 6.0 dps）か判定 */
+    if (abs_gyro >= CPU0_SPIN_MOTION_DETECT_DPS_X10) {
+        /* 回転中: これ以上のランプアップを止め、現在のRPMをホールド */
+        s_spin_breakaway_detected = TRUE;
+
+        /* 回転が速すぎる場合（過剰トルク・浮き上がり防止）はマイルドに下げる */
+        if (abs_gyro > CPU0_SPIN_HOLD_MAX_DPS_X10) {
+            if (s_spin_current_rpm - 3 >= CPU0_SPIN_RAMP_START_RPM) {
+                s_spin_current_rpm = (H) (s_spin_current_rpm - 3);
+            }
+        }
+    } else {
+        /* ジャイロが変化していない（回っていない、または停止した）:
+         * ジャイロが変化するまで毎周期Dutyを上げ続ける！ */
+        s_spin_breakaway_detected = FALSE;
+        if (s_spin_current_rpm + CPU0_SPIN_RAMP_STEP_RPM <= CPU0_SPIN_RAMP_MAX_RPM) {
+            s_spin_current_rpm = (H) (s_spin_current_rpm + CPU0_SPIN_RAMP_STEP_RPM);
+        } else {
+            s_spin_current_rpm = CPU0_SPIN_RAMP_MAX_RPM;
+        }
+    }
+
+    return s_spin_current_rpm;
+}
+
 /** =================================================================*
  * @brief  共通走行指令を4輪操舵・左右DCモーターの目標へ展開
- * @details 通常時は前後輪逆相、その場旋回時はハの字操舵で左右DCモーターを指令する。
+ * @details 通常時は前後輪逆相、最小並進回頭時はX字操舵で左右DCモーターを指令する。
  * @param[in] steering_deg 右正の車体操舵角
- * @param[in] is_spin_turn その場旋回のハの字操舵を選択する状態
+ * @param[in] is_spin_turn 最小並進回頭のX字操舵を選択する状態
  * @param[in] left_rpm 論理左モーター目標RPM
  * @param[in] right_rpm 論理右モーター目標RPM
  * @param[in] actuator_enable 出力許可
@@ -422,18 +518,16 @@ LOCAL ER task_think_publish_motion(H steering_deg, BOOL is_spin_turn, H left_rpm
 
     if (is_spin_turn) {
         /*
-         * 車体中心を回る接線方向へ向ける。サーボ出力符号をここで一度だけ適用する。
-         * FR, FL, RR, RL = -, +, +, - は、Papayaの既存手動Spin
-         * (RF-, LF+, RB+, LB-) と同じ物理的な向きである。
+         * 6輪ロッカーボギーサスペンションのX字操舵による超信地旋回。
+         * 前後4輪をX字（35°）に配向し、探索・調停済みRPMで左右逆回転を行う。
          */
-        H spin_servo_deg = (H) (CPU0_STEERING_SERVO_OUTPUT_SIGN * CPU0_SOUND_SPIN_SERVO_DEG);
-        /* サーボ番号はFR、FL、RR、RLの順に固定されている。 */
+        H const spin_servo_deg = (H) (CPU0_STEERING_SERVO_OUTPUT_SIGN * CPU0_SOUND_SPIN_SERVO_DEG);
         target.servo_target_deg[0] = spin_servo_deg;
         target.servo_target_deg[1] = (H) -spin_servo_deg;
         target.servo_target_deg[2] = (H) -spin_servo_deg;
         target.servo_target_deg[3] = spin_servo_deg;
     } else {
-        H front_steering_deg = (H) (CPU0_STEERING_SERVO_OUTPUT_SIGN * steering_deg);
+        H const front_steering_deg = (H) (CPU0_STEERING_SERVO_OUTPUT_SIGN * steering_deg);
         target.servo_target_deg[0] = front_steering_deg;
         target.servo_target_deg[1] = front_steering_deg;
         target.servo_target_deg[2] = (H) -front_steering_deg;
@@ -643,6 +737,8 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         BOOL const observation_usable =
             (E_OK == snapshot_err) && snapshot.usb_configured && snapshot.hello_received &&
             snapshot.observation_received && (ACOUSTIC_XVF_STATUS_READY == snapshot.observation.xvf_status) &&
+            (snapshot.observation.doa_deg < 360U) && (snapshot.observation.raw_doa_deg < 360U) &&
+            (snapshot.observation.doa_confidence <= 100U) &&
             (0U == (snapshot.observation.audio_flags &
                     (ACOUSTIC_AUDIO_FLAG_I2C_ERROR | ACOUSTIC_AUDIO_FLAG_MUTED | ACOUSTIC_AUDIO_FLAG_I2S_STALE)));
         BOOL const sequence_changed =
@@ -695,6 +791,57 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
 
         /* --- S3: 音源追従コントローラを先に実行し、目標操舵角を取得 --- */
         BOOL const match_required = (0U != CPU0_SOUND_REQUIRE_IDENTIFIER_MATCH) && g_task_think_storage_valid;
+        BOOL const sound_allowed = !match_required || target_sound_matched;
+        BOOL const target_sound_valid = link_ready && sound_allowed &&
+            (snapshot.observation.doa_confidence >= CPU0_SOUND_LOCALIZATION_MIN_CONFIDENCE) &&
+            (0U != snapshot.observation.vad) &&
+            (snapshot.observation.level_dbfs_x100 >= CPU0_SOUND_TRIGGER_DBFS_X100);
+
+        odometry_pose_t pose;
+        memset(&pose, 0, sizeof(pose));
+        odometry_service_get_pose(&pose);
+        BOOL const pose_valid = sensor_fresh && pose.valid &&
+            (0U != (sensor_snapshot.valid_flags & CPU0_SENSOR_VALID_IMU));
+        sound_source_localizer_input_t localizer_input = {
+            .pose = pose,
+            .relative_doa_deg = observation_usable ?
+                sound_follow_doa_to_relative(snapshot.observation.doa_deg) : 0,
+            .doa_confidence = snapshot.observation.doa_confidence,
+            .new_observation = new_observation,
+            .sound_valid = target_sound_valid,
+            .pose_valid = pose_valid,
+            .observation_sequence = snapshot.observation_sequence,
+            .now_ms = sensor_now_ms,
+        };
+        sound_source_localizer_output_t localizer_output;
+        memset(&localizer_output, 0, sizeof(localizer_output));
+        sound_source_localizer_step(&localizer_input, &localizer_output);
+
+        g_task_think_raw_doa_deg = observation_usable ? snapshot.observation.raw_doa_deg :
+                                                       ACOUSTIC_PROTOCOL_DOA_INVALID;
+        g_task_think_filtered_doa_deg = observation_usable ? snapshot.observation.doa_deg :
+                                                            ACOUSTIC_PROTOCOL_DOA_INVALID;
+        g_task_think_doa_confidence = observation_usable ? snapshot.observation.doa_confidence : 0U;
+        g_task_think_rover_x_mm = pose.x_mm;
+        g_task_think_rover_y_mm = pose.y_mm;
+        g_task_think_rover_heading_mrad = pose.theta_mrad;
+        g_task_think_source_x_mm = localizer_output.source_x_mm;
+        g_task_think_source_y_mm = localizer_output.source_y_mm;
+        g_task_think_source_range_mm = localizer_output.source_range_mm;
+        g_task_think_source_bearing_deg = localizer_output.source_bearing_deg;
+        g_task_think_source_confidence = localizer_output.source_confidence;
+        g_task_think_localization_observation_count = localizer_output.observation_count;
+        g_task_think_localization_residual_mm = localizer_output.localization_residual_mm;
+        g_task_think_localization_crossing_deg = localizer_output.bearing_crossing_angle_deg;
+        g_task_think_localization_baseline_mm = localizer_output.baseline_mm;
+        g_task_think_source_position_shift_mm = localizer_output.source_position_shift_mm;
+        g_task_think_localization_geometry_valid = localizer_output.localization_geometry_valid;
+        g_task_think_source_position_valid = localizer_output.source_position_valid;
+        g_task_think_navigation_target_valid = localizer_output.navigation_target_valid;
+        g_task_think_arrival_candidate = localizer_output.arrival_candidate;
+        g_task_think_arrival_state = localizer_output.arrival_state;
+        g_task_think_arrival_confirm_count = localizer_output.arrival_confirm_count;
+
         /* 音源追従コントローラへ渡す入力を思考周期ごとに更新する領域。 */
         LOCAL sound_follow_input_t input;
         input = (sound_follow_input_t){
@@ -705,6 +852,10 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             .observation = snapshot.observation,
             .match_required = match_required,
             .target_sound_matched = target_sound_matched,
+            .navigation_target_valid = localizer_output.navigation_target_valid,
+            .navigation_bearing_deg = localizer_output.source_bearing_deg,
+            .arrival_verify = CPU0_SOUND_ARRIVAL_VERIFY == localizer_output.arrival_state,
+            .arrived = CPU0_SOUND_ARRIVAL_ARRIVED == localizer_output.arrival_state,
             .imu_valid = sensor_fresh &&
                          (0U != (sensor_snapshot.valid_flags & CPU0_SENSOR_VALID_IMU)),
             .gyro_z_dps_x10 = sensor_snapshot.gyro_dps_x10[CPU0_SENSOR_YAW_AXIS],
@@ -739,16 +890,24 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         memset(&output, 0, sizeof(output));
         BOOL const tracking_active = (CPU0_THINK_STATE_MOVE_STEP == sf_output.state);
         BOOL spin_active = (CPU0_THINK_STATE_SPIN_STEP == sf_output.state);
-        BOOL const avoidance_active = (oa_output.rule == CPU0_SENSOR_RULE_BACKUP) ||
-                                      (oa_output.rule == CPU0_SENSOR_RULE_PIVOT_LEFT) ||
-                                      (oa_output.rule == CPU0_SENSOR_RULE_PIVOT_RIGHT);
+        BOOL const arrival_stop = (CPU0_THINK_STATE_ARRIVAL_VERIFY == sf_output.state) ||
+                                  (CPU0_THINK_STATE_ARRIVED == sf_output.state);
+        BOOL const avoidance_active = (oa_output.rule == CPU0_SENSOR_RULE_PIVOT_LEFT) ||
+                                      (oa_output.rule == CPU0_SENSOR_RULE_PIVOT_RIGHT) ||
+                                      (oa_output.rule == CPU0_SENSOR_RULE_BLOCKED_STOP);
+        BOOL const sensor_stop = (oa_output.rule == CPU0_SENSOR_RULE_SAFE_STOP) ||
+                                 (oa_output.rule == CPU0_SENSOR_RULE_BLOCKED_STOP) ||
+                                 (oa_output.rule == CPU0_SENSOR_RULE_IMU_STOP);
 
 #if (CPU0_USE_CONTROL_MLP != 0U)
-        if (!mlp_output.fallback_required && !avoidance_active && !oa_output.emergency_stop && !sf_output.emergency_stop &&
+        BOOL const mlp_eligible = tracking_active || (CPU0_THINK_STATE_STEER_PREP == sf_output.state);
+        if (mlp_eligible && !mlp_output.fallback_required && !avoidance_active && !sensor_stop && !arrival_stop &&
+            !oa_output.emergency_stop && !sf_output.emergency_stop &&
             !g_task_think_learning_mode && (APP_FAULT_NONE == g_task_think_fault_flags)) {
             /* TFLM 制御MLP による連続回避・追従計画 */
             output.state = sf_output.state;
             output.steering_deg = (H) roundf(mlp_output.steering_deg);
+            output.is_spin_turn = FALSE;
             output.emergency_stop = FALSE;
 
             if (mlp_output.is_blocked || (mlp_output.speed_scale <= 0.01f)) {
@@ -807,10 +966,25 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             output.actuator_enable = FALSE;
             output.left_rpm        = 0;
             output.right_rpm       = 0;
+        } else if (sensor_stop) {
+            /* センサー停止を到着停止で覆い隠さず、停止理由を独立して保持する。 */
+            output.state = oa_output.state;
+            output.steering_deg = 0;
+            output.is_spin_turn = FALSE;
+            output.left_rpm = 0;
+            output.right_rpm = 0;
+            output.actuator_enable = FALSE;
+            output.emergency_stop = FALSE;
+        } else if (arrival_stop) {
+            /* 音源到着停止は障害物停止・非常停止と別状態で保持する。 */
+            output = sf_output;
+            output.left_rpm = 0;
+            output.right_rpm = 0;
         } else if (avoidance_active && oa_output.actuator_enable) {
-            /* 障害物回避の切り返し・脱出動作を最優先実行 */
+            /* 障害物回避の最小並進旋回を最優先実行 */
             output.state           = oa_output.state;
             output.steering_deg    = oa_output.steering_deg;
+            output.is_spin_turn    = oa_output.is_spin_turn;
             output.left_rpm        = oa_output.left_rpm;
             output.right_rpm       = oa_output.right_rpm;
             output.actuator_enable = TRUE;
@@ -819,12 +993,13 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             /* S4連続走行: 音源引力とToF斥力を合成した回避走行指令を採用 */
             output.state           = oa_output.state;
             output.steering_deg    = oa_output.steering_deg;
+            output.is_spin_turn    = FALSE;
             output.left_rpm        = oa_output.left_rpm;
             output.right_rpm       = oa_output.right_rpm;
             output.actuator_enable = TRUE;
             output.emergency_stop  = FALSE;
         } else if (spin_active && oa_output.actuator_enable) {
-            /* その場旋回は回避走行の操舵と混合せず、独立した左右逆回転を維持する。 */
+            /* 最小並進回頭は回避走行の操舵と混合せず、独立した左右逆回転を維持する。 */
             output = sf_output;
         } else if ((CPU0_THINK_STATE_STEER_PREP == sf_output.state) ||
                    (CPU0_THINK_STATE_SPIN_PREP == sf_output.state)) {
@@ -838,6 +1013,25 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             output = sf_output;
             output.left_rpm        = 0;
             output.right_rpm       = 0;
+        }
+
+        /* --- スピンターン始動トルク探索＆定常回転維持（Breakaway & Hold）制御 --- */
+        if (output.is_spin_turn) {
+            BOOL const moving = (output.left_rpm != 0) || (output.right_rpm != 0);
+            H const gyro_z = sensor_fresh ? sensor_snapshot.gyro_dps_x10[CPU0_SENSOR_YAW_AXIS] : 0;
+            if (moving && output.actuator_enable && !output.emergency_stop) {
+                BOOL const turn_left = (output.left_rpm < output.right_rpm) ||
+                                       ((output.right_rpm > 0) && (output.left_rpm <= 0));
+                H const spin_rpm = task_think_spin_breakaway_rpm_update(TRUE, TRUE, gyro_z);
+                output.left_rpm = turn_left ? (H) -spin_rpm : spin_rpm;
+                output.right_rpm = turn_left ? spin_rpm : (H) -spin_rpm;
+            } else {
+                (void) task_think_spin_breakaway_rpm_update(FALSE, FALSE, 0);
+                output.left_rpm = 0;
+                output.right_rpm = 0;
+            }
+        } else {
+            (void) task_think_spin_breakaway_rpm_update(FALSE, FALSE, 0);
         }
 
         g_task_think_state = output.state;
@@ -875,6 +1069,9 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         output.right_rpm      = sa_arbitrated.right_rpm;
         output.actuator_enable = sa_arbitrated.actuator_enable;
         output.emergency_stop = sa_arbitrated.emergency_stop;
+        if ((output.left_rpm < 0) && (output.right_rpm < 0)) {
+            g_task_think_autonomous_backup_count++;
+        }
 
         if (E_OK != task_think_publish_target(&output)) {
             g_task_think_fault_flags |= APP_FAULT_TARGET_UPDATE;
@@ -920,6 +1117,7 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
  * ================================================================= */
 EXPORT void task_think_halt(app_fault_t fault) {
     UW fault_elapsed_ms = 0U;
+    (void) task_think_spin_breakaway_rpm_update(FALSE, FALSE, 0);
     g_task_think_fault_flags |= (UW) fault;
     g_task_think_state = CPU0_THINK_STATE_FAULT;
     g_task_think_link_ready = FALSE;

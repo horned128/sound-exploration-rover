@@ -12,7 +12,6 @@ extern "C" {
 #endif
 
 #define SMOOTH_PLANNER_MAX_STEERING_DEG    (45.0f)          /**< 最大舵角 [deg] */
-#define SMOOTH_PLANNER_HARD_STOP_MM        (250.0f)         /**< ハード停止距離 [mm] */
 #define SMOOTH_PLANNER_RECOVER_CLEAR_MM    (650.0f)         /**< 走行復帰基準距離 [mm] */
 #define SMOOTH_PLANNER_INFLUENCE_DISTANCE_MM (800.0f)       /**< 障害物影響距離 [mm] */
 #define SMOOTH_PLANNER_FAR_DISTANCE_MM     (4000.0f)        /**< 無効チャネル仮定距離 [mm] */
@@ -42,7 +41,7 @@ typedef struct st_smooth_avoidance_input {
 typedef struct st_smooth_avoidance_output {
     float steering_deg;                                     /**< 決定操舵角 [-45, +45], 正=右, 負=左 */
     float speed_scale;                                      /**< 決定速度スケール [0.0, 1.0] */
-    BOOL  is_blocked;                                       /**< ハード停止 (250mm未満または全無効) */
+    BOOL  is_blocked;                                       /**< 全ToF無効による安全停止 */
     float left_clearance_mm;                                /**< 左クリアランス[mm] */
     float center_clearance_mm;                              /**< 中央クリアランス[mm] */
     float right_clearance_mm;                               /**< 右クリアランス[mm] */

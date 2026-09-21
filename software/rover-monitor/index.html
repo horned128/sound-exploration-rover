@@ -263,7 +263,10 @@
 </head>
 <body>
     <div class="header">
-        <h1>Rover Monitor</h1>
+        <div style="display:flex; align-items:center; gap:16px;">
+            <h1>Rover Monitor</h1>
+            <span id="logPath" style="font-size: 11px; color: var(--text-muted); font-family: monospace;"></span>
+        </div>
         <span id="wsStatus" class="status-badge bg-error">WebSocket: Disconnected</span>
     </div>
 
@@ -284,7 +287,7 @@
             <div class="panel">
                 <h3 class="panel-title">State & Command</h3>
                 <div class="data-grid">
-                    <span class="data-label" data-help="CPU0の自律制御状態です。WAIT_LINKは音響リンク待ち、SPIN_*は後方音源に対するその場旋回、SENSOR_*は障害物回避、FAULTは異常停止を表します。">Think State</span><span class="data-value" id="val_think_state">UNKNOWN</span>
+                    <span class="data-label" data-help="CPU0の自律制御状態です。WAIT_LINKは音響リンク待ち、SPIN_*は最小並進の回頭、ARRIVAL_*は音源到着確認、SENSOR_*は障害物回避、FAULTは異常停止を表します。">Think State</span><span class="data-value" id="val_think_state">UNKNOWN</span>
                     <span class="data-label" data-help="非常停止要求です。ACTIVEなら安全側としてモーター出力を止めます。学習中はACTIVEが正常です。">E-Stop</span><span class="data-value" id="val_estop">-</span>
                     <span class="data-label" data-help="モーター駆動の許可状態です。ONでのみ目標回転数を出力できます。">Enable</span><span class="data-value" id="val_enable">-</span>
                     <span class="data-label" data-help="CPU0が音響リンクを走行判断に使える状態かを示します。YESなら有効な音響観測を受信しています。">Link Ready</span><span class="data-value" id="val_link_ready">-</span>
@@ -317,6 +320,20 @@
                     <span class="data-label" data-help="800msウィンドウ内の有効音響フレーム数です（最大80フレーム）。前半40・後半40の2スロット分割によりリズム・断続を認識します。">Active Frames</span><span class="data-value" id="val_recog_frames">-</span>
                     <span class="data-label" data-help="直近の照合で最も距離が近かった学習サンプルのインデックスです。">Nearest Sample</span><span class="data-value" id="val_recog_nearest">-</span>
                     <span class="data-label" data-help="直近のMRAM操作結果です。OK (0) は成功、EMPTY (1) は未学習で正常、その他は初期化・保存の異常です。">Last Result</span><span class="data-value" id="val_storage_result">-</span>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3 class="panel-title">Source Localization</h3>
+                <div class="data-grid">
+                    <span class="data-label" data-help="XVF3800から受け取った直近DoAと、ESP32S3の循環平均DoAです。無効値は表示しません。">DoA Raw / Filtered</span><span class="data-value" id="val_doa_pair">-</span>
+                    <span class="data-label" data-help="DoAの取得品質です。観測分散と取得経路から計算され、低い場合は位置推定に使われません。">DoA Confidence</span><span class="data-value" id="val_doa_confidence">-</span>
+                    <span class="data-label" data-help="複数のDoAとオドメトリから推定した音源の地図座標です。">Source (X, Y)</span><span class="data-value" id="val_source_pos">-</span>
+                    <span class="data-label" data-help="推定音源までの距離と車体正面からの方位です。単一DoAから距離を推定していません。">Source Range / Bearing</span><span class="data-value" id="val_source_range">-</span>
+                    <span class="data-label" data-help="方位線交差の残差、交差角、観測基線です。geometryが有効なときだけ距離を走行目標へ使います。">Geometry</span><span class="data-value" id="val_source_geometry">-</span>
+                    <span class="data-label" data-help="音源位置推定に使用している観測数と位置品質です。">Track Quality</span><span class="data-value" id="val_source_quality">-</span>
+                    <span class="data-label" data-help="到着候補は距離・音源品質・音の有効性を満たした状態です。ARRIVEDは複数観測の確認後です。">Arrival</span><span class="data-value" id="val_arrival_state">-</span>
+                    <span class="data-label" data-help="障害物回避で選択されたルールです。minimum-translation-turnが自律回避の回頭方式です。">Escape</span><span class="data-value" id="val_escape_state">-</span>
                 </div>
             </div>
 
@@ -371,6 +388,7 @@
                             <div style="position: absolute; top: 10px; left: 10px; font-size: 11px; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 5px 8px; border-radius: 4px; border: 1px solid #444;">
                                 <div style="color: #4caf50; font-weight: bold; margin-bottom: 3px;">累積相対マップ (Relative Odometry Map)</div>
                                 <div style="color: #ff9800; font-size: 10px; margin-bottom: 2px;">⚠️ 相対マップ・累積誤差あり (Drift Accumulation)</div>
+                                <div style="color: #03a9f4; font-size: 10px; margin-bottom: 2px;">● SOURCE 音源推定位置 (bearing-only)</div>
                                 <div style="color: #aaa; font-size: 10px;" id="trajectorySourceLabel">Source: CPU0 Odometry (24-bit Diff + Gyro Comp)</div>
                             </div>
                         </div>
@@ -384,6 +402,7 @@
                                 <div style="color: #e0e0e0; font-weight: bold; margin-bottom: 3px;">ローバー中心ビュー (Rover-Centric View)</div>
                                 <div style="color: #4caf50; font-size: 10px;">■ Steering 操舵目標 (実線)</div>
                                 <div style="color: #ff9800; font-size: 10px;">■ Audio DoA 音源方位 (点線)</div>
+                                <div style="color: #03a9f4; font-size: 10px;">■ Source bearing 推定音源方位</div>
                                 <div style="color: #2196f3; font-size: 10px;">● Obstacles (ToF L/C/R 平行ビーム)</div>
                                 <div style="color: #f44336; font-size: 10px;">-- 250mm 停止 / 234mm 交差ライン</div>
                             </div>
@@ -519,7 +538,8 @@
             6: "SENSOR_SAFE_STOP", 7: "SENSOR_FORWARD", 8: "SENSOR_CAUTION_FORWARD",
             9: "SENSOR_TURN_LEFT", 10: "SENSOR_TURN_RIGHT", 11: "SENSOR_BLOCKED_STOP",
             12: "SENSOR_IMU_STOP", 13: "FAULT", 17: "SPIN_PREP", 18: "SPIN_STEP", 19: "SPIN_NO_PROGRESS",
-            14: "SENSOR_PIVOT_LEFT", 15: "SENSOR_PIVOT_RIGHT", 16: "SENSOR_BACKUP"
+            14: "SENSOR_PIVOT_LEFT", 15: "SENSOR_PIVOT_RIGHT", 16: "SENSOR_BACKUP",
+            20: "ARRIVAL_VERIFY", 21: "ARRIVED"
         };
         const CPU0_FAULTS = {
             1: "TASK_CREATE", 2: "TASK_START", 4: "IPC_INIT", 8: "IPC_SEND",
@@ -535,6 +555,8 @@
                 case 1: return 'val-blue';
                 case 2: case 3: case 4: case 7: case 9: case 10: case 14: case 15: return 'val-ok';
                 case 12: case 13: return 'val-error';
+                case 20: return 'val-warn';
+                case 21: return 'val-ok';
                 default: return '';
             }
         }
@@ -634,9 +656,10 @@
         const TRACK_WIDTH_MM = 260.0;
         let latestSensors = null;
         let latestSteer = 0; 
-        let latestAudioDoa = 0;
+        let latestAudioDoa = 65535;
         let latestAudioLevel = -100;
         let latestPose = null;
+        let latestNavigation = null;
 
         function sensorValue(values, index) { return Number.isFinite(values?.[index]) ? values[index] : null; }
         function isSensorValid(sensors, index) { return ((Number(sensors?.valid_flags) || 0) & (1 << index)) !== 0; }
@@ -675,7 +698,7 @@
             ctx.strokeStyle = '#2d2d2d'; ctx.lineWidth = 1; ctx.beginPath();
             ctx.moveTo(ox, oy - r); ctx.lineTo(ox, oy + r); ctx.moveTo(ox - r, oy); ctx.lineTo(ox + r, oy); ctx.stroke();
             ctx.fillText('0° (Front)', ox, oy - r - 12); ctx.fillText('180°', ox, oy + r + 10);
-            ctx.fillText('90°', ox - r - 20, oy); ctx.fillText('-90°', ox + r + 20, oy);
+            ctx.fillText('-90°', ox - r - 20, oy); ctx.fillText('90°', ox + r + 20, oy);
 
             const toRadX = (xMm) => ox + (xMm * r / MAP_DEFAULT_RANGE_MM);
             const toRadY = (yMm) => oy - (yMm * r / MAP_DEFAULT_RANGE_MM);
@@ -770,7 +793,7 @@
             // 音響DoAおよび操舵目標レイの重畳描画
             // ==========================================
             function drawArrow(deg, color, isDashed, lenFactor = 1.0, isFan = false) {
-                const angle = (-deg - 90) * Math.PI / 180;
+                const angle = (deg - 90) * Math.PI / 180;
                 const arrowR = r * lenFactor;
                 const ex = ox + Math.cos(angle) * arrowR, ey = oy + Math.sin(angle) * arrowR;
 
@@ -802,7 +825,15 @@
             if (latestAudioDoa !== 65535) {
                 drawArrow(latestAudioDoa, '#ff9800', true, audioLenFactor, true);
             }
-            drawArrow(-latestSteer, '#4caf50', false, 1.0);
+            drawArrow(latestSteer, '#4caf50', false, 1.0);
+
+            const navigationFresh = latestNavigation?.valid && Number(latestNavigation.age_ms) <= 1000;
+            if (navigationFresh && latestNavigation.target_valid) {
+                const sourceBearing = Number(latestNavigation.bearing_deg);
+                if (Number.isFinite(sourceBearing)) {
+                    drawArrow(sourceBearing, '#03a9f4', false, 0.85);
+                }
+            }
             
             // ローバー原点マーク
             ctx.fillStyle = '#4caf50'; ctx.beginPath(); ctx.arc(ox, oy, 4, 0, 2 * Math.PI); ctx.fill();
@@ -838,6 +869,7 @@
 
         function updateOdometry(d) {
             latestPose = d.pose || null;
+            latestNavigation = d.navigation || null;
 
             if (d.pose && d.pose.valid) {
                 // CPU0 オドメトリ直接利用 (24-bit 剰余差分 + 相補フィルタ中点法)
@@ -921,7 +953,7 @@
             // ③ 音響イベントの重畳記録 (VAD検出時)
             if (d.audio && d.audio.vad && d.audio.doa_deg !== 65535) {
                 const doaRad = (d.audio.doa_deg * Math.PI) / 180.0;
-                const soundTheta = odomTheta - doaRad + (Math.PI / 2);
+                const soundTheta = odomTheta - doaRad;
                 const lastEvt = audioEvents[audioEvents.length - 1];
                 if (!lastEvt || (d.esp_ms - lastEvt.ms) > 400) {
                     audioEvents.push({
@@ -950,6 +982,13 @@
 
             let minX = odomX, maxX = odomX, minY = odomY, maxY = odomY;
             const allPts = pathHistory.concat(obstaclePoints);
+            const navigationFresh = latestNavigation?.valid && Number(latestNavigation.age_ms) <= 1000;
+            if (navigationFresh && latestNavigation.source_valid && latestNavigation.source_x_mm !== undefined && latestNavigation.source_y_mm !== undefined) {
+                allPts.push({
+                    x: -(latestNavigation.source_y_mm - resetOffsetY),
+                    y: latestNavigation.source_x_mm - resetOffsetX
+                });
+            }
             allPts.forEach(p => { if(p.x < minX) minX = p.x; if(p.x > maxX) maxX = p.x; if(p.y < minY) minY = p.y; if(p.y > maxY) maxY = p.y; });
 
             const pad = 800; minX -= pad; maxX += pad; minY -= pad; maxY += pad;
@@ -996,6 +1035,23 @@
             // 障害物プロット
             ctx.fillStyle = '#f44336';
             obstaclePoints.forEach(p => { ctx.beginPath(); ctx.arc(toCanvasX(p.x), toCanvasY(p.y), 2.5, 0, 2 * Math.PI); ctx.fill(); });
+
+            if (navigationFresh && latestNavigation.target_valid) {
+                const sourceX = -(latestNavigation.source_y_mm - resetOffsetY);
+                const sourceY = latestNavigation.source_x_mm - resetOffsetX;
+                const sx = toCanvasX(sourceX), sy = toCanvasY(sourceY);
+                ctx.fillStyle = '#03a9f4';
+                ctx.strokeStyle = '#b3e5fc';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(sx, sy, 7, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = '#b3e5fc';
+                ctx.font = '10px monospace';
+                ctx.textAlign = 'left';
+                ctx.fillText(`SOURCE ${Math.round(latestNavigation.range_mm)}mm`, sx + 10, sy - 8);
+            }
 
             // ローバー車体アイコン
             const rx = toCanvasX(odomX), ry = toCanvasY(odomY), roverSize = 12;
@@ -1121,8 +1177,21 @@
         ws.onopen = () => { wsStatus.textContent = 'WS Connected'; wsStatus.className = 'status-badge bg-ok'; };
         ws.onclose = () => { wsStatus.textContent = 'WS Disconnected'; wsStatus.className = 'status-badge bg-error'; };
 
+        fetch('/healthz')
+            .then(r => r.json())
+            .then(data => {
+                const el = document.getElementById('logPath');
+                if (el && data.log_path) el.textContent = `JSON Lines: ${data.log_path}`;
+            })
+            .catch(() => {});
+
         ws.onmessage = (event) => {
             const d = JSON.parse(event.data);
+            if (d._type === 'monitor_info') {
+                const el = document.getElementById('logPath');
+                if (el && d.log_path) el.textContent = `JSON Lines: ${d.log_path}`;
+                return;
+            }
 
             addTableRow(d);
 
@@ -1160,6 +1229,39 @@
 
             setVal('val_link_ready', d.think?.link_ready ? 'YES' : 'NO', d.think?.link_ready ? 'val-ok' : 'val-warn');
             setVal('val_faults', formatCpu0Faults(d.think?.faults), d.think?.faults > 0 ? 'val-error' : 'val-ok');
+
+            const nav = d.navigation || {};
+            const navValid = nav.valid === true || nav.valid === 1;
+            const navFresh = navValid && Number(nav.age_ms) <= 1000;
+            const rawDoa = Number(d.audio?.raw_doa_deg);
+            const filteredDoa = Number(d.audio?.filtered_doa_deg ?? d.audio?.doa_deg);
+            const formatDoa = value => Number.isFinite(value) && value >= 0 && value < 360 ? `${value.toFixed(0)}°` : '-';
+            setVal('val_doa_pair', `${formatDoa(rawDoa)} / ${formatDoa(filteredDoa)}`,
+                navFresh ? 'val-ok' : 'val-warn');
+            const doaConfidence = Number(d.audio?.confidence ?? nav.confidence);
+            setVal('val_doa_confidence', Number.isFinite(doaConfidence) ? `${doaConfidence} / 100` : '-',
+                doaConfidence >= 60 ? 'val-ok' : 'val-warn');
+            setVal('val_source_pos', navFresh && nav.source_valid ? `${Math.round(nav.source_x_mm)}, ${Math.round(nav.source_y_mm)} mm` : '-',
+                navFresh && nav.source_valid ? 'val-ok' : 'val-warn');
+            setVal('val_source_range', navFresh && nav.target_valid
+                ? `${Math.round(nav.range_mm)} mm / ${Number(nav.bearing_deg).toFixed(0)}°` : '-',
+                navFresh && nav.target_valid ? 'val-ok' : 'val-warn');
+            setVal('val_source_geometry', navFresh
+                ? `${Math.round(nav.residual_mm)}mm / ${Math.round(nav.crossing_deg)}° / ${Math.round(nav.baseline_mm)}mm`
+                : '-', navFresh && nav.geometry_valid ? 'val-ok' : 'val-warn');
+            setVal('val_source_quality', navFresh
+                ? `${nav.observation_count ?? 0} obs / ${nav.confidence ?? 0}` : '-');
+            const arrivalStateNames = ['SEARCH', 'TRACKING', 'VERIFY', 'ARRIVED'];
+            const arrivalState = Number(d.arrival?.state);
+            const arrivalText = d.arrival && navFresh
+                ? `${arrivalStateNames[arrivalState] || `UNKNOWN(${arrivalState})`} (${d.arrival.confirm_count ?? 0})`
+                : '-';
+            setVal('val_arrival_state', arrivalText,
+                navFresh && arrivalState === 3 ? 'val-ok' : (navFresh && d.arrival?.candidate ? 'val-warn' : ''));
+            const sensorRuleNames = ['SAFE_STOP', 'FORWARD', 'CAUTION_FORWARD', 'TURN_LEFT', 'TURN_RIGHT', 'BLOCKED_STOP', 'IMU_STOP', 'PIVOT_LEFT', 'PIVOT_RIGHT', 'BACKUP'];
+            const escapeName = d.escape?.minimum_translation_turn ? 'MIN_TRANSLATION_TURN' : (sensorRuleNames[d.escape?.sensor_rule] || '-');
+            setVal('val_escape_state', navFresh ? `${escapeName} / backup=${d.escape?.backup_command_count ?? 0}` : '-',
+                navFresh && d.escape?.minimum_translation_turn ? 'val-ok' : (navFresh && d.escape?.sensor_rule >= 5 ? 'val-warn' : ''));
 
             // 音響学習 & AI 照合テレメトリ
             const learningAvailable = d.learning !== undefined;
@@ -1267,7 +1369,8 @@
 
             latestSensors = d.sensors || null;
             latestSteer = d.think?.steering_deg || 0;
-            latestAudioDoa = d.audio?.doa_deg || 0;
+            latestAudioDoa = Number.isFinite(filteredDoa) ? filteredDoa : 65535;
+            latestNavigation = d.navigation || null;
 
             const validFlags = Number(d.sensors?.valid_flags) || 0;
             const sensorError = Number(d.sensors?.error_flags) || 0;

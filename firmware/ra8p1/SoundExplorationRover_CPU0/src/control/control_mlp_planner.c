@@ -127,19 +127,14 @@ EXPORT void control_mlp_planner_step(const sensor_snapshot_t * p_snapshot,
         return;
     }
 
-    /* 極近接チェック（150mm以下はフェイルセーフでルールベースの緊急後退へ委譲） */
+    /* 近接距離による即時停止はここでは行わない。正面衝突候補の連続確認と
+     * 回避旋回は、ToF 3眼を同時に扱うルールベース制御へ委譲する。 */
     float min_tof_mm = CONTROL_MLP_FAR_DISTANCE_MM;
     for (UW i = 0U; i < CPU0_SENSOR_TOF_COUNT; i++) {
         if (tof_valid[i]) {
             float const dist_mm = (float) p_snapshot->tof_distance_mm[i];
             if (dist_mm < min_tof_mm) {
                 min_tof_mm = dist_mm;
-            }
-            if (dist_mm <= CONTROL_MLP_HARD_STOP_DISTANCE_MM) {
-                p_output->fallback_required = TRUE;
-                p_output->is_blocked = TRUE;
-                p_output->speed_scale = 0.0f;
-                return;
             }
         }
     }
@@ -204,13 +199,6 @@ EXPORT void control_mlp_planner_step(const sensor_snapshot_t * p_snapshot,
         raw_steer_deg = 0.0f;
     }
 
-    /* ハード停止距離（250mm未満）では速度ゼロ */
-    BOOL is_blocked = FALSE;
-    if (min_tof_mm < CONTROL_MLP_HARD_STOP_DISTANCE_MM) {
-        is_blocked = TRUE;
-        raw_speed = 0.0f;
-    }
-
     /* スルーレート制限適用（100ms周期） */
     float const max_steer_step = CONTROL_MLP_MAX_STEER_RATE_DPS * CONTROL_MLP_STEP_DT_SEC;
     float const max_accel_step = CONTROL_MLP_MAX_ACCEL_PER_SEC * CONTROL_MLP_STEP_DT_SEC;
@@ -220,7 +208,7 @@ EXPORT void control_mlp_planner_step(const sensor_snapshot_t * p_snapshot,
 
     p_output->steering_deg      = s_current_steering_deg;
     p_output->speed_scale       = s_current_speed_scale;
-    p_output->is_blocked        = is_blocked || (s_current_speed_scale <= 0.01f);
+    p_output->is_blocked        = (s_current_speed_scale <= 0.01f);
     p_output->emergency_stop    = FALSE;
     p_output->fallback_required = FALSE;
 }

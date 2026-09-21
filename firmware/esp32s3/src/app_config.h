@@ -22,7 +22,8 @@
 #define APP_AUDIO_BLOCK_FRAMES             (256U)
 #define APP_AUDIO_STALE_TIMEOUT_MS         (100U)
 
-#define APP_OBSERVATION_PERIOD_MS          (50U)
+#define APP_OBSERVATION_PERIOD_MS          (20U)
+#define APP_DOA_FILTER_WINDOW              (5U)
 #define APP_HEALTH_PERIOD_MS               (1000U)
 #define APP_HELLO_PERIOD_MS                (1000U)
 #define APP_XVF_I2C_TIMEOUT_MS             (100U)

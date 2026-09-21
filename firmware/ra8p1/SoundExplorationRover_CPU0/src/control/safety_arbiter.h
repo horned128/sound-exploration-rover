@@ -1,6 +1,6 @@
 /** =================================================================*
  * @file   safety_arbiter.h
- * @brief  CPU0安全調停API（生存性・ToF veto・出力クランプ）
+ * @brief  CPU0安全調停API（生存性・センサー有効性・出力クランプ）
  * ================================================================= */
 #ifndef SEROV_CPU0_SAFETY_ARBITER_H
 #define SEROV_CPU0_SAFETY_ARBITER_H
@@ -24,9 +24,9 @@ typedef struct st_safety_motion_command {
 /**< 生存性・ToF・IMUを統合した安全判定状態 */
 typedef struct st_safety_arbiter_status {
     BOOL sensor_fresh;                                      /**< sensor_liveness判定結果 */
-    BOOL tof_usable;                                        /**< ToF有効かつ停止距離以上 */
+    BOOL tof_usable;                                        /**< ToF有効かつ期限内 */
     BOOL motion_allowed;                                    /**< 前進走行許可フラグ (fresh && tof_usable) */
-    BOOL hard_stop_veto;                                    /**< 250mm未満のToFによるveto発火 */
+    BOOL hard_stop_veto;                                    /**< 無効・期限切れセンサーによる停止発火 */
     BOOL imu_safe;                                          /**< IMU姿勢・衝撃の安全判定 */
 } safety_arbiter_status_t;
 

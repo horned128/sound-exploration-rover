@@ -13,7 +13,7 @@ typedef struct st_sound_follow_context {
     UW trigger_elapsed_ms;                                  /**< 音源トリガからの経過時間[ms] */
     UW quiet_elapsed_ms;                                    /**< 無音継続時間[ms] */
     BOOL trigger_active;                                    /**< 音源トリガの有効状態 */
-    BOOL desired_is_spin_turn;                              /**< その場旋回を要求する状態 */
+    BOOL desired_is_spin_turn;                              /**< 最小並進回頭を要求する状態 */
     BOOL spin_relisten_pending;                             /**< 連続音の再測定要求 */
     BOOL spin_imu_observed;                                 /**< 有効IMUを受信済み */
     BOOL spin_imu_update_valid;                             /**< 前回IMU更新回数を保持した状態 */
@@ -31,7 +31,6 @@ typedef struct st_sound_follow_context {
 } sound_follow_context_t;
 
 LOCAL H sound_follow_angle_normalize(W angle_deg);          /* 角度を-180～179度へ正規化 */
-LOCAL H sound_follow_relative_angle(UH doa_deg);            /* DoAを車体座標へ変換 */
 LOCAL H sound_follow_angle_delta(H angle_deg, H reference_deg); /* 円周上の符号付き角度差 */
 LOCAL H sound_follow_abs_i16(H value);                      /* int16_t絶対値 */
 LOCAL BOOL sound_follow_observation_usable(const acoustic_observation_t * p_observation); /* DoA品質判定 */
@@ -70,7 +69,7 @@ LOCAL H sound_follow_angle_normalize(W angle_deg) {
  * @param[in] doa_deg XVF3800の0～359度DoA
  * @return 車体正面基準の相対角度
  * ================================================================= */
-LOCAL H sound_follow_relative_angle(UH doa_deg) {
+EXPORT H sound_follow_doa_to_relative(UH doa_deg) {
     H angle = sound_follow_angle_normalize((W) doa_deg - CPU0_SOUND_DOA_ZERO_OFFSET_DEG);
     if (0U == CPU0_SOUND_DOA_CLOCKWISE_POSITIVE) {
         angle = (H) -angle;
@@ -206,7 +205,7 @@ LOCAL H sound_follow_steering_from_doa(H doa_deg) {
 }
 
 /** =================================================================*
- * @brief  DoAから一回のその場旋回目標ヨーを算出
+ * @brief  DoAから一回の最小並進回頭目標ヨーを算出
  * @details 前進操舵に渡す残角を残し、一回の目標を90度以内に制限する。
  * @param[in] doa_deg 車体正面基準の相対DoA
  * @return ジャイロZで確認する目標ヨー[mdeg]
@@ -221,7 +220,7 @@ LOCAL W sound_follow_spin_target_from_doa(H doa_deg) {
 /** =================================================================*
  * @brief  DoAから操舵と左右モーター指令を決定
  * @details 前方音源では内輪を減速した4輪逆相操舵で前進し、後方音源では
- *          ハの字操舵と左右逆回転によるその場旋回を選択する。
+ *          X字操舵と左右逆回転による低速の最小並進回頭を選択する。
  * @param[in] doa_deg 車体正面基準の相対DoA
  * ================================================================= */
 LOCAL void sound_follow_motion_from_doa(H doa_deg) {
@@ -282,7 +281,7 @@ LOCAL void sound_follow_state_enter(sound_follow_state_t state) {
 }
 
 /** =================================================================*
- * @brief  生ジャイロZからその場旋回の期待方向ヨー量を積分
+ * @brief  生ジャイロZから最小並進回頭の期待方向ヨー量を積分
  * @details 車輪エンコーダを混ぜたオドメトリは使わず、車体中心の鉛直Z軸だけを
  *          使う。同じセンサー更新を二重積分せず、逆向きの回頭は差し引く。
  * @param[in] p_input 現在の追従入力
@@ -316,7 +315,7 @@ LOCAL void sound_follow_spin_yaw_update(const sound_follow_input_t * p_input, UW
 }
 
 /** =================================================================*
- * @brief  残ヨーに応じたその場旋回RPM更新
+ * @brief  残ヨーに応じた最小並進回頭RPM更新
  * @details 目標へ近づいたら減速し、100 ms制御周期による行き過ぎを抑える。
  * ================================================================= */
 LOCAL void sound_follow_spin_command_update(void) {
@@ -396,6 +395,17 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
         controller.link_stable_ms = 0U;
         controller.quiet_elapsed_ms = 0U;
         sound_follow_state_enter(CPU0_THINK_STATE_WAIT_LINK);
+    } else if (p_input->arrived) {
+        if (CPU0_THINK_STATE_ARRIVED != controller.state) {
+            sound_follow_state_enter(CPU0_THINK_STATE_ARRIVED);
+        }
+    } else if (p_input->arrival_verify) {
+        if (CPU0_THINK_STATE_ARRIVAL_VERIFY != controller.state) {
+            sound_follow_state_enter(CPU0_THINK_STATE_ARRIVAL_VERIFY);
+        }
+    } else if ((CPU0_THINK_STATE_ARRIVAL_VERIFY == controller.state) ||
+               (CPU0_THINK_STATE_ARRIVED == controller.state)) {
+        sound_follow_state_enter(CPU0_THINK_STATE_LISTEN);
     } else if (CPU0_THINK_STATE_WAIT_LINK == controller.state) {
         controller.link_stable_ms += elapsed_ms;
         if (controller.link_stable_ms >= CPU0_SOUND_LINK_STABLE_MS) {
@@ -427,7 +437,7 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
             } else {
                 controller.trigger_elapsed_ms += elapsed_ms;
                 if (controller.trigger_elapsed_ms >= CPU0_SOUND_DOA_SETTLE_MS) {
-                    sound_follow_doa_push(sound_follow_relative_angle(p_input->observation.doa_deg));
+                    sound_follow_doa_push(sound_follow_doa_to_relative(p_input->observation.doa_deg));
                 }
             }
 
@@ -453,6 +463,20 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
         } else if (CPU0_THINK_STATE_MOVE_STEP == controller.state) {
             /* S4: 走行中も音源を追跡し、連続追従を行う（ながら動作） */
             BOOL const sound_allowed = !p_input->match_required || p_input->target_sound_matched;
+            if (p_input->navigation_target_valid) {
+                /* navigation bearingは操舵角の更新にのみ使用し、spin turnは発動しない。
+                 * bearingが後方を示しても前進しながら最大旋回で追従する。推定精度が
+                 * 低い段階で不正なspin turnを防止する。 */
+                H clamped_bearing = p_input->navigation_bearing_deg;
+                if (clamped_bearing > CPU0_SOUND_STEERING_MAX_DEG) {
+                    clamped_bearing = CPU0_SOUND_STEERING_MAX_DEG;
+                } else if (clamped_bearing < -CPU0_SOUND_STEERING_MAX_DEG) {
+                    clamped_bearing = -CPU0_SOUND_STEERING_MAX_DEG;
+                }
+                controller.desired_steering_deg = sound_follow_steering_from_doa(clamped_bearing);
+                controller.desired_is_spin_turn = FALSE;
+                controller.quiet_elapsed_ms = 0U;
+            }
             if (p_input->new_observation) {
                 BOOL const usable = sound_follow_observation_usable(&p_input->observation);
                 BOOL const loud = p_input->observation.level_dbfs_x100 >= CPU0_SOUND_TRIGGER_DBFS_X100;
@@ -460,7 +484,7 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
 
                 if (usable && loud && (0U != p_input->observation.vad) && sound_allowed) {
                     /* 有効音源の受信中: DoA履歴を更新し操舵角へ追従 */
-                    sound_follow_doa_push(sound_follow_relative_angle(p_input->observation.doa_deg));
+                    sound_follow_doa_push(sound_follow_doa_to_relative(p_input->observation.doa_deg));
                     H mean_doa_deg = 0;
                     if (sound_follow_doa_stable(&mean_doa_deg)) {
                         sound_follow_motion_from_doa(mean_doa_deg);
@@ -471,6 +495,33 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
                 }
             } else {
                 controller.quiet_elapsed_ms += elapsed_ms;
+            }
+
+            if ((controller.quiet_elapsed_ms > 0U) && !p_input->navigation_target_valid) {
+                /* 静音中: 直前の大舵角による円運動・壁突進を防ぐため、操舵角を徐々に0°へ復元 */
+                if (controller.desired_steering_deg > 0) {
+                    controller.desired_steering_deg = (controller.desired_steering_deg > 3) ?
+                        (H) (controller.desired_steering_deg - 3) : 0;
+                } else if (controller.desired_steering_deg < 0) {
+                    controller.desired_steering_deg = (controller.desired_steering_deg < -3) ?
+                        (H) (controller.desired_steering_deg + 3) : 0;
+                }
+                /* 舵角復元に合わせて左右RPMも直進値へ戻す */
+                H const cur_steer = controller.desired_steering_deg;
+                H left_rpm = CPU0_SOUND_MOVE_LEFT_RPM;
+                H right_rpm = CPU0_SOUND_MOVE_RIGHT_RPM;
+                W const steer_mag = sound_follow_abs_i16(cur_steer);
+                if (cur_steer > 0) {
+                    W const rpm_range = (W) CPU0_SOUND_MOVE_RIGHT_RPM - CPU0_SOUND_TURN_INNER_RPM;
+                    right_rpm = (H) ((W) CPU0_SOUND_MOVE_RIGHT_RPM -
+                                     ((rpm_range * steer_mag) / CPU0_SOUND_STEERING_MAX_DEG));
+                } else if (cur_steer < 0) {
+                    W const rpm_range = (W) CPU0_SOUND_MOVE_LEFT_RPM - CPU0_SOUND_TURN_INNER_RPM;
+                    left_rpm = (H) ((W) CPU0_SOUND_MOVE_LEFT_RPM -
+                                    ((rpm_range * steer_mag) / CPU0_SOUND_STEERING_MAX_DEG));
+                }
+                controller.desired_left_rpm = left_rpm;
+                controller.desired_right_rpm = right_rpm;
             }
 
             /* 音源消失判定: 静音が規定時間継続したら減速停止へ遷移 */

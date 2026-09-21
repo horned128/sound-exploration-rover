@@ -63,7 +63,7 @@ LOCAL float smooth_planner_rate_limit(float target, float current, float max_cha
 /** =================================================================*
  * @brief  滑らかな操舵角と速度スケールを算出
  * @details ToFの斥力と目標方位の引力を合成し、操舵角・速度の変化率を制限する。
- *          全チャネル無効またはハード停止距離未満では走行速度をゼロにする。
+ *          全チャネル無効時だけ安全停止し、近接距離だけでは停止しない。
  * @param[in] p_input 観測値と直前の出力
  * @param[out] p_output 回避計画結果
  * ================================================================= */
@@ -79,17 +79,12 @@ EXPORT void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
 
     /* 有効ToFチャネルの確認と幾何クリアランス計算 */
     BOOL any_valid = FALSE;
-    BOOL hard_stop_triggered = FALSE;
     float d[3];
 
     for (UW i = 0U; i < 3U; i++) {
         if (p_input->tof_valid[i]) {
             any_valid = TRUE;
             d[i] = p_input->tof_distance_mm[i];
-            /* 250mm未満の近接障害物は即時ハード停止 (I1) */
-            if (d[i] < SMOOTH_PLANNER_HARD_STOP_MM) {
-                hard_stop_triggered = TRUE;
-            }
         } else {
             /* 無効時は遠方障害物なしとみなす (A-3: 0mmを入れない) */
             d[i] = SMOOTH_PLANNER_FAR_DISTANCE_MM;
@@ -98,7 +93,13 @@ EXPORT void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
 
     /* 全センサ無効時は安全停止 (S6) */
     if (!any_valid) {
-        hard_stop_triggered = TRUE;
+        p_output->is_blocked = TRUE;
+        p_output->speed_scale = 0.0f;
+        /* 停止時も操舵角は急変させずレート制限を適用して維持 */
+        p_output->steering_deg = smooth_planner_rate_limit(p_input->current_steering_deg,
+                                                           p_input->current_steering_deg,
+                                                           max_steer_step);
+        return;
     }
 
     /* 幾何クリアランス記録 (車体中心原点からの距離) */
@@ -109,16 +110,6 @@ EXPORT void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
     p_output->right_clearance_mm =
         sqrtf((smooth_planner_sensor_x[2] + d[2]) * (smooth_planner_sensor_x[2] + d[2]) +
               smooth_planner_sensor_y[2] * smooth_planner_sensor_y[2]);
-
-    if (hard_stop_triggered) {
-        p_output->is_blocked = TRUE;
-        p_output->speed_scale = 0.0f;
-        /* 停止時も操舵角は急変させずレート制限を適用して維持 */
-        p_output->steering_deg = smooth_planner_rate_limit(p_input->current_steering_deg,
-                                                           p_input->current_steering_deg,
-                                                           max_steer_step);
-        return;
-    }
 
     p_output->is_blocked = FALSE;
 
@@ -138,7 +129,8 @@ EXPORT void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
     float rep_x = 0.0f;
     float rep_y = 0.0f;
     float const d_inf = SMOOTH_PLANNER_INFLUENCE_DISTANCE_MM;
-    float const d_min = SMOOTH_PLANNER_HARD_STOP_MM;
+    /* 近接しても停止させず、斥力だけを最大値へ飽和させる。 */
+    float const d_min = 0.0f;
 
     /* 左ToF (y = -90mm): 近づくと右(+y)へ押す */
     if (p_input->tof_valid[0] && (d[0] < d_inf)) {
@@ -220,9 +212,8 @@ EXPORT void smooth_avoidance_plan(const smooth_avoidance_input_t * p_input,
     if (min_front_d >= SMOOTH_PLANNER_RECOVER_CLEAR_MM) {
         target_speed = 1.0f;
     } else {
-        /* 250mm〜650mmで線形減速 */
-        float const ratio = (min_front_d - SMOOTH_PLANNER_HARD_STOP_MM) /
-                            (SMOOTH_PLANNER_RECOVER_CLEAR_MM - SMOOTH_PLANNER_HARD_STOP_MM);
+        /* 0mm〜650mmで線形減速し、最小走行速度を維持する。 */
+        float const ratio = min_front_d / SMOOTH_PLANNER_RECOVER_CLEAR_MM;
         target_speed = SMOOTH_PLANNER_MIN_SPEED_SCALE +
                        (1.0f - SMOOTH_PLANNER_MIN_SPEED_SCALE) *
                        smooth_planner_clampf(ratio, 0.0f, 1.0f);

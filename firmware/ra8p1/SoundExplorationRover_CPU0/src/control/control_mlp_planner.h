@@ -15,8 +15,7 @@ extern "C" {
 #define CONTROL_MLP_INPUT_DIMENSION         (10U)           /**< 入力テンソル次元数 */
 #define CONTROL_MLP_OUTPUT_DIMENSION        (2U)            /**< 出力テンソル次元数 */
 #define CONTROL_MLP_MAX_STEERING_DEG        (45.0f)         /**< 最大操舵角 [deg] */
-#define CONTROL_MLP_CRITICAL_DISTANCE_MM    (150.0f)        /**< 緊急フォールバック距離 [mm] */
-#define CONTROL_MLP_HARD_STOP_DISTANCE_MM   (250.0f)        /**< ハード停止距離 [mm] */
+#define CONTROL_MLP_CRITICAL_DISTANCE_MM    (150.0f)        /**< 正面衝突判定はルール制御側で実施 [mm] */
 #define CONTROL_MLP_FAR_DISTANCE_MM         (4000.0f)       /**< 無効時最大距離 [mm] */
 #define CONTROL_MLP_MAX_STEER_RATE_DPS      (90.0f)         /**< 最大操舵角変化率 [deg/s] */
 #define CONTROL_MLP_MAX_ACCEL_PER_SEC       (1.5f)          /**< 最大速度スケール変化率 [/s] */
@@ -26,7 +25,7 @@ extern "C" {
 typedef struct st_control_mlp_output {
     float steering_deg;                                     /**< 決定操舵角 [-45, +45] */
     float speed_scale;                                      /**< 決定速度スケール [0.0, 1.0] */
-    BOOL  is_blocked;                                       /**< ハード停止状態 */
+    BOOL  is_blocked;                                       /**< 推論結果が停止スケールの状態 */
     BOOL  emergency_stop;                                   /**< 非常停止要求 */
     BOOL  fallback_required;                                /**< ルールベースフォールバック要求 */
 } control_mlp_output_t;

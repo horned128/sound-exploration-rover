@@ -24,6 +24,7 @@ CONTROLLER_SOURCES = (
     CPU0_SOURCE_ROOT / "services/acoustic_identifier.c",
     CPU0_SOURCE_ROOT / "services/background_model.c",
     CPU0_SOURCE_ROOT / "services/odometry.c",
+    CPU0_SOURCE_ROOT / "services/sound_source_localizer.c",
     SHIM_ROOT / "tflm_runtime_shim.c",
 )
 

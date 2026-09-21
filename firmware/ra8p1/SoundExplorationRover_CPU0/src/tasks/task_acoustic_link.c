@@ -35,6 +35,7 @@ LOCAL void task_acoustic_link_control_complete(const usb_event_info_t * p_event_
 LOCAL fsp_err_t task_acoustic_link_read_start(void);        /* USB Bulk IN開始 */
 LOCAL fsp_err_t task_acoustic_link_actuator_telemetry_start(void); /* CPU1診断Bulk OUT開始 */
 LOCAL fsp_err_t task_acoustic_link_pose_telemetry_start(void); /* オドメトリ診断Bulk OUT開始 */
+LOCAL fsp_err_t task_acoustic_link_nav_diagnostics_start(void); /* 音源ナビ診断Bulk OUT開始 */
 LOCAL fsp_err_t task_acoustic_link_telemetry_start(void);   /* USB Bulk OUT開始 */
 LOCAL void task_acoustic_link_receive(UW length);           /* USB受信データ処理 */
 LOCAL void task_acoustic_link_frame_handle(const acoustic_frame_t * p_frame); /* 正常フレーム反映 */
@@ -65,6 +66,7 @@ LOCAL BOOL audio_write_pending;                             /**< Bulk OUT要求�
 LOCAL UW audio_write_started_at_ms;                         /**< Bulk OUT要求開始時刻 */
 LOCAL BOOL audio_actuator_telemetry_pending;                /**< CPU1診断送信待ち */
 LOCAL BOOL audio_pose_telemetry_pending;                    /**< オドメトリ診断送信待ち */
+LOCAL BOOL audio_nav_diagnostics_pending;                   /**< 音源ナビ診断送信待ち */
 LOCAL BOOL audio_control_pending;                           /**< CDC class request実行中 */
 LOCAL BOOL audio_sequence_valid;                            /**< sequence初回受信済み */
 LOCAL BOOL audio_boot_id_valid;                             /**< boot ID初回受信済み */
@@ -76,9 +78,11 @@ LOCAL UW audio_configured_at_ms;                            /**< USB列挙時刻
 LOCAL UW audio_observation_at_ms;                           /**< 最終観測受信時刻 */
 LOCAL UW audio_last_sequence;                               /**< 最終受信sequence */
 LOCAL UW audio_observation_sequence;                        /**< 最終観測sequence */
+LOCAL BOOL audio_observation_sequence_valid;                /**< 観測専用sequence受信済み */
 LOCAL UW audio_telemetry_sequence;                          /**< 診断送信sequence */
 LOCAL UW audio_actuator_telemetry_sequence;                 /**< CPU1診断送信sequence */
 LOCAL UW audio_pose_telemetry_sequence;                     /**< オドメトリ診断送信sequence */
+LOCAL UW audio_nav_diagnostics_sequence;                    /**< 音源ナビ診断送信sequence */
 LOCAL UW audio_last_telemetry_ms;                           /**< 最終診断送信要求時刻 */
 LOCAL UW audio_actuator_status_at_ms;                       /**< CPU1状態最終更新時刻 */
 LOCAL UW audio_actuator_status_sequence;                    /**< CPU1状態最終sequence */
@@ -115,6 +119,14 @@ EXPORT volatile UW g_task_acoustic_link_frame_count;        /**< 正常フレー
 EXPORT volatile UW g_task_acoustic_link_crc_error_count;    /**< CRC異常数 */
 EXPORT volatile UW g_task_acoustic_link_format_error_count; /**< 形式異常数 */
 EXPORT volatile UW g_task_acoustic_link_sequence_drop_count;/**< 逆行sequence数 */
+EXPORT volatile UW g_task_acoustic_link_observation_rx_count; /**< 有効観測受信数 */
+EXPORT volatile UW g_task_acoustic_link_observation_skipped_count; /**< 観測欠落数 */
+EXPORT volatile UW g_task_acoustic_link_observation_duplicate_count; /**< 観測重複数 */
+EXPORT volatile UW g_task_acoustic_link_invalid_observation_count; /**< 無効観測数 */
+EXPORT volatile UW g_task_acoustic_link_observation_last_interval_ms; /**< 直近観測間隔[ms] */
+EXPORT volatile UW g_task_acoustic_link_observation_min_interval_ms; /**< 最小観測間隔[ms] */
+EXPORT volatile UW g_task_acoustic_link_observation_max_interval_ms; /**< 最大観測間隔[ms] */
+EXPORT volatile UW g_task_acoustic_link_observation_source_uptime_ms; /**< ESP32S3観測時刻[ms] */
 /**< 特徴量イベント完成数 */
 EXPORT volatile UW g_task_acoustic_link_feature_complete_count;
 EXPORT volatile UW g_task_acoustic_link_feature_drop_count; /**< 特徴量イベント破棄数 */
@@ -155,6 +167,7 @@ EXPORT app_fault_t task_acoustic_link_create(void) {
     audio_write_pending = FALSE;
     audio_write_started_at_ms = 0U;
     audio_actuator_telemetry_pending = FALSE;
+    audio_nav_diagnostics_pending = FALSE;
     audio_control_pending = FALSE;
     audio_now_ms = 0U;
     audio_last_recovery_ms = 0U;
@@ -168,6 +181,14 @@ EXPORT app_fault_t task_acoustic_link_create(void) {
     g_task_acoustic_link_crc_error_count = 0U;
     g_task_acoustic_link_format_error_count = 0U;
     g_task_acoustic_link_sequence_drop_count = 0U;
+    g_task_acoustic_link_observation_rx_count = 0U;
+    g_task_acoustic_link_observation_skipped_count = 0U;
+    g_task_acoustic_link_observation_duplicate_count = 0U;
+    g_task_acoustic_link_invalid_observation_count = 0U;
+    g_task_acoustic_link_observation_last_interval_ms = 0U;
+    g_task_acoustic_link_observation_min_interval_ms = 0U;
+    g_task_acoustic_link_observation_max_interval_ms = 0U;
+    g_task_acoustic_link_observation_source_uptime_ms = 0U;
     g_task_acoustic_link_feature_complete_count = 0U;
     g_task_acoustic_link_feature_drop_count = 0U;
     g_task_acoustic_link_feature_generation = 0U;
@@ -253,6 +274,7 @@ LOCAL void task_acoustic_link_link_reset(void) {
     audio_write_started_at_ms = 0U;
     audio_actuator_telemetry_pending = FALSE;
     audio_pose_telemetry_pending = FALSE;
+    audio_nav_diagnostics_pending = FALSE;
     audio_control_pending = FALSE;
     audio_device_address = 0U;
     audio_configured_at_ms = audio_now_ms;
@@ -260,6 +282,7 @@ LOCAL void task_acoustic_link_link_reset(void) {
     audio_telemetry_sequence = 0U;
     audio_actuator_telemetry_sequence = 0U;
     audio_pose_telemetry_sequence = 0U;
+    audio_nav_diagnostics_sequence = 0U;
     audio_last_telemetry_ms = audio_now_ms;
     audio_actuator_status_at_ms = audio_now_ms;
     audio_actuator_status_sequence = 0U;
@@ -370,9 +393,12 @@ LOCAL void task_acoustic_link_observation_reset(void) {
     g_task_acoustic_link_observation_age_ms = UINT32_MAX;
     memset((void *) &g_task_acoustic_link_observation, 0, sizeof(g_task_acoustic_link_observation));
     g_task_acoustic_link_observation.doa_deg = ACOUSTIC_PROTOCOL_DOA_INVALID;
+    g_task_acoustic_link_observation.raw_doa_deg = ACOUSTIC_PROTOCOL_DOA_INVALID;
     memset(&audio_health, 0, sizeof(audio_health));
     audio_observation_at_ms = audio_now_ms;
     audio_observation_sequence = 0U;
+    audio_observation_sequence_valid = FALSE;
+    g_task_acoustic_link_observation_source_uptime_ms = 0U;
 }
 
 /** =================================================================*
@@ -485,6 +511,7 @@ LOCAL BOOL task_acoustic_link_write_in_progress(void) {
             audio_write_pending = FALSE;
             audio_actuator_telemetry_pending = FALSE;
             audio_pose_telemetry_pending = FALSE;
+            audio_nav_diagnostics_pending = FALSE;
             g_task_acoustic_link_last_error = FSP_ERR_TIMEOUT;
             return FALSE;
         }
@@ -587,7 +614,94 @@ LOCAL fsp_err_t task_acoustic_link_pose_telemetry_start(void) {
         audio_write_pending = TRUE;
         audio_write_started_at_ms = audio_now_ms;
         audio_pose_telemetry_pending = FALSE;
+        audio_nav_diagnostics_pending = TRUE;
         audio_pose_telemetry_sequence++;
+    } else if (FSP_ERR_USB_BUSY == err) {
+        g_task_acoustic_link_telemetry_busy_count++;
+    }
+    return err;
+}
+
+/** =================================================================*
+ * @brief  音源位置・到着・回避診断情報のUSB Bulk OUT開始
+ * @return FSPエラーコード
+ * ================================================================= */
+LOCAL fsp_err_t task_acoustic_link_nav_diagnostics_start(void) {
+    if (!g_task_acoustic_link_usb_configured || (CPU0_AUDIO_USB_STATE_READY != g_task_acoustic_link_usb_state) ||
+        (0U == audio_device_address)) {
+        return FSP_ERR_NOT_OPEN;
+    }
+    if (task_acoustic_link_write_in_progress()) {
+        return FSP_SUCCESS;
+    }
+
+    UB flags = 0U;
+    if (g_task_think_raw_doa_deg < 360U) {
+        flags |= ACOUSTIC_NAV_FLAG_RAW_DOA_VALID;
+    }
+    if (g_task_think_filtered_doa_deg < 360U) {
+        flags |= ACOUSTIC_NAV_FLAG_FILTERED_DOA_VALID;
+    }
+    if (g_task_think_source_position_valid) {
+        flags |= ACOUSTIC_NAV_FLAG_SOURCE_VALID;
+    }
+    if (g_task_think_localization_geometry_valid) {
+        flags |= ACOUSTIC_NAV_FLAG_GEOMETRY_VALID;
+    }
+    if (g_task_think_navigation_target_valid) {
+        flags |= ACOUSTIC_NAV_FLAG_TARGET_VALID;
+    }
+    if (g_task_think_arrival_candidate) {
+        flags |= ACOUSTIC_NAV_FLAG_ARRIVAL_CANDIDATE;
+    }
+    if (CPU0_SOUND_ARRIVAL_ARRIVED == g_task_think_arrival_state) {
+        flags |= ACOUSTIC_NAV_FLAG_ARRIVED;
+    }
+    if ((CPU0_THINK_STATE_SPIN_PREP == g_task_think_state) ||
+        (CPU0_THINK_STATE_SPIN_STEP == g_task_think_state)) {
+        flags |= ACOUSTIC_NAV_FLAG_MIN_TRANSLATION_TURN;
+    }
+
+    acoustic_nav_diagnostics_t const diagnostics = {
+        .schema_version = 1U,
+        .flags = flags,
+        .doa_confidence = g_task_think_doa_confidence,
+        .arrival_state = (UB) g_task_think_arrival_state,
+        .observation_sequence = g_task_think_observation_sequence,
+        .raw_doa_deg = g_task_think_raw_doa_deg,
+        .filtered_doa_deg = g_task_think_filtered_doa_deg,
+        .rover_x_mm = g_task_think_rover_x_mm,
+        .rover_y_mm = g_task_think_rover_y_mm,
+        .rover_heading_mrad = g_task_think_rover_heading_mrad,
+        .source_x_mm = g_task_think_source_x_mm,
+        .source_y_mm = g_task_think_source_y_mm,
+        .source_range_mm = g_task_think_source_range_mm,
+        .source_bearing_deg = g_task_think_source_bearing_deg,
+        .source_confidence = g_task_think_source_confidence,
+        .observation_count = g_task_think_localization_observation_count,
+        .localization_residual_mm = g_task_think_localization_residual_mm,
+        .crossing_angle_deg = g_task_think_localization_crossing_deg,
+        .baseline_mm = g_task_think_localization_baseline_mm,
+        .source_position_shift_mm = g_task_think_source_position_shift_mm,
+        .arrival_confirm_count = g_task_think_arrival_confirm_count,
+        .sensor_rule = (UB) g_task_think_sensor_rule,
+        .think_state = (UB) g_task_think_state,
+        .reserved = 0U,
+        .autonomous_backup_count = g_task_think_autonomous_backup_count,
+    };
+    size_t const length = acoustic_protocol_encode_nav_diagnostics(audio_nav_diagnostics_sequence, audio_now_ms,
+                                                                    &diagnostics, audio_tx_buffer,
+                                                                    sizeof(audio_tx_buffer));
+    if (0U == length) {
+        return FSP_ERR_INVALID_SIZE;
+    }
+
+    fsp_err_t const err = g_usb_on_usb.write(&g_basic0_ctrl, audio_tx_buffer, (UW) length, audio_device_address);
+    if (FSP_SUCCESS == err) {
+        audio_write_pending = TRUE;
+        audio_write_started_at_ms = audio_now_ms;
+        audio_nav_diagnostics_pending = FALSE;
+        audio_nav_diagnostics_sequence++;
     } else if (FSP_ERR_USB_BUSY == err) {
         g_task_acoustic_link_telemetry_busy_count++;
     }
@@ -612,6 +726,9 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
     }
     if (audio_pose_telemetry_pending) {
         return task_acoustic_link_pose_telemetry_start();
+    }
+    if (audio_nav_diagnostics_pending) {
+        return task_acoustic_link_nav_diagnostics_start();
     }
     if ((audio_now_ms - audio_last_telemetry_ms) < CPU0_AUDIO_TELEMETRY_PERIOD_MS) {
         return FSP_SUCCESS;
@@ -817,7 +934,8 @@ LOCAL void task_acoustic_link_frame_handle(const acoustic_frame_t * p_frame) {
             return;
         }
 
-        UW const required = ACOUSTIC_CAPABILITY_DOA | ACOUSTIC_CAPABILITY_VAD | ACOUSTIC_CAPABILITY_LEVEL;
+        UW const required = ACOUSTIC_CAPABILITY_DOA | ACOUSTIC_CAPABILITY_VAD | ACOUSTIC_CAPABILITY_LEVEL |
+                            ACOUSTIC_CAPABILITY_DOA_DIAGNOSTICS;
         audio_hello = hello;
         audio_boot_id = hello.boot_id;
         audio_boot_id_valid = TRUE;
@@ -831,11 +949,43 @@ LOCAL void task_acoustic_link_frame_handle(const acoustic_frame_t * p_frame) {
 
     if (ACOUSTIC_MESSAGE_OBSERVATION == p_frame->type) {
         acoustic_observation_t observation;
-        if (acoustic_protocol_decode_observation(p_frame, &observation) && (observation.doa_deg < 360U)) {
-            g_task_acoustic_link_observation = observation;
-            audio_observation_sequence = p_frame->sequence;
-            audio_observation_at_ms = audio_now_ms;
+        if (!acoustic_protocol_decode_observation(p_frame, &observation) || (observation.doa_deg >= 360U) ||
+            (observation.raw_doa_deg >= 360U) || (observation.doa_confidence > 100U)) {
+            g_task_acoustic_link_invalid_observation_count++;
+            g_task_acoustic_link_format_error_count++;
+            return;
         }
+
+        if (audio_observation_sequence_valid) {
+            W const delta = (W) (observation.sample_sequence - audio_observation_sequence);
+            if (0 == delta) {
+                g_task_acoustic_link_observation_duplicate_count++;
+                return;
+            }
+            if (delta < 0) {
+                g_task_acoustic_link_sequence_drop_count++;
+                return;
+            }
+            if (delta > 1) {
+                g_task_acoustic_link_observation_skipped_count += (UW) (delta - 1);
+            }
+
+            UW const interval_ms = audio_now_ms - audio_observation_at_ms;
+            g_task_acoustic_link_observation_last_interval_ms = interval_ms;
+            if ((0U == g_task_acoustic_link_observation_min_interval_ms) ||
+                (interval_ms < g_task_acoustic_link_observation_min_interval_ms)) {
+                g_task_acoustic_link_observation_min_interval_ms = interval_ms;
+            }
+            if (interval_ms > g_task_acoustic_link_observation_max_interval_ms) {
+                g_task_acoustic_link_observation_max_interval_ms = interval_ms;
+            }
+        }
+        g_task_acoustic_link_observation = observation;
+        audio_observation_sequence = observation.sample_sequence;
+        audio_observation_sequence_valid = TRUE;
+        audio_observation_at_ms = audio_now_ms;
+        g_task_acoustic_link_observation_source_uptime_ms = p_frame->uptime_ms;
+        g_task_acoustic_link_observation_rx_count++;
     } else if (ACOUSTIC_MESSAGE_HEALTH == p_frame->type) {
         (void) acoustic_protocol_decode_health(p_frame, &audio_health);
     } else if (ACOUSTIC_MESSAGE_FEATURE == p_frame->type) {

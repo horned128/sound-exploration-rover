@@ -10,9 +10,11 @@ from controlsim.invariants import assert_same_sound_outputs, assert_steering_wit
 def usable_loud_observation() -> AcousticObservation:
     return AcousticObservation(
         doa_deg=90,
+        raw_doa_deg=90,
         level_dbfs_x100=-3000,
         peak_dbfs_x100=-2800,
         vad=1,
+        doa_confidence=90,
         xvf_status=ACOUSTIC_XVF_STATUS_READY,
     )
 
@@ -195,3 +197,16 @@ def test_identifier_match_lost_initiates_settle_after_timeout() -> None:
     assert outputs[-1].state in (1, 4, 5)
     assert outputs[-1].left_rpm == 0
     assert outputs[-1].right_rpm == 0
+
+
+def test_arrival_states_stop_without_reporting_emergency_or_obstacle_stop() -> None:
+    trace = [
+        (SoundFollowInput(link_ready=1, motion_allowed=1), 500),
+        (SoundFollowInput(link_ready=1, motion_allowed=1, arrival_verify=1), 50),
+        (SoundFollowInput(link_ready=1, motion_allowed=1, arrived=1), 50),
+    ]
+    outputs = sound_follow_trace(trace)
+    assert outputs[-2].state == 20
+    assert outputs[-1].state == 21
+    assert all(output.left_rpm == output.right_rpm == 0 for output in outputs[-2:])
+    assert all(output.actuator_enable and not output.emergency_stop for output in outputs[-2:])

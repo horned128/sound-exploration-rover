@@ -19,6 +19,14 @@ static rover_motion_target_t target;
 bsp_leds_t g_bsp_leds={0,NULL};
 volatile UW g_task_acoustic_link_feature_generation;
 volatile UW g_task_infer_feature_generation;
+void odometry_service_get_pose(odometry_pose_t *pose) {
+    *pose=(odometry_pose_t){.valid=TRUE};
+}
+void sound_source_localizer_init(void) {}
+void sound_source_localizer_step(const sound_source_localizer_input_t *input,
+                                 sound_source_localizer_output_t *output) {
+    (void)input;*output=(sound_source_localizer_output_t){0};
+}
 static fsp_err_t pin_read(void *ctrl,bsp_io_port_pin_t pin,bsp_io_level_t *level) {
     (void)ctrl;(void)pin;*level=BSP_IO_LEVEL_HIGH;return FSP_SUCCESS;
 }
@@ -99,7 +107,8 @@ ER task_sensor_snapshot_get(sensor_snapshot_t *out) {
 ER task_acoustic_link_snapshot_get(task_acoustic_link_snapshot_t *out) {
     *out=(task_acoustic_link_snapshot_t){
         .usb_configured=TRUE,.hello_received=TRUE,.observation_received=TRUE,.observation_sequence=loops+1,
-        .observation={.xvf_status=ACOUSTIC_XVF_STATUS_READY,.level_dbfs_x100=-2000,.vad=1},
+        .observation={.doa_deg=0,.raw_doa_deg=0,.level_dbfs_x100=-2000,.vad=1,
+                      .doa_confidence=90,.xvf_status=ACOUSTIC_XVF_STATUS_READY},
     };
     if (stage==2 && ++recovery_loops<=20) {
         out->observation.vad=0;

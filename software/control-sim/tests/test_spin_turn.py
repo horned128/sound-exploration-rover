@@ -16,9 +16,11 @@ STATE_SPIN_STEP = 18
 def loud_observation(doa_deg: int) -> AcousticObservation:
     return AcousticObservation(
         doa_deg=doa_deg,
+        raw_doa_deg=doa_deg,
         level_dbfs_x100=-3000,
         peak_dbfs_x100=-2800,
         vad=1,
+        doa_confidence=90,
         xvf_status=ACOUSTIC_XVF_STATUS_READY,
     )
 
@@ -27,11 +29,15 @@ def stable_trace(
     doa_deg: int, samples: int, *, gyro_z_dps_x10: int | None = None
 ) -> list[tuple[SoundFollowInput, int]]:
     observation = loud_observation(doa_deg)
-    relative_doa_deg = -doa_deg
-    if relative_doa_deg < -180:
+    relative_doa_deg = doa_deg
+    if relative_doa_deg > 180:
+        relative_doa_deg -= 360
+    elif relative_doa_deg < -180:
         relative_doa_deg += 360
     if gyro_z_dps_x10 is None:
-        gyro_z_dps_x10 = 100 if relative_doa_deg > 0 else -100
+        # Current vehicle wiring reports the opposite Z sign from the
+        # logical spin direction used by the controller.
+        gyro_z_dps_x10 = -100 if relative_doa_deg > 0 else 100
     trace = [(SoundFollowInput(link_ready=1, motion_allowed=1), 500)]
     for update_count in range(1, samples + 1):
         trace.append(
@@ -74,14 +80,14 @@ def test_rear_sound_uses_gyro_target_and_reduces_rpm_near_it() -> None:
     assert 10 <= len(spin_outputs) < 22
     assert all(output.is_spin_turn for output in spin_outputs)
     assert all(output.left_rpm == -output.right_rpm for output in spin_outputs)
-    assert any(abs(output.left_rpm) == 300 for output in spin_outputs)
-    assert any(abs(output.left_rpm) == 220 for output in spin_outputs)
+    assert any(abs(output.left_rpm) == 100 for output in spin_outputs)
+    assert any(abs(output.left_rpm) == 85 for output in spin_outputs)
     assert any(output.state == STATE_SETTLE for output in outputs[spin_step_index + 1 :])
 
 
 def test_rear_sound_on_each_side_selects_opposite_spin_directions() -> None:
-    clockwise_outputs = sound_follow_trace(stable_trace(210, 17))
-    counterclockwise_outputs = sound_follow_trace(stable_trace(135, 17))
+    clockwise_outputs = sound_follow_trace(stable_trace(135, 17))
+    counterclockwise_outputs = sound_follow_trace(stable_trace(210, 17))
 
     clockwise = next(output for output in clockwise_outputs if output.state == STATE_SPIN_STEP)
     counterclockwise = next(output for output in counterclockwise_outputs if output.state == STATE_SPIN_STEP)
@@ -90,13 +96,13 @@ def test_rear_sound_on_each_side_selects_opposite_spin_directions() -> None:
 
 
 def test_rear_sound_stops_and_reports_no_progress_when_gyro_confirms_no_turn() -> None:
-    outputs = sound_follow_trace(stable_trace(135, 25, gyro_z_dps_x10=0))
+    outputs = sound_follow_trace(stable_trace(135, 40, gyro_z_dps_x10=0))
 
     no_progress = next(output for output in outputs if output.state == 19)
     assert no_progress.is_spin_turn
     assert no_progress.left_rpm == 0
     assert no_progress.right_rpm == 0
-    assert len([output for output in outputs if output.state == STATE_SPIN_STEP]) == 5
+    assert len([output for output in outputs if output.state == STATE_SPIN_STEP]) == 25
 
 
 def test_rear_sound_does_not_double_integrate_a_repeated_gyro_sample() -> None:
@@ -115,7 +121,7 @@ def test_rear_sound_does_not_double_integrate_a_repeated_gyro_sample() -> None:
             ),
             100,
         )
-        for _ in range(12)
+        for _ in range(60)
     )
 
     outputs = sound_follow_trace(trace)
@@ -125,7 +131,7 @@ def test_rear_sound_does_not_double_integrate_a_repeated_gyro_sample() -> None:
 
 def test_successful_rear_spin_relistens_without_waiting_for_silence() -> None:
     # 後方の連続音では、ジャイロ目標または時間上限の後に静音待ちへ入らずDoA測定へ戻る。
-    outputs = sound_follow_trace(stable_trace(135, 80, gyro_z_dps_x10=-100))
+    outputs = sound_follow_trace(stable_trace(135, 80, gyro_z_dps_x10=-500))
     spin_start_indices = [
         index
         for index, output in enumerate(outputs)

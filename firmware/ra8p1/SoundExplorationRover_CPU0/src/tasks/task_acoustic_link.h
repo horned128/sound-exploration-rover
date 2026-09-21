@@ -54,6 +54,14 @@ IMPORT volatile UW g_task_acoustic_link_frame_count;        /**< 正常フレー
 IMPORT volatile UW g_task_acoustic_link_crc_error_count;    /**< CRC異常数（Live Watch用） */
 IMPORT volatile UW g_task_acoustic_link_format_error_count; /**< 形式異常数（Live Watch用） */
 IMPORT volatile UW g_task_acoustic_link_sequence_drop_count;/**< 逆行sequence数（Live Watch用） */
+IMPORT volatile UW g_task_acoustic_link_observation_rx_count; /**< 有効観測受信数 */
+IMPORT volatile UW g_task_acoustic_link_observation_skipped_count; /**< 観測欠落数 */
+IMPORT volatile UW g_task_acoustic_link_observation_duplicate_count; /**< 観測重複数 */
+IMPORT volatile UW g_task_acoustic_link_invalid_observation_count; /**< 無効観測数 */
+IMPORT volatile UW g_task_acoustic_link_observation_last_interval_ms; /**< 直近観測間隔[ms] */
+IMPORT volatile UW g_task_acoustic_link_observation_min_interval_ms; /**< 最小観測間隔[ms] */
+IMPORT volatile UW g_task_acoustic_link_observation_max_interval_ms; /**< 最大観測間隔[ms] */
+IMPORT volatile UW g_task_acoustic_link_observation_source_uptime_ms; /**< ESP32S3観測時刻[ms] */
 /**< 特徴量完成数 */
 IMPORT volatile UW g_task_acoustic_link_feature_complete_count;
 IMPORT volatile UW g_task_acoustic_link_feature_drop_count; /**< 特徴量イベント破棄数（Live Watch用） */

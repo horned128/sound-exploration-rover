@@ -63,19 +63,18 @@ def test_tof_mask_semantics_independent_of_imu():
     assert not status.hard_stop_veto
 
 
-def test_hard_stop_veto_stops_forward_motion():
-    """I1要件: 250mm未満の障害物で前進阻止 (速度0、actuator_enable=False)。"""
+def test_close_tof_does_not_veto_forward_motion():
+    """距離だけでは停止せず、正面の連続衝突判定を回避制御へ委譲する。"""
     for idx in range(3):
         tof = [1000, 1000, 1000]
-        tof[idx] = 240  # 250mm未満
+        tof[idx] = 240
         snap = make_snapshot(tof_mm=tuple(tof))
         cmd = make_command(left_rpm=120, right_rpm=120)
         arb = safety_arbiter_arbitrate_step(cmd, snap, sensor_fresh=True)
 
-        assert not arb.actuator_enable, f"ToF channel {idx} < 250mm must disable actuator"
-        assert arb.left_rpm == 0
-        assert arb.right_rpm == 0
-        # A-3 / 4-4-3 / I6: 通常vetoでemergency_stopを立てない
+        assert arb.actuator_enable, f"ToF channel {idx} close reading must not veto by distance"
+        assert arb.left_rpm == 120
+        assert arb.right_rpm == 120
         assert not arb.emergency_stop
 
 

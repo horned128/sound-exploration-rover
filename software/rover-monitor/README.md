@@ -34,14 +34,21 @@ uv run main.py
 - BMI270の加速度と角速度
 - 学習モード、MRAM保存データ有無、直近の保存結果
 - 車体を原点とする局所障害物マップ
+- XVF3800のraw / 循環平均DoA、DoA信頼度、複数方位線とオドメトリからの音源位置推定
+- 音源位置の残差・交差角・観測基線、到着候補／確認状態、最小並進回頭の診断
 - ESP32S3 log-melの起動時自己テスト、特徴量生成fps、80フレームリング、
   256-sampleブロックの直近／最大処理時間、I2S overrun
 
 局所障害物マップは、前方を上としてLEFT / CENTER / RIGHTのToF測距値を描画します。自己位置や向きの推定は含まれないため、これはSLAMの地図ではなく、現在の車体周囲を確認するための表示です。
 
-## log-mel実機確認
+音源位置は、CPU0が複数のDoA観測、BMI270の方位、車輪オドメトリを用いて推定します。単一DoAから距離を生成せず、十分な観測基線・交差角・残差が揃わない間は走行目標を無効として表示します。推定位置は累積相対マップ上に水色の`SOURCE`点として描画されます。
 
-ESP32S3を書き込んでRover Monitorを30秒以上動かし、`rover-monitor.log`を保存します。
+ESP32S3からのUDP JSONには、既存の`ROVER_TELEMETRY`に加えてCPU0の`NAV_DIAGNOSTICS`フレーム由来の`navigation`、`arrival`、`escape`オブジェクトが含まれます。`main.py`はJSONを検証・転送するだけなので、追加フィールドのための個別変更は不要です。
+
+## ログ保存とlog-mel実機確認
+
+ESP32S3を書き込んでRover Monitorを30秒以上動かすと、テレメトリが `logs/rover-monitor-YYYYMMDD-HHMMSS.jsonl` （JSON Lines形式）へ自動保存されます。
+画面ヘッダーにも記録中のファイル名が表示されます。
 CPU0が未接続で`cpu_valid:false`の場合も、`esp_audio`診断は記録されます。
 
 | 項目 | 合格条件 |
@@ -52,16 +59,22 @@ CPU0が未接続で`cpu_valid:false`の場合も、`esp_audio`診断は記録さ
 | `esp_audio.log_mel_block_max_us` | I2Sの16 ms読出し周期より短い`16000`未満 |
 | `esp_audio.i2s_overruns` | 計測中に増加しない |
 
-画面の`Log-mel DSP`欄で同じ値を確認できます。詳細解析用にはログファイルをそのまま渡してください。
-ローカルで自動判定する場合は、Rover Monitorを停止してから次を実行します。
+画面の`Log-mel DSP`欄で同じ値を確認できます。詳細解析用には `logs/` 配下の `.jsonl` ファイルをそのまま渡してください。
+ローカルで自動判定する場合は、Rover Monitorを停止してから次を実行します（引数省略時は最新の `.jsonl` を自動検出します）。
 
 ```powershell
-uv run python check_log_mel.py rover-monitor.log
+uv run python check_log_mel.py
+```
+
+特定のログファイルを指定して判定することも可能です。
+
+```powershell
+uv run python check_log_mel.py logs/rover-monitor-20260921-220000.jsonl
 ```
 
 ## MRAM学習結果の実機確認
 
-CPU0とESP32S3を書き込んだ後、EK-RA8P1のSW1を2秒間長押しすると学習を開始する。対象音を1〜5回取り込み、再度SW1を2秒間長押しすると平均プロトタイプをCode MRAMへ保存する。`rover-monitor.log`の`learning`を確認する。
+CPU0とESP32S3を書き込んだ後、EK-RA8P1のSW1を2秒間長押しすると学習を開始する。対象音を1〜5回取り込み、再度SW1を2秒間長押しすると平均プロトタイプをCode MRAMへ保存する。`logs/` の `.jsonl` に記録された `learning` を確認する。
 
 | 項目 | 合格条件 |
 |---|---|

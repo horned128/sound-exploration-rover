@@ -140,13 +140,17 @@ size_t acoustic_protocol_encode_observation(uint32_t sequence, uint32_t uptime_m
 
     uint8_t payload[ACOUSTIC_OBSERVATION_PAYLOAD_SIZE];
     acoustic_write_u16_le(&payload[0], p_observation->doa_deg);
-    acoustic_write_u16_le(&payload[2], (uint16_t) p_observation->level_dbfs_x100);
-    acoustic_write_u16_le(&payload[4], (uint16_t) p_observation->peak_dbfs_x100);
-    payload[6] = p_observation->vad;
-    payload[7] = p_observation->xvf_status;
-    payload[8] = p_observation->audio_flags;
-    payload[9] = p_observation->xvf_raw_status;
-    acoustic_write_u32_le(&payload[10], p_observation->audio_frame_count);
+    acoustic_write_u16_le(&payload[2], p_observation->raw_doa_deg);
+    acoustic_write_u16_le(&payload[4], (uint16_t) p_observation->level_dbfs_x100);
+    acoustic_write_u16_le(&payload[6], (uint16_t) p_observation->peak_dbfs_x100);
+    payload[8] = p_observation->vad;
+    payload[9] = p_observation->doa_confidence;
+    payload[10] = p_observation->xvf_status;
+    payload[11] = p_observation->audio_flags;
+    payload[12] = p_observation->xvf_raw_status;
+    payload[13] = p_observation->reserved;
+    acoustic_write_u32_le(&payload[14], p_observation->audio_frame_count);
+    acoustic_write_u32_le(&payload[18], p_observation->sample_sequence);
 
     return acoustic_protocol_encode(ACOUSTIC_MESSAGE_OBSERVATION, sequence, uptime_ms, payload,
                                     (uint16_t) sizeof(payload), p_output, output_capacity);
@@ -366,6 +370,53 @@ size_t acoustic_protocol_encode_pose_telemetry(uint32_t sequence, uint32_t uptim
 }
 
 /** =================================================================*
+ * @brief  音源位置・到着・回避診断情報を符号化
+ * @param[in] sequence 送信シーケンス
+ * @param[in] uptime_ms CPU0起動後時間
+ * @param[in] p_diagnostics 音源ナビゲーション診断
+ * @param[out] p_output 出力先
+ * @param[in] output_capacity 出力先容量
+ * @return 符号化長。引数不正時は0
+ * ================================================================= */
+size_t acoustic_protocol_encode_nav_diagnostics(uint32_t sequence, uint32_t uptime_ms,
+                                                const acoustic_nav_diagnostics_t * p_diagnostics,
+                                                uint8_t * p_output, size_t output_capacity) {
+    if (NULL == p_diagnostics) {
+        return 0U;
+    }
+
+    uint8_t payload[ACOUSTIC_NAV_DIAGNOSTICS_PAYLOAD_SIZE] = {0};
+    payload[0] = p_diagnostics->schema_version;
+    payload[1] = p_diagnostics->flags;
+    payload[2] = p_diagnostics->doa_confidence;
+    payload[3] = p_diagnostics->arrival_state;
+    acoustic_write_u32_le(&payload[4], p_diagnostics->observation_sequence);
+    acoustic_write_u16_le(&payload[8], p_diagnostics->raw_doa_deg);
+    acoustic_write_u16_le(&payload[10], p_diagnostics->filtered_doa_deg);
+    acoustic_write_u32_le(&payload[12], (uint32_t) p_diagnostics->rover_x_mm);
+    acoustic_write_u32_le(&payload[16], (uint32_t) p_diagnostics->rover_y_mm);
+    acoustic_write_u32_le(&payload[20], (uint32_t) p_diagnostics->rover_heading_mrad);
+    acoustic_write_u32_le(&payload[24], (uint32_t) p_diagnostics->source_x_mm);
+    acoustic_write_u32_le(&payload[28], (uint32_t) p_diagnostics->source_y_mm);
+    acoustic_write_u32_le(&payload[32], p_diagnostics->source_range_mm);
+    acoustic_write_u16_le(&payload[36], (uint16_t) p_diagnostics->source_bearing_deg);
+    payload[38] = p_diagnostics->source_confidence;
+    payload[39] = p_diagnostics->observation_count;
+    acoustic_write_u16_le(&payload[40], p_diagnostics->localization_residual_mm);
+    acoustic_write_u16_le(&payload[42], p_diagnostics->crossing_angle_deg);
+    acoustic_write_u16_le(&payload[44], p_diagnostics->baseline_mm);
+    acoustic_write_u16_le(&payload[46], p_diagnostics->source_position_shift_mm);
+    payload[48] = p_diagnostics->arrival_confirm_count;
+    payload[49] = p_diagnostics->sensor_rule;
+    payload[50] = p_diagnostics->think_state;
+    payload[51] = p_diagnostics->reserved;
+    acoustic_write_u32_le(&payload[52], p_diagnostics->autonomous_backup_count);
+
+    return acoustic_protocol_encode(ACOUSTIC_MESSAGE_NAV_DIAGNOSTICS, sequence, uptime_ms, payload,
+                                    (uint16_t) sizeof(payload), p_output, output_capacity);
+}
+
+/** =================================================================*
  * @brief  PC直結音響AIラボ用の推論snapshotを符号化
  * @details すべての浮動小数値は固定小数点へ縮約し、MCU/PC間で同一の
  *          診断値を扱う。特徴量本体は別のchunk frameで送る。
@@ -529,13 +580,17 @@ bool acoustic_protocol_decode_observation(const acoustic_frame_t * p_frame, acou
     }
 
     p_observation->doa_deg = acoustic_read_u16_le(&p_frame->payload[0]);
-    p_observation->level_dbfs_x100 = (int16_t) acoustic_read_u16_le(&p_frame->payload[2]);
-    p_observation->peak_dbfs_x100 = (int16_t) acoustic_read_u16_le(&p_frame->payload[4]);
-    p_observation->vad = p_frame->payload[6];
-    p_observation->xvf_status = p_frame->payload[7];
-    p_observation->audio_flags = p_frame->payload[8];
-    p_observation->xvf_raw_status = p_frame->payload[9];
-    p_observation->audio_frame_count = acoustic_read_u32_le(&p_frame->payload[10]);
+    p_observation->raw_doa_deg = acoustic_read_u16_le(&p_frame->payload[2]);
+    p_observation->level_dbfs_x100 = (int16_t) acoustic_read_u16_le(&p_frame->payload[4]);
+    p_observation->peak_dbfs_x100 = (int16_t) acoustic_read_u16_le(&p_frame->payload[6]);
+    p_observation->vad = p_frame->payload[8];
+    p_observation->doa_confidence = p_frame->payload[9];
+    p_observation->xvf_status = p_frame->payload[10];
+    p_observation->audio_flags = p_frame->payload[11];
+    p_observation->xvf_raw_status = p_frame->payload[12];
+    p_observation->reserved = p_frame->payload[13];
+    p_observation->audio_frame_count = acoustic_read_u32_le(&p_frame->payload[14]);
+    p_observation->sample_sequence = acoustic_read_u32_le(&p_frame->payload[18]);
     return true;
 }
 
@@ -711,5 +766,46 @@ bool acoustic_protocol_decode_pose_telemetry(const acoustic_frame_t * p_frame,
     p_telemetry->flags = p_frame->payload[30];
     p_telemetry->reserved = p_frame->payload[31];
     p_telemetry->uptime_ms = acoustic_read_u32_le(&p_frame->payload[32]);
+    return true;
+}
+
+/** =================================================================*
+ * @brief  音源位置・到着・回避診断情報を復号
+ * @param[in] p_frame 受信フレーム
+ * @param[out] p_diagnostics 音源ナビゲーション診断
+ * @return フレームが正しい診断情報ならtrue
+ * ================================================================= */
+bool acoustic_protocol_decode_nav_diagnostics(const acoustic_frame_t * p_frame,
+                                             acoustic_nav_diagnostics_t * p_diagnostics) {
+    if ((NULL == p_frame) || (NULL == p_diagnostics) || (ACOUSTIC_MESSAGE_NAV_DIAGNOSTICS != p_frame->type) ||
+        (ACOUSTIC_NAV_DIAGNOSTICS_PAYLOAD_SIZE != p_frame->payload_length)) {
+        return false;
+    }
+
+    p_diagnostics->schema_version = p_frame->payload[0];
+    p_diagnostics->flags = p_frame->payload[1];
+    p_diagnostics->doa_confidence = p_frame->payload[2];
+    p_diagnostics->arrival_state = p_frame->payload[3];
+    p_diagnostics->observation_sequence = acoustic_read_u32_le(&p_frame->payload[4]);
+    p_diagnostics->raw_doa_deg = acoustic_read_u16_le(&p_frame->payload[8]);
+    p_diagnostics->filtered_doa_deg = acoustic_read_u16_le(&p_frame->payload[10]);
+    p_diagnostics->rover_x_mm = (int32_t) acoustic_read_u32_le(&p_frame->payload[12]);
+    p_diagnostics->rover_y_mm = (int32_t) acoustic_read_u32_le(&p_frame->payload[16]);
+    p_diagnostics->rover_heading_mrad = (int32_t) acoustic_read_u32_le(&p_frame->payload[20]);
+    p_diagnostics->source_x_mm = (int32_t) acoustic_read_u32_le(&p_frame->payload[24]);
+    p_diagnostics->source_y_mm = (int32_t) acoustic_read_u32_le(&p_frame->payload[28]);
+    p_diagnostics->source_range_mm = acoustic_read_u32_le(&p_frame->payload[32]);
+    p_diagnostics->source_bearing_deg = (int16_t) acoustic_read_u16_le(&p_frame->payload[36]);
+    p_diagnostics->source_confidence = p_frame->payload[38];
+    p_diagnostics->observation_count = p_frame->payload[39];
+    p_diagnostics->localization_residual_mm = acoustic_read_u16_le(&p_frame->payload[40]);
+    p_diagnostics->crossing_angle_deg = acoustic_read_u16_le(&p_frame->payload[42]);
+    p_diagnostics->baseline_mm = acoustic_read_u16_le(&p_frame->payload[44]);
+    p_diagnostics->source_position_shift_mm = acoustic_read_u16_le(&p_frame->payload[46]);
+    p_diagnostics->arrival_confirm_count = p_frame->payload[48];
+    p_diagnostics->sensor_rule = p_frame->payload[49];
+    p_diagnostics->think_state = p_frame->payload[50];
+    p_diagnostics->reserved = p_frame->payload[51];
+    p_diagnostics->autonomous_backup_count = acoustic_read_u32_le(&p_frame->payload[52]);
     return true;
 }

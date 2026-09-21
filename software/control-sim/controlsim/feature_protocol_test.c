@@ -70,6 +70,88 @@ static void protocol_round_trip_test(void)
     assert(!acoustic_protocol_decode_feature(&frame, &output));
 }
 
+static void observation_round_trip_test(void)
+{
+    acoustic_observation_t const input = {
+        .doa_deg = 359U,
+        .raw_doa_deg = 1U,
+        .level_dbfs_x100 = -3210,
+        .peak_dbfs_x100 = -2800,
+        .vad = 1U,
+        .doa_confidence = 87U,
+        .xvf_status = ACOUSTIC_XVF_STATUS_READY,
+        .audio_flags = ACOUSTIC_AUDIO_FLAG_DOA_FALLBACK,
+        .xvf_raw_status = 0x5AU,
+        .reserved = 0U,
+        .audio_frame_count = 0x12345678U,
+        .sample_sequence = 0xFEDCBA98U,
+    };
+    uint8_t encoded[ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE] = {0};
+    size_t const encoded_size =
+        acoustic_protocol_encode_observation(7U, 11U, &input, encoded, sizeof(encoded));
+    assert(encoded_size == ACOUSTIC_PROTOCOL_HEADER_SIZE + ACOUSTIC_OBSERVATION_PAYLOAD_SIZE +
+                           ACOUSTIC_PROTOCOL_CRC_SIZE);
+
+    acoustic_protocol_parser_t parser;
+    acoustic_protocol_parser_init(&parser);
+    acoustic_frame_t frame = {0};
+    acoustic_parse_result_t result = ACOUSTIC_PARSE_MORE;
+    for (size_t index = 0U; index < encoded_size; index++) {
+        result = acoustic_protocol_parser_push(&parser, encoded[index], &frame);
+    }
+    assert(result == ACOUSTIC_PARSE_FRAME_READY);
+    acoustic_observation_t output = {0};
+    assert(acoustic_protocol_decode_observation(&frame, &output));
+    assert(memcmp(&input, &output, sizeof(input)) == 0);
+}
+
+static void navigation_diagnostics_round_trip_test(void)
+{
+    acoustic_nav_diagnostics_t const input = {
+        .schema_version = 1U,
+        .flags = ACOUSTIC_NAV_FLAG_SOURCE_VALID | ACOUSTIC_NAV_FLAG_TARGET_VALID,
+        .doa_confidence = 82U,
+        .arrival_state = 2U,
+        .observation_sequence = 0x12345678U,
+        .raw_doa_deg = 359U,
+        .filtered_doa_deg = 1U,
+        .rover_x_mm = -1200,
+        .rover_y_mm = 340,
+        .rover_heading_mrad = -1570,
+        .source_x_mm = 4500,
+        .source_y_mm = -800,
+        .source_range_mm = 3800U,
+        .source_bearing_deg = -18,
+        .source_confidence = 76U,
+        .observation_count = 12U,
+        .localization_residual_mm = 45U,
+        .crossing_angle_deg = 31U,
+        .baseline_mm = 920U,
+        .source_position_shift_mm = 55U,
+        .arrival_confirm_count = 2U,
+        .sensor_rule = 7U,
+        .think_state = 18U,
+        .reserved = 0U,
+        .autonomous_backup_count = 0U,
+    };
+    uint8_t encoded[ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE] = {0};
+    size_t const encoded_size = acoustic_protocol_encode_nav_diagnostics(3U, 4U, &input, encoded, sizeof(encoded));
+    assert(encoded_size == ACOUSTIC_PROTOCOL_HEADER_SIZE + ACOUSTIC_NAV_DIAGNOSTICS_PAYLOAD_SIZE +
+                           ACOUSTIC_PROTOCOL_CRC_SIZE);
+
+    acoustic_protocol_parser_t parser;
+    acoustic_protocol_parser_init(&parser);
+    acoustic_frame_t frame = {0};
+    acoustic_parse_result_t result = ACOUSTIC_PARSE_MORE;
+    for (size_t index = 0U; index < encoded_size; index++) {
+        result = acoustic_protocol_parser_push(&parser, encoded[index], &frame);
+    }
+    assert(result == ACOUSTIC_PARSE_FRAME_READY);
+    acoustic_nav_diagnostics_t output = {0};
+    assert(acoustic_protocol_decode_nav_diagnostics(&frame, &output));
+    assert(memcmp(&input, &output, sizeof(input)) == 0);
+}
+
 static void assembler_complete_test(void)
 {
     acoustic_feature_assembler_t assembler;
@@ -140,6 +222,8 @@ static void assembler_rejection_test(void)
 int main(void)
 {
     protocol_round_trip_test();
+    observation_round_trip_test();
+    navigation_diagnostics_round_trip_test();
     assembler_complete_test();
     assembler_rejection_test();
     return 0;

@@ -24,7 +24,7 @@ graph LR
 
     subgraph Safety ["安全調停 (task_think.c)"]
         ESCAPE{"ルールベース脱出?<br/>ピボット / 後退"}
-        ARBITER["safety_arbiter.c<br/>ハードウェア保護 (<=250mm)"]
+        ARBITER["safety_arbiter.c<br/>センサー有効性・IMU保護"]
         CMD["task_command / IPC<br/>CPU1 モーター駆動"]
     end
 

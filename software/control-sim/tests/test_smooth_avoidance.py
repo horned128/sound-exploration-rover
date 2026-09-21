@@ -35,15 +35,15 @@ def make_input(
 
 # --- 不変条件テスト (Invariants) ---
 
-def test_i1_hard_stop_distance():
-    """I1: 任意の有効ToFが 250mm 未満なら即時停止。"""
+def test_i1_close_distance_does_not_stop_by_itself():
+    """距離だけでは停止せず、近接しても最小走行速度を維持する。"""
     for idx in range(3):
         tof = [1000.0, 1000.0, 1000.0]
         tof[idx] = 249.0
         inp = make_input(tof_mm=tuple(tof))
         out = smooth_avoidance_plan_step(inp)
-        assert out.is_blocked, f"ToF channel {idx} under 250mm must trigger is_blocked"
-        assert out.speed_scale == 0.0, f"ToF channel {idx} under 250mm must command 0 speed"
+        assert not out.is_blocked, f"ToF channel {idx} close reading must not stop by distance"
+        assert out.speed_scale > 0.0, f"ToF channel {idx} must keep moving"
 
 
 def test_i2_steering_clamp():
@@ -108,7 +108,7 @@ def test_i6_all_invalid_stops():
 
 def test_i9_deadzone_avoidance_when_driving():
     """I9: 停止意図でない走行時、速度スケールは 0.20 を下回らない。"""
-    # 障害物が接近しているが 250mm よりは離れている (例: 300mm)
+    # 障害物が接近していても、停止意図がなければ最低速度を維持する。
     inp = make_input(
         tof_mm=(300.0, 300.0, 300.0),
         current_speed_scale=0.5,
@@ -122,7 +122,7 @@ def test_i9_deadzone_avoidance_when_driving():
 # --- 合成シナリオテスト (Scenarios) ---
 
 def test_s1_head_on_wall_approach_and_stop():
-    """S1: 正面の壁に接近すると徐々に減速し、250mm手前で停止する。"""
+    """S1: 正面の壁に接近すると徐々に減速し、近接しても停止はしない。"""
     speeds = []
     # 1000mmから200mmまで接近
     for dist in [1000.0, 800.0, 600.0, 450.0, 300.0, 250.0, 240.0]:
@@ -134,10 +134,10 @@ def test_s1_head_on_wall_approach_and_stop():
         out = smooth_avoidance_plan_step(inp)
         speeds.append(out.speed_scale)
 
-    # 1000mm時は1.0、600mm時は減速、240mm時は0.0
+    # 1000mm時は1.0、600mm時は減速し、240mmでも走行スケールを残す
     assert speeds[0] == 1.0
     assert speeds[2] < speeds[0]
-    assert speeds[-1] == 0.0
+    assert speeds[-1] > 0.0
 
 
 def test_s2_corridor_centering():

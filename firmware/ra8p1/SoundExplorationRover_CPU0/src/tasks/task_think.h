@@ -8,6 +8,7 @@
 #include "control/sound_follow_controller.h"                /* 思考状態型 */
 #include "control/obstacle_avoidance_controller.h"          /* センサー走行ルール型 */
 #include "services/prototype_storage.h"                     /* MRAM保存結果型 */
+#include "services/sound_source_localizer.h"                /* 音源位置・到着状態型 */
 #include "task_common.h"                                    /* CPU0タスク共通異常型 */
 #include <tk/tkernel.h>                                     /* μT-Kernel型 */
 
@@ -38,6 +39,29 @@ IMPORT volatile H g_task_think_left_rpm;                    /**< 左RPM判断値
 IMPORT volatile H g_task_think_right_rpm;                   /**< 右RPM判断値（Live Watch用） */
 IMPORT volatile BOOL g_task_think_actuator_enable;          /**< 出力許可判断（Live Watch用） */
 IMPORT volatile BOOL g_task_think_emergency_stop;           /**< 非常停止判断（Live Watch用） */
+IMPORT volatile UH g_task_think_raw_doa_deg;                /**< XVF3800 raw DoA[deg] */
+IMPORT volatile UH g_task_think_filtered_doa_deg;           /**< ESP32S3循環平均DoA[deg] */
+IMPORT volatile UB g_task_think_doa_confidence;             /**< DoA品質[0..100] */
+IMPORT volatile W g_task_think_rover_x_mm;                  /**< 推定車体X座標[mm] */
+IMPORT volatile W g_task_think_rover_y_mm;                  /**< 推定車体Y座標[mm] */
+IMPORT volatile W g_task_think_rover_heading_mrad;          /**< 推定車体方位[mrad] */
+IMPORT volatile W g_task_think_source_x_mm;                 /**< 推定音源X座標[mm] */
+IMPORT volatile W g_task_think_source_y_mm;                 /**< 推定音源Y座標[mm] */
+IMPORT volatile UW g_task_think_source_range_mm;            /**< 推定音源距離[mm] */
+IMPORT volatile H g_task_think_source_bearing_deg;          /**< 音源目標方位（右正）[deg] */
+IMPORT volatile UB g_task_think_source_confidence;          /**< 音源位置品質[0..100] */
+IMPORT volatile UB g_task_think_localization_observation_count; /**< 位置推定観測数 */
+IMPORT volatile UH g_task_think_localization_residual_mm;   /**< 方位線残差RMS[mm] */
+IMPORT volatile UH g_task_think_localization_crossing_deg;  /**< 方位交差角[deg] */
+IMPORT volatile UH g_task_think_localization_baseline_mm;   /**< 方位観測の最大基線[mm] */
+IMPORT volatile UH g_task_think_source_position_shift_mm;   /**< 前回推定からの位置変化[mm] */
+IMPORT volatile BOOL g_task_think_localization_geometry_valid; /**< 今回の推定幾何有効 */
+IMPORT volatile BOOL g_task_think_source_position_valid;    /**< 音源位置推定有効 */
+IMPORT volatile BOOL g_task_think_navigation_target_valid;  /**< 音源目標保持期限内 */
+IMPORT volatile BOOL g_task_think_arrival_candidate;        /**< 音源到着候補 */
+IMPORT volatile sound_arrival_state_t g_task_think_arrival_state; /**< 到着判定段階 */
+IMPORT volatile UB g_task_think_arrival_confirm_count;      /**< 到着確認観測数 */
+IMPORT volatile UW g_task_think_autonomous_backup_count;    /**< 自律両輪後退検出数 */
 /**< 採用センサー規則 */
 IMPORT volatile obstacle_avoidance_rule_t g_task_think_sensor_rule;
 IMPORT volatile UW g_task_think_fault_flags;                /**< CPU0異常ラッチ（Live Watch用） */

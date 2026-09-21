@@ -11,14 +11,14 @@
 
 #define ACOUSTIC_PROTOCOL_MAGIC_0          (0x53U)
 #define ACOUSTIC_PROTOCOL_MAGIC_1          (0x52U)
-#define ACOUSTIC_PROTOCOL_VERSION          (1U)
+#define ACOUSTIC_PROTOCOL_VERSION          (2U)
 #define ACOUSTIC_PROTOCOL_HEADER_SIZE      (14U)
 #define ACOUSTIC_PROTOCOL_CRC_SIZE         (2U)
 #define ACOUSTIC_PROTOCOL_MAX_PAYLOAD_SIZE (96U)
 #define ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE   \
     (ACOUSTIC_PROTOCOL_HEADER_SIZE + ACOUSTIC_PROTOCOL_MAX_PAYLOAD_SIZE + ACOUSTIC_PROTOCOL_CRC_SIZE)
 #define ACOUSTIC_PROTOCOL_DOA_INVALID         (0xFFFFU)
-#define ACOUSTIC_OBSERVATION_PAYLOAD_SIZE     (14U)
+#define ACOUSTIC_OBSERVATION_PAYLOAD_SIZE     (22U)
 #define ACOUSTIC_HELLO_PAYLOAD_SIZE           (12U)
 #define ACOUSTIC_HEALTH_PAYLOAD_SIZE          (12U)
 #define ACOUSTIC_FEATURE_BIN_COUNT             (32U)
@@ -31,6 +31,7 @@
 #define ACOUSTIC_ROVER_TELEMETRY_PAYLOAD_SIZE (96U)
 #define ACOUSTIC_ACTUATOR_TELEMETRY_PAYLOAD_SIZE (24U)
 #define ACOUSTIC_POSE_TELEMETRY_PAYLOAD_SIZE (36U)
+#define ACOUSTIC_NAV_DIAGNOSTICS_PAYLOAD_SIZE (56U)
 #define ACOUSTIC_AI_LAB_SNAPSHOT_PAYLOAD_SIZE        (48U) /**< snapshot長[byte] */
 #define ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE              (64U) /**< chunkデータ長[byte] */
 #define ACOUSTIC_AI_LAB_SUMMARY_CHUNK_PAYLOAD_SIZE   (8U + ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE) /**< 要約chunk長 */
@@ -45,6 +46,7 @@
 #define ACOUSTIC_CAPABILITY_VAD            (1UL << 1)
 #define ACOUSTIC_CAPABILITY_LEVEL          (1UL << 2)
 #define ACOUSTIC_CAPABILITY_WIFI           (1UL << 3)
+#define ACOUSTIC_CAPABILITY_DOA_DIAGNOSTICS (1UL << 4)
 
 #define ACOUSTIC_AUDIO_FLAG_I2S_OVERRUN    (1U << 0)
 #define ACOUSTIC_AUDIO_FLAG_I2C_ERROR      (1U << 1)
@@ -65,6 +67,15 @@
 #define ACOUSTIC_TELEMETRY_STORAGE_VALID   (1U << 4)
 #define ACOUSTIC_TELEMETRY_LEARNING_MODE   (1U << 5)
 
+#define ACOUSTIC_NAV_FLAG_RAW_DOA_VALID       (1U << 0)
+#define ACOUSTIC_NAV_FLAG_FILTERED_DOA_VALID  (1U << 1)
+#define ACOUSTIC_NAV_FLAG_SOURCE_VALID        (1U << 2)
+#define ACOUSTIC_NAV_FLAG_GEOMETRY_VALID      (1U << 3)
+#define ACOUSTIC_NAV_FLAG_TARGET_VALID        (1U << 4)
+#define ACOUSTIC_NAV_FLAG_ARRIVAL_CANDIDATE   (1U << 5)
+#define ACOUSTIC_NAV_FLAG_ARRIVED             (1U << 6)
+#define ACOUSTIC_NAV_FLAG_MIN_TRANSLATION_TURN (1U << 7)
+
 typedef enum e_acoustic_message_type {
     ACOUSTIC_MESSAGE_HELLO = 0x01U,
     ACOUSTIC_MESSAGE_OBSERVATION = 0x02U,
@@ -76,6 +87,7 @@ typedef enum e_acoustic_message_type {
     ACOUSTIC_MESSAGE_ROVER_TELEMETRY = 0x20U,
     ACOUSTIC_MESSAGE_ACTUATOR_TELEMETRY = 0x21U,
     ACOUSTIC_MESSAGE_POSE_TELEMETRY = 0x22U,
+    ACOUSTIC_MESSAGE_NAV_DIAGNOSTICS = 0x23U,
     ACOUSTIC_MESSAGE_AI_LAB_SNAPSHOT = 0x30U,             /**< AIラボsnapshot */
     ACOUSTIC_MESSAGE_AI_LAB_SUMMARY_CHUNK = 0x31U,       /**< AIラボ要約chunk */
     ACOUSTIC_MESSAGE_AI_LAB_COMMAND = 0x32U,              /**< AIラボ操作要求 */
@@ -107,14 +119,18 @@ typedef enum e_acoustic_xvf_status {
 } acoustic_xvf_status_t;
 
 typedef struct st_acoustic_observation {
-    uint16_t doa_deg;
+    uint16_t doa_deg;                                      /**< 循環平均後DoA[deg] */
+    uint16_t raw_doa_deg;                                  /**< XVF3800直近DoA[deg] */
     int16_t level_dbfs_x100;
     int16_t peak_dbfs_x100;
     uint8_t vad;
+    uint8_t doa_confidence;                                /**< 分散・取得経路から求めた品質[0..100] */
     uint8_t xvf_status;
     uint8_t audio_flags;
     uint8_t xvf_raw_status;
+    uint8_t reserved;
     uint32_t audio_frame_count;
+    uint32_t sample_sequence;                              /**< DoA観測専用sequence */
 } acoustic_observation_t;
 
 typedef struct st_acoustic_hello {
@@ -215,6 +231,35 @@ typedef struct st_acoustic_pose_telemetry {
     uint32_t uptime_ms;
 } acoustic_pose_telemetry_t;
 
+/**< 音源位置・到着・回避判断の診断情報。ROVER_TELEMETRYとは別フレームで送る。 */
+typedef struct st_acoustic_nav_diagnostics {
+    uint8_t schema_version;
+    uint8_t flags;
+    uint8_t doa_confidence;
+    uint8_t arrival_state;
+    uint32_t observation_sequence;
+    uint16_t raw_doa_deg;
+    uint16_t filtered_doa_deg;
+    int32_t rover_x_mm;
+    int32_t rover_y_mm;
+    int32_t rover_heading_mrad;
+    int32_t source_x_mm;
+    int32_t source_y_mm;
+    uint32_t source_range_mm;
+    int16_t source_bearing_deg;
+    uint8_t source_confidence;
+    uint8_t observation_count;
+    uint16_t localization_residual_mm;
+    uint16_t crossing_angle_deg;
+    uint16_t baseline_mm;
+    uint16_t source_position_shift_mm;
+    uint8_t arrival_confirm_count;
+    uint8_t sensor_rule;
+    uint8_t think_state;
+    uint8_t reserved;
+    uint32_t autonomous_backup_count;
+} acoustic_nav_diagnostics_t;
+
 /**< PC上の音響AIラボが継続記録する、CPU0推論の縮約snapshot */
 typedef struct st_acoustic_ai_lab_snapshot {
     uint8_t schema_version;                                 /**< 通信schema版数 */
@@ -301,6 +346,9 @@ size_t acoustic_protocol_encode_actuator_telemetry(uint32_t sequence, uint32_t u
 size_t acoustic_protocol_encode_pose_telemetry(uint32_t sequence, uint32_t uptime_ms,
                                                const acoustic_pose_telemetry_t * p_telemetry,
                                                uint8_t * p_output, size_t output_capacity);
+size_t acoustic_protocol_encode_nav_diagnostics(uint32_t sequence, uint32_t uptime_ms,
+                                                const acoustic_nav_diagnostics_t * p_diagnostics,
+                                                uint8_t * p_output, size_t output_capacity);
 size_t acoustic_protocol_encode_ai_lab_snapshot(uint32_t sequence, uint32_t uptime_ms,
                                                 const acoustic_ai_lab_snapshot_t * p_snapshot,
                                                 uint8_t * p_output, size_t output_capacity); /* AIラボsnapshot */
@@ -324,5 +372,7 @@ bool acoustic_protocol_decode_actuator_telemetry(const acoustic_frame_t * p_fram
                                                  acoustic_actuator_telemetry_t * p_telemetry);
 bool acoustic_protocol_decode_pose_telemetry(const acoustic_frame_t * p_frame,
                                              acoustic_pose_telemetry_t * p_telemetry);
+bool acoustic_protocol_decode_nav_diagnostics(const acoustic_frame_t * p_frame,
+                                             acoustic_nav_diagnostics_t * p_diagnostics);
 
 #endif /* SEROV_ACOUSTIC_PROTOCOL_H */

@@ -20,7 +20,7 @@ typedef enum e_sensor_rule {
     CPU0_SENSOR_RULE_IMU_STOP,                              /**< IMU異常による停止 */
     CPU0_SENSOR_RULE_PIVOT_LEFT,                            /**< 左ピボット */
     CPU0_SENSOR_RULE_PIVOT_RIGHT,                           /**< 右ピボット */
-    CPU0_SENSOR_RULE_BACKUP,                                /**< 後退 */
+    CPU0_SENSOR_RULE_BACKUP,                                /**< 予約済み旧後退値（自律走行では未使用） */
 } obstacle_avoidance_rule_t;
 
 /**< ルールベース障害物回避の状態とアクチュエータ指令 */
@@ -28,6 +28,7 @@ typedef struct st_obstacle_avoidance_output {
     sound_follow_state_t state;                             /**< 走行状態 */
     obstacle_avoidance_rule_t rule;                         /**< 適用した障害物回避ルール */
     H steering_deg;                                         /**< 操舵角指令[deg] */
+    BOOL is_spin_turn;                                      /**< X字操舵の最小並進旋回 */
     H left_rpm;                                             /**< 左車輪指令RPM */
     H right_rpm;                                            /**< 右車輪指令RPM */
     BOOL actuator_enable;                                   /**< アクチュエータ出力許可 */

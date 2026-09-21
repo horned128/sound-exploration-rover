@@ -15,16 +15,21 @@
 #include "wifi_telemetry.h"                                 /* Wi-Fi接続状態取得API */
 #include "xvf3800_control.h"                                /* XVF3800到来方向取得API */
 #include <limits.h>                                         /* 整数型の最小値 */
+#include <math.h>                                           /* 循環平均と角度変換 */
 #include <stdbool.h>                                        /* 真偽値 */
 #include <stddef.h>                                         /* size_t */
 #include <stdint.h>                                         /* 固定幅整数型 */
 #include <string.h>                                         /* 特徴量パケットへのコピー */
 
 #define FRONTEND_FIRMWARE_MAJOR            (1U)
-#define FRONTEND_FIRMWARE_MINOR            (0U)
+#define FRONTEND_FIRMWARE_MINOR            (1U)
 #define FRONTEND_FIRMWARE_PATCH            (0U)
+#define FRONTEND_PI                        (3.14159265358979323846F)
+#define FRONTEND_DEG_TO_RAD(deg)           ((deg) * (FRONTEND_PI / 180.0F))
+#define FRONTEND_RAD_TO_DEG(rad)           ((rad) * (180.0F / FRONTEND_PI))
 
 static uint32_t s_sequence;                                 /**< USB送信フレーム連番 */
+static uint32_t s_observation_sequence;                     /**< DoA観測専用連番 */
 static uint32_t s_boot_id;                                  /**< 起動ごとのランダムID */
 static uint32_t s_i2c_error_count;                          /**< XVF3800通信失敗累積数 */
 static uint32_t s_previous_overrun_count;                   /**< 前回観測時のI2Sオーバーラン数 */
@@ -32,6 +37,29 @@ static uint16_t s_next_feature_event_id;                    /**< 次に収集す
 /**< 有効な到来方向の取得済み状態 */
 static acoustic_xvf_status_t s_xvf_status = ACOUSTIC_XVF_STATUS_STARTING;
 static bool s_has_valid_doa;                                /**< 起動後に有効な到来方向を得た状態 */
+
+volatile uint32_t g_acoustic_frontend_read_count;           /**< XVF3800読出し回数 */
+volatile uint32_t g_acoustic_frontend_read_error_count;     /**< XVF3800読出し失敗回数 */
+volatile uint32_t g_acoustic_frontend_tx_count;             /**< DoA観測送信成功回数 */
+volatile uint32_t g_acoustic_frontend_tx_error_count;       /**< DoA観測送信失敗回数 */
+volatile uint32_t g_acoustic_frontend_last_period_ms;       /**< 直近DoA読出し周期[ms] */
+volatile uint32_t g_acoustic_frontend_min_period_ms;        /**< 最小DoA読出し周期[ms] */
+volatile uint32_t g_acoustic_frontend_max_period_ms;        /**< 最大DoA読出し周期[ms] */
+volatile uint32_t g_acoustic_frontend_processing_us;        /**< 直近DoA処理時間[us] */
+volatile uint32_t g_acoustic_frontend_deadline_miss_count;  /**< DoA処理期限超過回数 */
+volatile uint32_t g_acoustic_frontend_last_sample_ms;       /**< 直近DoA観測時刻[ms] */
+volatile uint32_t g_acoustic_frontend_observation_sequence; /**< 直近DoA観測sequence */
+volatile uint16_t g_acoustic_frontend_raw_doa_deg;          /**< 直近XVF3800 DoA[deg] */
+volatile uint16_t g_acoustic_frontend_filtered_doa_deg;     /**< 循環平均DoA[deg] */
+volatile uint8_t g_acoustic_frontend_doa_confidence;        /**< DoA品質[0..100] */
+
+typedef struct {
+    uint16_t samples_deg[APP_DOA_FILTER_WINDOW];            /**< 新しい順に上書きするDoA履歴 */
+    uint8_t count;                                          /**< 有効履歴数 */
+    uint8_t next;                                           /**< 次回上書き位置 */
+} frontend_doa_filter_t;
+
+static frontend_doa_filter_t s_doa_filter;                  /**< ESP32S3側の循環DoAフィルタ */
 
 typedef struct {
     audio_capture_feature_event_t event;                    /**< 送信中イベントの固定80フレーム */
@@ -43,6 +71,8 @@ typedef struct {
 static frontend_feature_burst_t s_feature_burst;            /**< 送信中イベント。4 KiBのタスクスタックを圧迫しない */
 
 static uint32_t frontend_uptime_ms(void);                   /* 起動からの経過時刻取得 */
+static void frontend_doa_filter_update(xvf3800_doa_result_t const * doa, uint16_t * filtered_deg,
+                                       uint8_t * confidence); /* 循環平均と品質算出 */
 static esp_err_t frontend_send_frame(uint8_t const * frame, size_t length); /* 音響プロトコルフレーム送信 */
 static esp_err_t frontend_send_hello(void);                 /* 起動情報送信 */
 /* 音響観測結果送信 */
@@ -56,6 +86,58 @@ static bool frontend_feature_trigger_active(bool i2s_stale,
 static esp_err_t frontend_send_feature_packet(frontend_feature_burst_t const * burst); /* 2フレーム送信 */
 static bool frontend_feature_burst_take(frontend_feature_burst_t * burst, uint32_t now_ms); /* 完成イベント取得 */
 static void acoustic_frontend_task(void * context);         /* 音響観測・送信タスク */
+
+/** =================================================================*
+ * @brief  DoA循環平均と品質算出
+ * @details 集中度へ履歴充足率を掛け、fallbackは上限70、VADなしは上限40とする。
+ * @param[in] doa XVF3800直近読出し
+ * @param[out] filtered_deg 循環平均DoA[deg]
+ * @param[out] confidence DoA品質[0..100]
+ * ================================================================= */
+static void frontend_doa_filter_update(xvf3800_doa_result_t const * doa, uint16_t * filtered_deg,
+                                       uint8_t * confidence) {
+    if ((doa == NULL) || (filtered_deg == NULL) || (confidence == NULL) || !doa->doa_valid) {
+        memset(&s_doa_filter, 0, sizeof(s_doa_filter));
+        if (filtered_deg != NULL) {
+            *filtered_deg = ACOUSTIC_PROTOCOL_DOA_INVALID;
+        }
+        if (confidence != NULL) {
+            *confidence = 0U;
+        }
+        return;
+    }
+
+    s_doa_filter.samples_deg[s_doa_filter.next] = doa->doa_deg;
+    s_doa_filter.next = (uint8_t) ((s_doa_filter.next + 1U) % APP_DOA_FILTER_WINDOW);
+    if (s_doa_filter.count < APP_DOA_FILTER_WINDOW) {
+        s_doa_filter.count++;
+    }
+
+    float sum_sin = 0.0F;
+    float sum_cos = 0.0F;
+    for (uint8_t index = 0U; index < s_doa_filter.count; index++) {
+        float const angle_rad = FRONTEND_DEG_TO_RAD((float) s_doa_filter.samples_deg[index]);
+        sum_sin += sinf(angle_rad);
+        sum_cos += cosf(angle_rad);
+    }
+    float angle_deg = FRONTEND_RAD_TO_DEG(atan2f(sum_sin, sum_cos));
+    if (angle_deg < 0.0F) {
+        angle_deg += 360.0F;
+    }
+    uint16_t rounded = (uint16_t) (angle_deg + 0.5F);
+    *filtered_deg = (rounded >= 360U) ? 0U : rounded;
+
+    float const concentration = sqrtf((sum_sin * sum_sin) + (sum_cos * sum_cos)) /
+                                (float) s_doa_filter.count;
+    float quality = concentration * 100.0F * (float) s_doa_filter.count / (float) APP_DOA_FILTER_WINDOW;
+    if (doa->used_aec_fallback && (quality > 70.0F)) {
+        quality = 70.0F;
+    }
+    if ((0U == doa->speech_detected_raw) && (quality > 40.0F)) {
+        quality = 40.0F;
+    }
+    *confidence = (uint8_t) ((quality < 0.0F) ? 0U : (quality > 100.0F) ? 100U : (uint8_t) (quality + 0.5F));
+}
 
 /** =================================================================*
  * @brief  起動経過時刻取得
@@ -91,8 +173,8 @@ static esp_err_t frontend_send_hello(void) {
         .firmware_minor = FRONTEND_FIRMWARE_MINOR,
         .firmware_patch = FRONTEND_FIRMWARE_PATCH,
         .reserved = 0U,
-        .capabilities =
-            ACOUSTIC_CAPABILITY_DOA | ACOUSTIC_CAPABILITY_VAD | ACOUSTIC_CAPABILITY_LEVEL | ACOUSTIC_CAPABILITY_WIFI,
+        .capabilities = ACOUSTIC_CAPABILITY_DOA | ACOUSTIC_CAPABILITY_VAD | ACOUSTIC_CAPABILITY_LEVEL |
+                        ACOUSTIC_CAPABILITY_WIFI | ACOUSTIC_CAPABILITY_DOA_DIAGNOSTICS,
         .boot_id = s_boot_id,
     };
     uint8_t frame[ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE];
@@ -126,20 +208,42 @@ static esp_err_t frontend_send_observation(xvf3800_doa_result_t const * doa, boo
         flags |= ACOUSTIC_AUDIO_FLAG_DOA_FALLBACK;
     }
 
+    uint16_t filtered_doa_deg = ACOUSTIC_PROTOCOL_DOA_INVALID;
+    uint8_t doa_confidence = 0U;
+    /* I2C失敗・無効DoAでは履歴を消し、復帰後の値へ古い方向を混ぜない。 */
+    frontend_doa_filter_update(doa, &filtered_doa_deg, &doa_confidence);
+
     acoustic_observation_t const observation = {
-        .doa_deg = (i2c_ok && doa->doa_valid) ? doa->doa_deg : ACOUSTIC_PROTOCOL_DOA_INVALID,
+        .doa_deg = filtered_doa_deg,
+        .raw_doa_deg = (i2c_ok && doa->doa_valid) ? doa->doa_deg : ACOUSTIC_PROTOCOL_DOA_INVALID,
         .level_dbfs_x100 = audio->level_dbfs_x100,
         .peak_dbfs_x100 = audio->peak_dbfs_x100,
         .vad = (uint8_t) (i2c_ok && (doa->speech_detected_raw != 0U)),
+        .doa_confidence = doa_confidence,
         .xvf_status = (uint8_t) s_xvf_status,
         .audio_flags = flags,
         .xvf_raw_status = doa->raw_status,
+        .reserved = 0U,
         .audio_frame_count = audio->frame_count,
+        .sample_sequence = s_observation_sequence,
     };
+    g_acoustic_frontend_raw_doa_deg = observation.raw_doa_deg;
+    g_acoustic_frontend_filtered_doa_deg = observation.doa_deg;
+    g_acoustic_frontend_doa_confidence = observation.doa_confidence;
+    uint32_t const sample_ms = frontend_uptime_ms();
+    g_acoustic_frontend_last_sample_ms = sample_ms;
+    g_acoustic_frontend_observation_sequence = observation.sample_sequence;
     uint8_t frame[ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE];
     size_t const length =
-        acoustic_protocol_encode_observation(s_sequence, frontend_uptime_ms(), &observation, frame, sizeof(frame));
-    return frontend_send_frame(frame, length);
+        acoustic_protocol_encode_observation(s_sequence, sample_ms, &observation, frame, sizeof(frame));
+    esp_err_t const err = frontend_send_frame(frame, length);
+    s_observation_sequence++;
+    if (ESP_OK == err) {
+        g_acoustic_frontend_tx_count++;
+    } else {
+        g_acoustic_frontend_tx_error_count++;
+    }
+    return err;
 }
 
 /** =================================================================*
@@ -245,12 +349,15 @@ static void acoustic_frontend_task(void * context) {
     uint32_t last_observation_ms = 0U;
     uint32_t last_feature_event_started_ms = 0U;
     bool hello_pending = false;
+    TickType_t last_wake_tick = xTaskGetTickCount();
 
     while (true) {
         if (usb_link_take_new_session()) {
             audio_capture_feature_event_discard();
             s_feature_burst.active = false;
             last_feature_event_started_ms = 0U;
+            last_observation_ms = 0U;
+            memset(&s_doa_filter, 0, sizeof(s_doa_filter));
             hello_pending = true;
             last_hello_ms = 0U;
         }
@@ -258,7 +365,7 @@ static void acoustic_frontend_task(void * context) {
             audio_capture_feature_event_discard();
             s_feature_burst.active = false;
             last_feature_event_started_ms = 0U;
-            vTaskDelay(pdMS_TO_TICKS(APP_OBSERVATION_PERIOD_MS));
+            vTaskDelayUntil(&last_wake_tick, pdMS_TO_TICKS(APP_OBSERVATION_PERIOD_MS));
             continue;
         }
         uint32_t const loop_now_ms = frontend_uptime_ms();
@@ -267,11 +374,27 @@ static void acoustic_frontend_task(void * context) {
                 hello_pending = false;
                 last_hello_ms = loop_now_ms;
             }
-            vTaskDelay(pdMS_TO_TICKS(APP_OBSERVATION_PERIOD_MS));
-            continue;
         }
 
-        if ((loop_now_ms - last_observation_ms) >= APP_OBSERVATION_PERIOD_MS) {
+        {
+            int64_t const processing_started_us = esp_timer_get_time();
+            bool period_deadline_missed = false;
+            if (0U != last_observation_ms) {
+                uint32_t const period_ms = loop_now_ms - last_observation_ms;
+                g_acoustic_frontend_last_period_ms = period_ms;
+                if ((0U == g_acoustic_frontend_min_period_ms) ||
+                    (period_ms < g_acoustic_frontend_min_period_ms)) {
+                    g_acoustic_frontend_min_period_ms = period_ms;
+                }
+                if (period_ms > g_acoustic_frontend_max_period_ms) {
+                    g_acoustic_frontend_max_period_ms = period_ms;
+                }
+                if (period_ms > APP_OBSERVATION_PERIOD_MS) {
+                    period_deadline_missed = true;
+                }
+            }
+            last_observation_ms = loop_now_ms;
+            g_acoustic_frontend_read_count++;
             xvf3800_doa_result_t doa = {0};
             esp_err_t const i2c_result = xvf3800_control_read_doa(&doa);
             bool const i2c_ok = i2c_result == ESP_OK;
@@ -282,6 +405,7 @@ static void acoustic_frontend_task(void * context) {
                 s_xvf_status = s_has_valid_doa ? ACOUSTIC_XVF_STATUS_READY : ACOUSTIC_XVF_STATUS_STARTING;
             } else {
                 s_i2c_error_count++;
+                g_acoustic_frontend_read_error_count++;
                 s_xvf_status = ACOUSTIC_XVF_STATUS_ERROR;
             }
 
@@ -301,7 +425,13 @@ static void acoustic_frontend_task(void * context) {
                 last_health_ms = now_ms;
             }
             s_previous_overrun_count = audio.overrun_count;
-            last_observation_ms = loop_now_ms;
+            int64_t const processing_us = esp_timer_get_time() - processing_started_us;
+            g_acoustic_frontend_processing_us =
+                (processing_us > (int64_t) UINT32_MAX) ? UINT32_MAX : (uint32_t) processing_us;
+            if (period_deadline_missed ||
+                (processing_us > ((int64_t) APP_OBSERVATION_PERIOD_MS * 1000LL))) {
+                g_acoustic_frontend_deadline_miss_count++;
+            }
 
             bool const feature_trigger_active = frontend_feature_trigger_active(i2s_stale, &audio);
             if (!feature_trigger_active) {
@@ -335,12 +465,7 @@ static void acoustic_frontend_task(void * context) {
             }
         }
 
-        uint32_t delay_ms = APP_OBSERVATION_PERIOD_MS;
-        if (s_feature_burst.active) {
-            int32_t const remaining_ms = (int32_t) (s_feature_burst.next_packet_at_ms - frontend_uptime_ms());
-            delay_ms = (remaining_ms > 0) ? (uint32_t) remaining_ms : 1U;
-        }
-        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+        vTaskDelayUntil(&last_wake_tick, pdMS_TO_TICKS(APP_OBSERVATION_PERIOD_MS));
     }
 }
 
@@ -351,6 +476,8 @@ static void acoustic_frontend_task(void * context) {
 esp_err_t acoustic_frontend_start(void) {
     s_boot_id = esp_random();
     s_next_feature_event_id = (uint16_t) esp_random();
+    g_acoustic_frontend_raw_doa_deg = ACOUSTIC_PROTOCOL_DOA_INVALID;
+    g_acoustic_frontend_filtered_doa_deg = ACOUSTIC_PROTOCOL_DOA_INVALID;
 
     BaseType_t const result = xTaskCreate(acoustic_frontend_task, "acoustic_frontend", APP_FRONTEND_TASK_STACK_SIZE,
                                           NULL, APP_FRONTEND_TASK_PRIORITY, NULL);

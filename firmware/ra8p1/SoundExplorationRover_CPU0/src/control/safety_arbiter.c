@@ -1,6 +1,6 @@
 /** =================================================================*
  * @file   safety_arbiter.c
- * @brief  CPU0安全調停実装（生存性・ToF veto・出力クランプ）
+ * @brief  CPU0安全調停実装（生存性・センサー有効性・出力クランプ）
  * ================================================================= */
 #include "safety_arbiter.h"                                 /* 安全調停APIと指令型 */
 #include "config/control_config.h"                          /* 制御上限値 */
@@ -36,7 +36,7 @@ LOCAL W abs_i32(W val) {
 /** =================================================================*
  * @brief  ToFスナップショットの前進利用可否を判定
  * @param[in] p_snapshot 最新センサースナップショット
- * @return 3眼ToFが有効かつハード停止距離以上ならTRUE
+ * @return 3眼ToFが有効かつ期限内ならTRUE
  * ================================================================= */
 EXPORT BOOL safety_arbiter_tof_usable(const sensor_snapshot_t * p_snapshot) {
     UB const required_tof_flags = (UB) (CPU0_SENSOR_VALID_TOF_LEFT |
@@ -48,11 +48,6 @@ EXPORT BOOL safety_arbiter_tof_usable(const sensor_snapshot_t * p_snapshot) {
         return FALSE;
     }
 
-    for (UW index = 0U; index < CPU0_SENSOR_TOF_COUNT; index++) {
-        if (p_snapshot->tof_distance_mm[index] < CPU0_SENSOR_HARD_STOP_DISTANCE_MM) {
-            return FALSE;
-        }
-    }
     return TRUE;
 }
 
@@ -143,11 +138,12 @@ EXPORT void safety_arbiter_arbitrate(const safety_motion_command_t * p_requested
         return;
     }
 
-    /* 前進要求時のToF安全調停 (I1) */
+    /* 前進要求時のToF有効性調停。距離閾値による即時停止は行わず、
+     * 正面近接の連続確認と回避判断は obstacle_avoidance_controller が担う。 */
     BOOL const is_forward_request = (p_requested->left_rpm > 0) || (p_requested->right_rpm > 0);
     if (is_forward_request) {
         if (!safety_arbiter_tof_usable(p_snapshot)) {
-            /* ハード停止: 前進を阻止し停止 (I1) */
+            /* 無効・期限切れToFは前進を阻止する。 */
             p_arbitrated->left_rpm = 0;
             p_arbitrated->right_rpm = 0;
             p_arbitrated->actuator_enable = FALSE;

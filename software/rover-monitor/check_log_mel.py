@@ -78,12 +78,27 @@ def assess(samples: list[tuple[int, dict[str, object]]]) -> tuple[list[str], lis
     return failures, details
 
 
+def find_default_log() -> Path:
+    base_dir = Path(__file__).resolve().parent
+    logs_dir = base_dir / "logs"
+    if logs_dir.is_dir():
+        jsonl_files = sorted(logs_dir.glob("rover-monitor-*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if jsonl_files:
+            return jsonl_files[0]
+        all_jsonls = sorted(logs_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if all_jsonls:
+            return all_jsonls[0]
+    return base_dir / "rover-monitor.log"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("log", nargs="?", type=Path, default=Path(__file__).with_name("rover-monitor.log"))
+    parser.add_argument("log", nargs="?", type=Path, default=None, help="ログファイルパス (.jsonl または .log)")
     arguments = parser.parse_args()
+    log_path = arguments.log or find_default_log()
+    print(f"Reading log: {log_path}")
     try:
-        failures, details = assess(load_samples(arguments.log))
+        failures, details = assess(load_samples(log_path))
     except (OSError, ValueError) as error:
         print(f"FAIL: {error}")
         return 1

@@ -10,8 +10,8 @@
 - XVF3800 I2S: WS GPIO7、BCLK GPIO8、DIN GPIO43、DOUT GPIO44
 - I2S形式: XIAO master、16 kHz、stereo、32 bit、Philips I2S
 - USB: XIAO側USB-CをTinyUSBのCDC-ACM deviceとして使用
-- 送信: `HELLO`（接続時と1 s周期）、`ACOUSTIC_OBSERVATION`（50 ms周期）、`HEALTH`（1 s周期）、`ACOUSTIC_FEATURE`（音量イベント時）
-- 受信: CPU0の`ROVER_TELEMETRY`（250 ms周期、schema 2でToF/BMI270診断を含む）
+- 送信: `HELLO`（接続時と1 s周期）、`ACOUSTIC_OBSERVATION`（20 ms周期）、`HEALTH`（1 s周期）、`ACOUSTIC_FEATURE`（音量イベント時）
+- 受信: CPU0の`ROVER_TELEMETRY`、`ACTUATOR_TELEMETRY`、`POSE_TELEMETRY`、`NAV_DIAGNOSTICS`（音源位置・到着・回避診断を含む）
 - Wi-Fi: station mode、自動再接続、指定PCへのUDP JSON Lines（250 ms周期）
 - フレーム: `firmware/common/acoustic_protocol.h` の共有バイナリプロトコル
 - log-mel診断: 起動時固定ベクトル自己テスト、生成fps、80-frameリング充填、256-sampleブロック処理時間、I2S overrun
@@ -69,7 +69,7 @@ idf.py -p COMx flash
 
 1. EK-RA8P1 J7をXIAO側USB-Cから外し、XIAO側USB-CをPCへ直接接続します。
 2. XIAO ESP32S3本体の`BOOT`を押したまま、XIAO本体の`RESET`を押して離します。
-3. `BOOT`を離し、WindowsでCOMポートが列挙されたことを確認します。
+3. `BOOT`を離し、COMポート（ROMブートローダー）が列挙されたことを確認します。
 4. `ESP32: Upload`を実行します。
 
 ReSpeaker基板側のXVF3800用`RESET`ではESP32-S3をROMダウンロードモードへ移行できません。XIAO上の小さい`BOOT`/`RESET`を使用してください。ボタンを見分けにくい場合は、XIAO側USB-Cを外し、XIAOの`BOOT`を押したままPCへ接続してから`BOOT`を離す方法でも移行できます。
@@ -80,7 +80,7 @@ GPIO43/44はXVF3800のI2Sに使用するため、UART0 consoleは無効です。
 
 1. XIAO側USB-CをPCへ接続してリセットします。
 2. デバイスマネージャーでCDC COMポートが1個だけ列挙されることを確認します。
-3. COMポートをバイナリで読み、先頭が `53 52 01 01` のHELLO、その後にtype `02` の観測が約20 Hz、type `03` のhealthが約1 Hzで届くことを確認します。
+3. COMポートをバイナリで読み、先頭が `53 52 02 01` のHELLO、その後にtype `02` の観測が約50 Hz、type `03` のhealthが約1 Hzで届くことを確認します。
 4. 無音時と発声時で `level_dbfs_x100`、`peak_dbfs_x100`、`vad`が変化することを確認します。
 5. 音源を周囲へ移動し、有効なDoAが `0..359`、読出失敗時が `0xFFFF`になることを確認します。UDP診断では`xvf_raw_status`も併せて記録し、DoA/VAD固定時のXVF3800応答切り分けに使います。
 6. CRC-16/CCITT-FALSEを検証し、sequenceが増加することを確認します。
@@ -92,7 +92,7 @@ GPIO43/44はXVF3800のI2Sに使用するため、UART0 consoleは無効です。
 1. EK-RA8P1 J7をUSB hostとして有効にし、VBUSENを含むUSB HSピン設定を生成します。
 2. J7へUSB-C male to USB-A femaleのhost adapterを挿し、data対応USB-A to USB-CケーブルでXIAO側USB-Cへ接続します。
 3. EK-RA8P1側を先に起動してからReSpeakerを接続します。
-4. CPU0でHELLO受信、50 ms前後の観測更新、sequence、CRC error count、timeoutを確認します。
+4. CPU0でHELLO受信、20 ms前後の観測更新、観測専用sequence、raw/filtered DoA、confidence、欠落・重複数、CRC error count、timeoutを確認します。
 5. USBを抜いたときCPU0がアクチュエータを安全停止し、再接続後に新しいHELLOを受けて復帰することを確認します。
 
 EK-RA8P1からのVBUS給電を使う場合も、モーター電源や3S LiPoをUSB 5 Vへ直結しないでください。電源容量、突入電流、GND経路は実機配線に合わせて確認します。

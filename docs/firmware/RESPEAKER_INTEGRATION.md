@@ -352,6 +352,25 @@ if raw DoA is not clockwise-positive:
 7. motor停止時、servo保持時、motor回転後のsettle中を比較し、500 msで自己雑音が十分下がるか確認する。Wi-Fi実装後は、送信中も同じ測定を追加する。
 8. 校正値をCPU0設定へ固定し、ReSpeakerの取付角を変えた場合だけ再校正する。
 
+### 7.1 オドメトリ世界座標系と車体相対座標系の変換
+
+オドメトリ世界座標系（`odometry.c`）と車体相対座標系（DoA・操舵角・音源方位）では、角度の回転極性が異なる点に注意する。
+
+- **オドメトリ世界座標系**: 初期進行方向を $+X$、左方を $+Y$ とし、反時計回り（CCW: 左旋回）を正とする極座標系（$\theta = 0$ が $+X$、$\theta = +\pi/2$ が $+Y$）。
+- **車体相対座標系**: 車体正面を $0^\circ$、**右方を正（CW）**、**左方を負（CCW）** とする。
+
+このため、音源位置推定器（`sound_source_localizer.c`）における座標変換は以下の関係を満たす。
+
+1. **車体相対DoAから世界座標観測線（bearing ray）への変換**:
+   車体姿勢角 $\theta_{\text{rover}}$（CCW正）に対して、右方にある音源（$\text{relative\_doa} > 0$）は時計回りに回転するため、世界方位角 $\phi_{\text{world}}$ は引算となる。
+   $$\phi_{\text{world}} = \theta_{\text{rover}} - \text{relative\_doa}$$
+2. **推定音源位置 $(x_s, y_s)$ から車体相対音源方位（`source_bearing_deg`）への変換**:
+   車体位置 $(x_r, y_r)$ から音源への世界ベクトル方位 $\text{atan2}(y_s - y_r, x_s - x_r)$（CCW正）から、車体正面からの時計回り角度（右正）を算出する。
+   $$\text{source\_bearing} = \theta_{\text{rover}} - \text{atan2}(y_s - y_r, x_s - x_r)$$
+3. **Rover Monitor（`index.html`）での表示**:
+   - レーダー表示の `drawArrow(sourceBearing)` は右正（$0^\circ$ が上、$+90^\circ$ が右、$-90^\circ$ が左）として直接描画される。
+   - 地図表示（`trajectoryCanvas`）では、世界座標系 $+X$（前）を地図上方向（$+Y_{\text{map}}$）、$+Y$（左）を地図左方向（$-X_{\text{map}}$、すなわち $X_{\text{map}} = -y$）として投影される。
+
 VADは音声活動検出であり、任意の衝撃音、機械音、警報音を必ず検出する保証はない。さらに、現在使用しているXVF3800 I2S firmwareでは公式GPO ServicerのDoA取得がstatus `0x41`で失敗するため、ESP32S3はselected azimuthへfallbackしている。この値は新しい音へ切り替わるまで直前の方向を保持し、fallback時のVADもAEC speech energyから生成した近似値である。そこで現行制御はVADをイベント開始条件にだけ使い、開始後500 msは保持値を捨て、その後の最新5 sampleで方向を確定する。目的音とモーター自己雑音の実測値を採り、trigger/release閾値、更新待ち時間、安定幅は実機ごとに調整する。
 
 ## 8. 安全な導入・検証順

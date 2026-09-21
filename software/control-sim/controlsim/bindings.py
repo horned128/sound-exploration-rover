@@ -26,13 +26,17 @@ CPU0_BACKGROUND_MODEL_HIDDEN_DIMENSION = 16
 class AcousticObservation(ctypes.Structure):
     _fields_ = [
         ("doa_deg", ctypes.c_uint16),
+        ("raw_doa_deg", ctypes.c_uint16),
         ("level_dbfs_x100", ctypes.c_int16),
         ("peak_dbfs_x100", ctypes.c_int16),
         ("vad", ctypes.c_uint8),
+        ("doa_confidence", ctypes.c_uint8),
         ("xvf_status", ctypes.c_uint8),
         ("audio_flags", ctypes.c_uint8),
         ("xvf_raw_status", ctypes.c_uint8),
+        ("reserved", ctypes.c_uint8),
         ("audio_frame_count", ctypes.c_uint32),
+        ("sample_sequence", ctypes.c_uint32),
     ]
 
 
@@ -45,6 +49,10 @@ class SoundFollowInput(ctypes.Structure):
         ("observation", AcousticObservation),
         ("match_required", BOOL),
         ("target_sound_matched", BOOL),
+        ("navigation_target_valid", BOOL),
+        ("navigation_bearing_deg", ctypes.c_int16),
+        ("arrival_verify", BOOL),
+        ("arrived", BOOL),
         ("imu_valid", BOOL),
         ("gyro_z_dps_x10", ctypes.c_int16),
         ("imu_update_count", ctypes.c_uint32),
@@ -94,6 +102,7 @@ class ObstacleAvoidanceOutput(ctypes.Structure):
         ("state", ctypes.c_int32),
         ("rule", ctypes.c_int32),
         ("steering_deg", ctypes.c_int16),
+        ("is_spin_turn", BOOL),
         ("left_rpm", ctypes.c_int16),
         ("right_rpm", ctypes.c_int16),
         ("actuator_enable", BOOL),
@@ -154,6 +163,40 @@ class OdometryContext(ctypes.Structure):
         ("right_unwrapped", ctypes.c_int32),
         ("initialized", BOOL),
         ("gyro_calibrated", BOOL),
+    ]
+
+
+class SoundSourceLocalizerInput(ctypes.Structure):
+    _fields_ = [
+        ("pose", OdometryPose),
+        ("relative_doa_deg", ctypes.c_int16),
+        ("doa_confidence", ctypes.c_uint8),
+        ("new_observation", BOOL),
+        ("sound_valid", BOOL),
+        ("pose_valid", BOOL),
+        ("observation_sequence", ctypes.c_uint32),
+        ("now_ms", ctypes.c_uint32),
+    ]
+
+
+class SoundSourceLocalizerOutput(ctypes.Structure):
+    _fields_ = [
+        ("source_x_mm", ctypes.c_int32),
+        ("source_y_mm", ctypes.c_int32),
+        ("source_range_mm", ctypes.c_uint32),
+        ("source_bearing_deg", ctypes.c_int16),
+        ("source_confidence", ctypes.c_uint8),
+        ("observation_count", ctypes.c_uint8),
+        ("source_position_valid", BOOL),
+        ("localization_geometry_valid", BOOL),
+        ("navigation_target_valid", BOOL),
+        ("arrival_candidate", BOOL),
+        ("localization_residual_mm", ctypes.c_uint16),
+        ("bearing_crossing_angle_deg", ctypes.c_uint16),
+        ("baseline_mm", ctypes.c_uint16),
+        ("source_position_shift_mm", ctypes.c_uint16),
+        ("arrival_confirm_count", ctypes.c_uint8),
+        ("arrival_state", ctypes.c_int32),
     ]
 
 
@@ -298,6 +341,13 @@ def library() -> ctypes.CDLL:
         ctypes.POINTER(OdometryPose),
     ]
     handle.odometry_get_pose.restype = None
+    handle.sound_source_localizer_init.argtypes = []
+    handle.sound_source_localizer_init.restype = None
+    handle.sound_source_localizer_step.argtypes = [
+        ctypes.POINTER(SoundSourceLocalizerInput),
+        ctypes.POINTER(SoundSourceLocalizerOutput),
+    ]
+    handle.sound_source_localizer_step.restype = None
     handle.smooth_avoidance_plan.argtypes = [
         ctypes.POINTER(SmoothAvoidanceInput),
         ctypes.POINTER(SmoothAvoidanceOutput),

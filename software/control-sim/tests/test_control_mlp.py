@@ -6,8 +6,8 @@ Verifies:
 3. Numerical parity (<= 1 LSB, >= 90% 0 LSB match) between Python TFLite reference
    and C tflm_runtime_invoke.
 4. Firmware control_mlp_planner C API (init, reset, proactive steering, rate limiting,
-   and hard stop failsafe).
-5. Closed-loop wall approach collision-free guarantee across 54 dynamic conditions.
+   and close-distance continuation).
+5. Closed-loop wall approach forward-priority behavior across 54 dynamic conditions.
 """
 
 from __future__ import annotations
@@ -237,20 +237,22 @@ def test_control_mlp_planner_lifecycle_and_proactive_steering() -> None:
 
 
 def test_control_mlp_planner_failsafe_and_rate_limiting() -> None:
-    """Verify safety failsafes: hard stop <= 250 mm, sensor invalid fallback, and rate limits."""
+    """Verify invalid-sensor fallback and rate limits without a 250mm distance veto."""
     handle = library()
     handle.control_mlp_planner_reset()
     handle.control_mlp_planner_init()
 
-    # 1. Hard stop distance (any valid channel <= 250 mm)
+    # 1. Close distance alone does not trigger a planner hard stop.
     for idx in range(3):
         dists = [1000, 1000, 1000]
         dists[idx] = 249
+        handle.control_mlp_planner_reset()
+        handle.control_mlp_planner_init()
         snap = sensor_snapshot(left_mm=dists[0], center_mm=dists[1], right_mm=dists[2])
         out = control_mlp_plan_step(snap, 0.0)
-        assert out.is_blocked, f"Channel {idx} <= 250 mm must trigger is_blocked"
-        assert out.speed_scale == 0.0
-        assert out.fallback_required
+        assert not out.fallback_required
+        assert not out.is_blocked, f"Channel {idx} close reading must not stop by distance"
+        assert out.speed_scale > 0.0
 
     # 2. Invalid sensor snapshot / NULL fallback
     out_null = control_mlp_plan_step(None, 0.0)

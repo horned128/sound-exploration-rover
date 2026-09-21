@@ -26,10 +26,12 @@ typedef enum e_sound_follow_state {
     CPU0_THINK_STATE_FAULT,                                 /**< システム異常停止 */
     CPU0_THINK_STATE_SENSOR_PIVOT_LEFT,                     /**< センサー判断の左ピボット */
     CPU0_THINK_STATE_SENSOR_PIVOT_RIGHT,                    /**< センサー判断の右ピボット */
-    CPU0_THINK_STATE_SENSOR_BACKUP,                         /**< センサー判断の後退 */
-    CPU0_THINK_STATE_SPIN_PREP,                             /**< その場旋回の舵角整定中 */
-    CPU0_THINK_STATE_SPIN_STEP,                             /**< その場旋回中 */
-    CPU0_THINK_STATE_SPIN_NO_PROGRESS,                      /**< その場旋回のヨー進行不足停止 */
+    CPU0_THINK_STATE_SENSOR_BACKUP,                         /**< 予約済み旧自律後退状態（未使用） */
+    CPU0_THINK_STATE_SPIN_PREP,                             /**< 最小並進回頭の舵角整定中 */
+    CPU0_THINK_STATE_SPIN_STEP,                             /**< 最小並進回頭中 */
+    CPU0_THINK_STATE_SPIN_NO_PROGRESS,                      /**< 最小並進回頭のヨー進行不足停止 */
+    CPU0_THINK_STATE_ARRIVAL_VERIFY,                        /**< 音源到着候補の停止確認 */
+    CPU0_THINK_STATE_ARRIVED,                               /**< 音源到着による停止 */
 } sound_follow_state_t;
 
 /**< 音源追従ステートマシンへ入力するリンク・安全・照合状態 */
@@ -41,6 +43,10 @@ typedef struct st_sound_follow_input {
     acoustic_observation_t observation;                     /**< 最新音響観測 */
     BOOL match_required;                                    /**< 見本照合を要求する状態 */
     BOOL target_sound_matched;                              /**< 対象音一致状態 */
+    BOOL navigation_target_valid;                           /**< 位置推定済み音源目標が有効 */
+    H navigation_bearing_deg;                               /**< 現在位置から音源への方位（右正）[deg] */
+    BOOL arrival_verify;                                    /**< 到着候補の停止確認要求 */
+    BOOL arrived;                                           /**< 音源到着停止要求 */
     BOOL imu_valid;                                         /**< 生ジャイロZ値を利用可能な状態 */
     H gyro_z_dps_x10;                                       /**< 生ジャイロZ角速度[0.1dps] */
     UW imu_update_count;                                    /**< センサーの正常更新回数 */
@@ -50,7 +56,7 @@ typedef struct st_sound_follow_input {
 typedef struct st_sound_follow_output {
     sound_follow_state_t state;                             /**< 追従状態 */
     H steering_deg;                                         /**< 操舵角指令[deg] */
-    BOOL is_spin_turn;                                      /**< ハの字操舵によるその場旋回指令 */
+    BOOL is_spin_turn;                                      /**< X字操舵による最小並進回頭指令 */
     H left_rpm;                                             /**< 左車輪指令RPM */
     H right_rpm;                                            /**< 右車輪指令RPM */
     BOOL actuator_enable;                                   /**< アクチュエータ出力許可 */
@@ -58,6 +64,7 @@ typedef struct st_sound_follow_output {
 } sound_follow_output_t;
 
 EXPORT void sound_follow_controller_init(void);             /* 追従状態初期化 */
+EXPORT H sound_follow_doa_to_relative(UH doa_deg);          /* XVF DoAから車体相対角への変換 */
 EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input,
                                   UW elapsed_ms,
                                   sound_follow_output_t * p_output); /* 追従状態更新 */

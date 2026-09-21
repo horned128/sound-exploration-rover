@@ -24,10 +24,17 @@ int main(void)
     obstacle_avoidance_controller_step(&snapshot, FALSE, 0U, 0, &avoidance_output);
     /* Exercise timed recovery and signed gyro arithmetic under ASan/UBSan. */
     obstacle_avoidance_controller_init();
-    for (UW now_ms = 0U; now_ms <= 4000U; now_ms += 100U) {
+    for (UW now_ms = 0U; now_ms <= 6000U; now_ms += 100U) {
         snapshot.update_count++;
         snapshot.tof_distance_mm[CPU0_TOF_CENTER] = 430U;
         obstacle_avoidance_controller_step(&snapshot, FALSE, now_ms, 0, &avoidance_output);
+        assert(!((avoidance_output.left_rpm < 0) && (avoidance_output.right_rpm < 0)));
+    }
+    assert(CPU0_SENSOR_RULE_BLOCKED_STOP != avoidance_output.rule);
+    for (UW index = 0U; index < 3U; index++) {
+        snapshot.update_count++;
+        snapshot.tof_distance_mm[CPU0_TOF_CENTER] = 120U;
+        obstacle_avoidance_controller_step(&snapshot, FALSE, 6100U + index * 100U, 0, &avoidance_output);
     }
     assert(CPU0_SENSOR_RULE_BLOCKED_STOP == avoidance_output.rule);
     obstacle_avoidance_controller_init();
@@ -58,11 +65,11 @@ int main(void)
     assert(!planner_output.is_blocked);
     assert(planner_output.speed_scale > 0.0f);
 
-    /* Exercise hard stop under ASan/UBSan */
+    /* Exercise close-distance continuation under ASan/UBSan */
     planner_input.tof_distance_mm[1] = 200.0f;
     smooth_avoidance_plan(&planner_input, &planner_output);
-    assert(planner_output.is_blocked);
-    assert(planner_output.speed_scale == 0.0f);
+    assert(!planner_output.is_blocked);
+    assert(planner_output.speed_scale > 0.0f);
 
     /* Exercise safety_arbiter under ASan/UBSan */
     safety_motion_command_t req = {
@@ -79,11 +86,11 @@ int main(void)
     assert(arb.actuator_enable);
     assert(arb.left_rpm == 100);
 
-    /* Exercise veto when front obstacle < 250mm */
+    /* Exercise close-distance continuation in the safety arbiter */
     snapshot.tof_distance_mm[CPU0_TOF_CENTER] = 200U;
     safety_arbiter_arbitrate(&req, &snapshot, TRUE, &arb);
-    assert(!arb.actuator_enable);
-    assert(arb.left_rpm == 0);
+    assert(arb.actuator_enable);
+    assert(arb.left_rpm == 100);
     assert(!arb.emergency_stop);
 
     /* Exercise control_mlp_planner under ASan/UBSan */
@@ -96,12 +103,10 @@ int main(void)
     control_mlp_planner_step(&snapshot, 15.0f, &mlp_out);
     assert(!mlp_out.fallback_required);
 
-    /* Exercise failsafe fallback when front distance <= 150mm */
+    /* Close distance alone does not trigger MLP fallback. */
     snapshot.tof_distance_mm[CPU0_TOF_CENTER] = 120U;
     control_mlp_planner_step(&snapshot, 0.0f, &mlp_out);
-    assert(mlp_out.fallback_required);
-    assert(mlp_out.is_blocked);
-    assert(mlp_out.speed_scale == 0.0f);
+    assert(!mlp_out.fallback_required);
 
     /* Exercise reset */
     control_mlp_planner_reset();

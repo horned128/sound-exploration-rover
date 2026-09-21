@@ -24,7 +24,7 @@
 #include <string.h>                                         /* 文字列・メモリー操作API */
 
 #define WIFI_TELEMETRY_CONNECTED_BIT       (1U << 0)
-#define WIFI_TELEMETRY_JSON_CAPACITY       (2048U)
+#define WIFI_TELEMETRY_JSON_CAPACITY       (3072U)
 
 static EventGroupHandle_t s_wifi_event_group;               /**< Wi-Fi接続状態イベント */
 static struct sockaddr_in s_destination;                    /**< UDP送信先IPv4アドレス */
@@ -50,6 +50,8 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
                                       acoustic_pose_telemetry_t const * pose_telemetry,
                                       bool pose_frame_valid, uint32_t received_at_ms,
                                       uint32_t actuator_received_at_ms, uint32_t pose_received_at_ms,
+                                      acoustic_nav_diagnostics_t const * nav_diagnostics,
+                                      bool nav_frame_valid, uint32_t nav_received_at_ms,
                                       int rssi_dbm, audio_capture_snapshot_t const * esp_audio,
                                       uint32_t feature_fps_x100);
 /* 接続状態JSON整形 */
@@ -87,6 +89,7 @@ static char const * wifi_telemetry_think_state(uint8_t state) {
         "SENSOR_FORWARD", "SENSOR_CAUTION_FORWARD", "SENSOR_TURN_LEFT", "SENSOR_TURN_RIGHT",
         "SENSOR_BLOCKED_STOP", "SENSOR_IMU_STOP", "FAULT",
         "SENSOR_PIVOT_LEFT", "SENSOR_PIVOT_RIGHT", "SENSOR_BACKUP",
+        "SPIN_PREP", "SPIN_STEP", "SPIN_NO_PROGRESS", "ARRIVAL_VERIFY", "ARRIVED",
     };
     return (state < (sizeof(names) / sizeof(names[0]))) ? names[state] : "UNKNOWN";
 }
@@ -218,6 +221,9 @@ static esp_err_t wifi_telemetry_station_start(void) {
  * @param[in] received_at_ms ESP32での受信時刻[ms]
  * @param[in] actuator_received_at_ms 実出力フレーム受信時刻[ms]
  * @param[in] pose_received_at_ms 姿勢推定フレーム受信時刻[ms]
+ * @param[in] nav_diagnostics 音源位置・到着・回避診断
+ * @param[in] nav_frame_valid 音源ナビ診断フレーム受信済みならtrue
+ * @param[in] nav_received_at_ms 音源ナビ診断フレーム受信時刻[ms]
  * @param[in] rssi_dbm Wi-Fi受信強度[dBm]
  * @param[in] esp_audio ESP32S3の音声DSP診断値
  * @param[in] feature_fps_x100 特徴量生成レート[fps x100]
@@ -230,6 +236,8 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
                                       acoustic_pose_telemetry_t const * pose_telemetry,
                                       bool pose_frame_valid, uint32_t received_at_ms,
                                       uint32_t actuator_received_at_ms, uint32_t pose_received_at_ms,
+                                      acoustic_nav_diagnostics_t const * nav_diagnostics,
+                                      bool nav_frame_valid, uint32_t nav_received_at_ms,
                                       int rssi_dbm, audio_capture_snapshot_t const * esp_audio,
                                       uint32_t feature_fps_x100) {
     uint32_t const now_ms = wifi_telemetry_uptime_ms();
@@ -241,6 +249,11 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
                                          : UINT32_MAX;
     bool const pose_valid = pose_frame_valid && ((pose_telemetry->flags & ACOUSTIC_POSE_FLAG_CALIBRATED) != 0U);
     uint32_t const pose_age_ms = pose_frame_valid ? (now_ms - pose_received_at_ms) : UINT32_MAX;
+    bool const nav_valid = nav_frame_valid && (nav_diagnostics->schema_version >= 1U);
+    uint32_t const nav_age_ms = nav_valid ? (now_ms - nav_received_at_ms) : UINT32_MAX;
+    uint16_t const raw_doa_deg = nav_valid ? nav_diagnostics->raw_doa_deg : ACOUSTIC_PROTOCOL_DOA_INVALID;
+    uint16_t const filtered_doa_deg = nav_valid ? nav_diagnostics->filtered_doa_deg : telemetry->doa_deg;
+    uint8_t const doa_confidence = nav_valid ? nav_diagnostics->doa_confidence : 0U;
 
     float const cosine_dist = (0xFFFFU == telemetry->infer_cosine_dist_x1000)
                                   ? -1.0f
@@ -265,7 +278,8 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         "\"cpu_ms\":%lu,\"cpu_seq\":%lu,\"state\":%u,"
         "\"configured\":%d,\"hello\":%d},"
         "\"audio\":{\"observation\":%d,\"sequence\":%lu,"
-        "\"age_ms\":%lu,\"doa_deg\":%u,"
+        "\"age_ms\":%lu,\"doa_deg\":%u,\"raw_doa_deg\":%u,"
+        "\"filtered_doa_deg\":%u,\"confidence\":%u,"
         "\"level_dbfs_x100\":%d,\"peak_dbfs_x100\":%d,"
         "\"vad\":%u,\"xvf_status\":%u,"
         "\"doa_fallback\":%d,\"flags\":%u,"
@@ -294,7 +308,18 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         "\"v_mm_s\":%ld,\"omega_mrad_s\":%ld,"
         "\"left_encoder\":%ld,\"right_encoder\":%ld,"
         "\"gyro_bias_dps_x10\":%d,\"stationary\":%u,\"calibrated\":%u,"
-        "\"uptime_ms\":%lu}}\n",
+        "\"uptime_ms\":%lu},"
+        "\"navigation\":{\"valid\":%d,\"age_ms\":%lu,"
+        "\"source_valid\":%d,"
+        "\"observation_sequence\":%lu,\"rover_x_mm\":%ld,\"rover_y_mm\":%ld,"
+        "\"rover_heading_mrad\":%ld,\"source_x_mm\":%ld,\"source_y_mm\":%ld,"
+        "\"range_mm\":%lu,\"bearing_deg\":%d,\"confidence\":%u,"
+        "\"observation_count\":%u,\"residual_mm\":%u,\"crossing_deg\":%u,"
+        "\"baseline_mm\":%u,\"position_shift_mm\":%u,\"geometry_valid\":%d,"
+        "\"target_valid\":%d},"
+        "\"arrival\":{\"candidate\":%d,\"state\":%u,\"confirm_count\":%u},"
+        "\"escape\":{\"minimum_translation_turn\":%d,\"sensor_rule\":%u,"
+        "\"backup_command_count\":%lu}}\n",
         (unsigned long) now_ms, (unsigned long) (now_ms - received_at_ms), rssi_dbm,
         (unsigned long) s_wifi_reconnect_count, (unsigned long) s_udp_send_count, (unsigned long) s_udp_error_count,
         esp_audio->valid ? 1 : 0, (unsigned long) esp_audio->frame_count,
@@ -307,7 +332,8 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         wifi_telemetry_flag(flags, ACOUSTIC_TELEMETRY_FLAG_HELLO_RECEIVED),
         wifi_telemetry_flag(flags, ACOUSTIC_TELEMETRY_FLAG_OBSERVATION),
         (unsigned long) telemetry->observation_sequence, (unsigned long) telemetry->observation_age_ms,
-        (unsigned int) telemetry->doa_deg, telemetry->level_dbfs_x100, telemetry->peak_dbfs_x100,
+        (unsigned int) telemetry->doa_deg, (unsigned int) raw_doa_deg, (unsigned int) filtered_doa_deg,
+        (unsigned int) doa_confidence, telemetry->level_dbfs_x100, telemetry->peak_dbfs_x100,
         (unsigned int) telemetry->vad, (unsigned int) telemetry->xvf_status,
         wifi_telemetry_flag(telemetry->audio_flags, ACOUSTIC_AUDIO_FLAG_DOA_FALLBACK),
         (unsigned int) telemetry->audio_flags,
@@ -348,7 +374,31 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         (int) pose_telemetry->gyro_bias_dps_x10,
         ((pose_telemetry->flags & ACOUSTIC_POSE_FLAG_STATIONARY) != 0U) ? 1U : 0U,
         ((pose_telemetry->flags & ACOUSTIC_POSE_FLAG_CALIBRATED) != 0U) ? 1U : 0U,
-        (unsigned long) pose_telemetry->uptime_ms);
+        (unsigned long) pose_telemetry->uptime_ms,
+        nav_valid ? 1 : 0, (unsigned long) nav_age_ms,
+        nav_valid && ((nav_diagnostics->flags & ACOUSTIC_NAV_FLAG_SOURCE_VALID) != 0U) ? 1 : 0,
+        (unsigned long) (nav_valid ? nav_diagnostics->observation_sequence : telemetry->observation_sequence),
+        (long) (nav_valid ? nav_diagnostics->rover_x_mm : 0),
+        (long) (nav_valid ? nav_diagnostics->rover_y_mm : 0),
+        (long) (nav_valid ? nav_diagnostics->rover_heading_mrad : 0),
+        (long) (nav_valid ? nav_diagnostics->source_x_mm : 0),
+        (long) (nav_valid ? nav_diagnostics->source_y_mm : 0),
+        (unsigned long) (nav_valid ? nav_diagnostics->source_range_mm : 0U),
+        (int) (nav_valid ? nav_diagnostics->source_bearing_deg : 0),
+        (unsigned int) (nav_valid ? nav_diagnostics->source_confidence : 0U),
+        (unsigned int) (nav_valid ? nav_diagnostics->observation_count : 0U),
+        (unsigned int) (nav_valid ? nav_diagnostics->localization_residual_mm : 0U),
+        (unsigned int) (nav_valid ? nav_diagnostics->crossing_angle_deg : 0U),
+        (unsigned int) (nav_valid ? nav_diagnostics->baseline_mm : 0U),
+        (unsigned int) (nav_valid ? nav_diagnostics->source_position_shift_mm : 0U),
+        nav_valid && ((nav_diagnostics->flags & ACOUSTIC_NAV_FLAG_GEOMETRY_VALID) != 0U) ? 1 : 0,
+        nav_valid && ((nav_diagnostics->flags & ACOUSTIC_NAV_FLAG_TARGET_VALID) != 0U) ? 1 : 0,
+        nav_valid && ((nav_diagnostics->flags & ACOUSTIC_NAV_FLAG_ARRIVAL_CANDIDATE) != 0U) ? 1 : 0,
+        (unsigned int) (nav_valid ? nav_diagnostics->arrival_state : 0U),
+        (unsigned int) (nav_valid ? nav_diagnostics->arrival_confirm_count : 0U),
+        nav_valid && ((nav_diagnostics->flags & ACOUSTIC_NAV_FLAG_MIN_TRANSLATION_TURN) != 0U) ? 1 : 0,
+        (unsigned int) (nav_valid ? nav_diagnostics->sensor_rule : 0U),
+        (unsigned long) (nav_valid ? nav_diagnostics->autonomous_backup_count : 0U));
 }
 
 /** =================================================================*
@@ -394,16 +444,19 @@ static void wifi_telemetry_task(void * argument) {
     acoustic_rover_telemetry_t latest_telemetry = {0};
     acoustic_actuator_telemetry_t latest_actuator_telemetry = {0};
     acoustic_pose_telemetry_t latest_pose_telemetry = {0};
+    acoustic_nav_diagnostics_t latest_nav_diagnostics = {0};
     acoustic_frame_t latest_frame = {0};
     uint32_t received_at_ms = 0U;
     uint32_t actuator_received_at_ms = 0U;
     uint32_t pose_received_at_ms = 0U;
+    uint32_t nav_received_at_ms = 0U;
     uint32_t last_send_ms = 0U;
     uint32_t previous_feature_frame_count = 0U;
     uint32_t previous_feature_sample_ms = 0U;
     bool telemetry_valid = false;
     bool actuator_frame_valid = false;
     bool pose_frame_valid = false;
+    bool nav_frame_valid = false;
     int socket_fd = -1;
     uint8_t rx_data[CONFIG_TINYUSB_CDC_RX_BUFSIZE];
     acoustic_protocol_parser_init(&parser);
@@ -428,6 +481,9 @@ static void wifi_telemetry_task(void * argument) {
                     } else if (acoustic_protocol_decode_pose_telemetry(&frame, &latest_pose_telemetry)) {
                         pose_received_at_ms = wifi_telemetry_uptime_ms();
                         pose_frame_valid = true;
+                    } else if (acoustic_protocol_decode_nav_diagnostics(&frame, &latest_nav_diagnostics)) {
+                        nav_received_at_ms = wifi_telemetry_uptime_ms();
+                        nav_frame_valid = true;
                     }
                 }
             }
@@ -479,6 +535,7 @@ static void wifi_telemetry_task(void * argument) {
                                           &latest_actuator_telemetry, actuator_frame_valid,
                                           &latest_pose_telemetry, pose_frame_valid,
                                           received_at_ms, actuator_received_at_ms, pose_received_at_ms,
+                                          &latest_nav_diagnostics, nav_frame_valid, nav_received_at_ms,
                                           rssi_dbm, &esp_audio, feature_fps_x100)
                                     : wifi_telemetry_format_heartbeat(s_telemetry_json, sizeof(s_telemetry_json), rssi_dbm, &esp_audio,
                                                                       feature_fps_x100);
