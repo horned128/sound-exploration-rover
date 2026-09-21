@@ -295,7 +295,10 @@ EXPORT ER task_infer_prototype_telemetry_get(task_infer_prototype_telemetry_t * 
     p_telemetry->storage_valid = infer_storage_valid;
     p_telemetry->sample_count = infer_storage_data.sample_count;
     p_telemetry->target_peak_bin = infer_target_peak_bin;
-    p_telemetry->identifier_threshold = infer_storage_data.identifier_threshold;
+    /* 旧MRAMに広い値が保存されていても、画面には実際に使用する上限を出す。 */
+    p_telemetry->identifier_threshold =
+        (infer_storage_data.identifier_threshold > CPU0_ACOUSTIC_IDENTIFIER_THRESHOLD_MAX) ?
+            CPU0_ACOUSTIC_IDENTIFIER_THRESHOLD_MAX : infer_storage_data.identifier_threshold;
     return tk_unl_mtx(infer_mutex_id);
 }
 

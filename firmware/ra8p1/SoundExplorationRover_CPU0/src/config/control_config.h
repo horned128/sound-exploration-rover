@@ -34,8 +34,8 @@
 #define CPU0_SENSOR_COMMIT_MAX_MS          (10000U)         /**< センサー確定の最大[ms] */
 #define CPU0_SENSOR_ESCAPE_MAX_ATTEMPTS    (3U)             /**< センサー脱出最大の試行回数 */
 #define CPU0_SENSOR_MAX_STEP_MS            (500U)           /**< センサー最大の更新幅[ms] */
-/* 実機ログの左旋回でZ負、右旋回でZ正。IMUの取付を変えたら再確認する。 */
-#define CPU0_SENSOR_YAW_AXIS               (2U)             /**< センサーヨーの軸 */
+/* 車体中心の鉛直Z軸を使い、実機ログでは左旋回が負、右旋回が正となる。 */
+#define CPU0_SENSOR_YAW_AXIS               (2U)             /**< 車体ヨーに使う鉛直Z軸 */
 #define CPU0_SENSOR_YAW_RIGHT_SIGN         (1)              /**< センサーヨー右の符号 */
 #define CPU0_SENSOR_YAW_DEADBAND_DPS_X10   (30)             /**< センサーヨーの不感帯[0.1dps] */
 /*
@@ -68,6 +68,17 @@
 #define CPU0_SOUND_FRONT_TOLERANCE_DEG     (0)              /**< 音響正面の許容幅[deg] */
 #define CPU0_SOUND_STEERING_MIN_DEG        (1)              /**< 音響操舵の最小[deg] */
 #define CPU0_SOUND_STEERING_MAX_DEG        (45)             /**< 音響操舵の最大[deg] */
+#define CPU0_SOUND_SPIN_THRESHOLD_DEG      (90)             /**< 後方音源のその場旋回DoA[deg] */
+#define CPU0_SOUND_SPIN_RPM                (300)            /**< その場旋回の左右車輪目標RPM絶対値 */
+#define CPU0_SOUND_SPIN_SLOW_RPM           (220)            /**< その場旋回の終端減速RPM絶対値 */
+#define CPU0_SOUND_SPIN_SERVO_DEG          (45)             /**< その場旋回の各舵輪角度絶対値[deg] */
+#define CPU0_SOUND_SPIN_FRONT_RESERVE_DEG  (15)             /**< 前進操舵へ渡す残角[deg] */
+#define CPU0_SOUND_SPIN_MAX_YAW_MDEG       (90000)          /**< その場旋回一回の最大目標ヨー[mdeg] */
+#define CPU0_SOUND_SPIN_SLOWDOWN_MDEG      (20000)          /**< 終端減速を始める残ヨー[mdeg] */
+#define CPU0_SOUND_SPIN_MAX_MS             (2200U)          /**< その場旋回の安全上限時間[ms] */
+#define CPU0_SOUND_SPIN_PROGRESS_MS        (500U)           /**< その場旋回の進行を確認する時間[ms] */
+#define CPU0_SOUND_SPIN_PROGRESS_MDEG      (3000)           /**< 進行成立とみなす最小ヨー角[mdeg] */
+#define CPU0_SOUND_SPIN_FAILURE_HOLD_MS    (500U)           /**< 進行不足の通知保持[ms] */
 #define CPU0_SOUND_LINK_STABLE_MS          (500U)           /**< 音響リンクの安定[ms] */
 #define CPU0_SOUND_OBSERVATION_TIMEOUT_MS  (600U)           /**< 音響観測の期限[ms] */
 #define CPU0_SOUND_STEER_SETTLE_MS         (500U)           /**< 音響操舵の安定待ち[ms] */

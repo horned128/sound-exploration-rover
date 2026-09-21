@@ -27,6 +27,9 @@ typedef enum e_sound_follow_state {
     CPU0_THINK_STATE_SENSOR_PIVOT_LEFT,                     /**< センサー判断の左ピボット */
     CPU0_THINK_STATE_SENSOR_PIVOT_RIGHT,                    /**< センサー判断の右ピボット */
     CPU0_THINK_STATE_SENSOR_BACKUP,                         /**< センサー判断の後退 */
+    CPU0_THINK_STATE_SPIN_PREP,                             /**< その場旋回の舵角整定中 */
+    CPU0_THINK_STATE_SPIN_STEP,                             /**< その場旋回中 */
+    CPU0_THINK_STATE_SPIN_NO_PROGRESS,                      /**< その場旋回のヨー進行不足停止 */
 } sound_follow_state_t;
 
 /**< 音源追従ステートマシンへ入力するリンク・安全・照合状態 */
@@ -38,12 +41,16 @@ typedef struct st_sound_follow_input {
     acoustic_observation_t observation;                     /**< 最新音響観測 */
     BOOL match_required;                                    /**< 見本照合を要求する状態 */
     BOOL target_sound_matched;                              /**< 対象音一致状態 */
+    BOOL imu_valid;                                         /**< 生ジャイロZ値を利用可能な状態 */
+    H gyro_z_dps_x10;                                       /**< 生ジャイロZ角速度[0.1dps] */
+    UW imu_update_count;                                    /**< センサーの正常更新回数 */
 } sound_follow_input_t;
 
 /**< 音源追従ステートマシンが出力する走行指令 */
 typedef struct st_sound_follow_output {
     sound_follow_state_t state;                             /**< 追従状態 */
     H steering_deg;                                         /**< 操舵角指令[deg] */
+    BOOL is_spin_turn;                                      /**< ハの字操舵によるその場旋回指令 */
     H left_rpm;                                             /**< 左車輪指令RPM */
     H right_rpm;                                            /**< 右車輪指令RPM */
     BOOL actuator_enable;                                   /**< アクチュエータ出力許可 */

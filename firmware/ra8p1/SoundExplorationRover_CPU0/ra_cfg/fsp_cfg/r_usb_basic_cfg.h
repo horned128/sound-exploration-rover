@@ -34,9 +34,9 @@ extern const uint16_t NULL[];
 #if (RA_NOT_DEFINED != RA_NOT_DEFINED)
             #define USB_CFG_HAUD_USE
             #endif
-#if ((RA_NOT_DEFINED != RA_NOT_DEFINED) || (RA_NOT_DEFINED != RA_NOT_DEFINED))
-            #define USB_CFG_PCDC_USE
-            #endif
+#if ((1 != RA_NOT_DEFINED) || (RA_NOT_DEFINED != RA_NOT_DEFINED))
+#define USB_CFG_PCDC_USE
+#endif
 #if (RA_NOT_DEFINED != RA_NOT_DEFINED)
             #define USB_CFG_PCDC2_USE
             #endif
@@ -104,13 +104,13 @@ extern const uint16_t NULL[];
             #endif
 
 #if (defined(USB_CFG_PCDC_USE) || defined(USB_CFG_PPRN_USE) || defined(USB_CFG_PMSC_USE) || defined(USB_CFG_PHID_USE) || defined(USB_CFG_PVND_USE) || defined(USB_CFG_PAUD_USE) || defined(USB_CFG_DFU_USE) || defined(USB_CFG_PAUD_USE))
-            #define USB_CFG_PERI_MODE 2
-            #else
-#define USB_CFG_PERI_MODE 0
-#endif
+#define USB_CFG_PERI_MODE 2
+#else
+            #define USB_CFG_PERI_MODE 0
+            #endif
 
 #define USB_CFG_MODE (USB_CFG_PERI_MODE | USB_CFG_HOST_MODE)
-#define USB_CFG_MULTIPORT (USB_CFG_DISABLE)
+#define USB_CFG_MULTIPORT (USB_CFG_ENABLE)
 #define USB_CFG_PARAM_CHECKING_ENABLE (BSP_CFG_PARAM_CHECKING_ENABLE)
 #define USB_CFG_CLKSEL (USB_CFG_24MHZ)
 #define USB_CFG_BUSWAIT (USB_CFG_BUSWAIT_7)

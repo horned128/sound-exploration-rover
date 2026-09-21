@@ -8,7 +8,7 @@ CPU0 / Cortex-M85 / μT-Kernel
                    ├─ task_command (priority 6 / 50 ms)
                    │    └─ 4サーボ＋左右モーターを1フレームでIPC送信
                    ├─ task_acoustic_link   (priority 8 / 1 ms poll)
-                   │    └─ USB HCDCの音響観測受信・テレメトリ送信
+                   │    └─ J7 USB HCDCの音響観測受信・J11 AI Lab CDC deviceの診断
                    └─ task_think   (priority 10 / 100 ms)
                         ├─ 停止聴取型の音源追従目標
                         └─ 青・緑LEDによる状態／fault表示
@@ -189,7 +189,7 @@ RPWMとLPWMは同じ側で同時にHighにせず、同じ側では1方向のPWM�
 
 ## 音源追従の動作確認
 
-初回は車輪を浮かせ、モーター電源を電流制限付きにします。USB linkと音響観測が成立するまでCPU0はemergency stopを維持します。成立後は停止して音を聴き、DoA更新待ちと5点の安定確認を行ってからservoを500 ms整定し、最大左右120 RPM相当で1000 msだけ移動して500 ms停止します。
+初回は車輪を浮かせ、モーター電源を電流制限付きにします。USB linkと音響観測が成立するまでCPU0はemergency stopを維持します。成立後は停止して音を聴き、DoA更新待ちと5点の安定確認を行います。前方・側方ではservoを500 ms整定して最大左右120 RPM相当で前進します。後方ではハの字操舵を500 ms整定して左右逆転のその場旋回を行い、車体中心に固定したBMI270の鉛直Z軸ヨーで目標到達・進行不足を確認します。初回は必ず車輪を浮かせ、左右モーターが逆転すること、Z軸が期待方向へ増えること、残ヨー20度以下で220 RPMへ減速することを順に確認してください。
 
 USB接続だけの試験、静止音響試験、DoA座標校正、車輪を浮かせたアクチュエータ試験、接地試験の順序は[ReSpeaker統合設計の「安全な導入・検証順」](../../docs/firmware/RESPEAKER_INTEGRATION.md#8-安全な導入検証順)に従ってください。目標RPMは20 kHz PWMの基本値へ変換し、現在の代表エンコーダ値は診断にだけ使用します。
 
@@ -257,6 +257,8 @@ CPU0では次の変数をLive Watchへ追加します。
 | `SoundExplorationRover_CPU0/src/main.c` | CPU1起動とCPU0タスク群の起動 |
 | `SoundExplorationRover_CPU0/src/tasks/task_registry.c` | CPU0タスク登録配列、全タスクの生成・開始、失敗時の逆順解放 |
 | `SoundExplorationRover_CPU0/src/tasks/task_acoustic_link.c` | HCDC event、frame検証、最新音響snapshot |
+| `SoundExplorationRover_CPU0/src/services/acoustic_ai_lab_link.c` | J11 USB CDCによるAI学習・推論品質snapshot、特徴量/profile読出し、学習操作 |
+| `../../software/acoustic-ai-lab/` | JSON Lines記録とブラウザ可視化を行うPC側品質評価ツール。Rover Monitor/UDPとは独立 |
 | `SoundExplorationRover_CPU0/src/tasks/task_think.c` | 音響snapshot取得、目標展開、青・緑LED、CPU0 faultラッチ |
 | `SoundExplorationRover_CPU0/src/control/sound_follow_controller.c` | 停止聴取型の音源追従状態機械 |
 | `SoundExplorationRover_CPU0/src/tasks/task_command.c` | 最新目標の共有、期限監視、全アクチュエータのIPC一括送信 |

@@ -430,16 +430,21 @@ target RPM -> duty permille = target * 1000 / 300 RPM
 
 ## 8. 停止聴取型の音源追従
 
-`task_think`は[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/control/sound_follow_controller.c)を100 msごとに更新する。USB linkと観測が500 ms安定した後だけ待受へ入り、-45 dBFS以上かつVAD検出中の1観測を音源イベントの開始条件とする。開始直後の保持DoAを使わないよう500 ms待ち、その後の最新5 sampleが相互差20度以内になった場合だけ操舵する。取得開始から2000 ms以内に安定しなければイベントを破棄する。DoAの全方位で前進を選び、側方・後方は最大45度の4輪逆相操舵に加え、内輪を90 RPM相当へ減速する。検出時にDoAと走行目標を固定し、500 msのservo整定後に1000 msだけ移動する。servoを直進へ戻して500 ms停止した後、200 msの静音を確認して次の検出を受け付ける。
+`task_think`は[`sound_follow_controller.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/control/sound_follow_controller.c)を100 msごとに更新する。USB linkと観測が500 ms安定した後だけ待受へ入り、-45 dBFS以上かつVAD検出中の1観測を音源イベントの開始条件とする。開始直後の保持DoAを使わないよう500 ms待ち、その後の最新5 sampleが相互差20度以内になった場合だけ動作する。取得開始から2000 ms以内に安定しなければイベントを破棄する。相対DoAの絶対値が90度を超える後方音源では、ハの字の45度操舵と左右逆回転によるその場旋回を選ぶ。車体中心に固定したBMI270の鉛直Z軸だけを積分し、同じ`update_count`を二重積分しない。今回の目標ヨーはDoAから決め、前進操舵へ渡す15度を残して最大90度に制限する。残ヨー20度以下では300 RPMから220 RPMへ減速し、目標到達または2200 msで停止・500 ms整定してから、連続音でも改めてDoAを測定する。前方・側方音源では最大45度の4輪逆相操舵で前進する。
 
 ```mermaid
 stateDiagram-v2
     [*] --> WAIT_LINK
     WAIT_LINK --> LISTEN: linkを500 ms確認
     LISTEN --> STEER_PREP: loud + stable DoA
+    LISTEN --> SPIN_PREP: 後方のloud + stable DoA
     STEER_PREP --> MOVE_STEP: 500 ms
-    MOVE_STEP --> SETTLE: 1000 ms
+    SPIN_PREP --> SPIN_STEP: 500 ms
+    SPIN_STEP --> SETTLE: Z軸ヨー目標 / 2200 ms
+    SPIN_STEP --> SPIN_NO_PROGRESS: 500 msで3度未満
+    SPIN_NO_PROGRESS --> COOLDOWN: 500 ms
     SETTLE --> COOLDOWN: 500 ms
+    SETTLE --> LISTEN: 成功したその場旋回
     COOLDOWN --> LISTEN: quiet 200 ms
     LISTEN --> WAIT_LINK: observation 600 ms timeout
     STEER_PREP --> WAIT_LINK: detach / timeout
@@ -454,7 +459,7 @@ stateDiagram-v2
     end note
 ```
 
-車体相対角は前0度、右正、左負で、正面±15度は0度操舵とする。正面以外は絶対値20～45度へ制限し、前輪FR/FLをその符号、後輪RR/RLを逆符号へ展開する。左右モーターを逆転させるその場旋回は使わない。`FAULT`へ入る原因bitは実行中にclearせず、復帰には原因除去後のsystem resetが必要である。動作値、USB protocol、DoA座標校正、安全な試験順は[ReSpeaker統合設計](RESPEAKER_INTEGRATION.md)を参照する。
+車体相対角は前0度、右正、左負である。後方音源のその場旋回ではFR/FL/RR/RLを接線方向へ向け、論理左右モーターを逆転させる。Z軸の右回頭を正として積分するため、IMUの取付を変更した場合は`CPU0_SENSOR_YAW_AXIS`と`CPU0_SENSOR_YAW_RIGHT_SIGN`を再確認する。`FAULT`へ入る原因bitは実行中にclearせず、復帰には原因除去後のsystem resetが必要である。動作値、USB protocol、DoA座標校正、安全な試験順は[ReSpeaker統合設計](RESPEAKER_INTEGRATION.md)を参照する。
 
 ## 9. FSP、Solution、ピン設定
 

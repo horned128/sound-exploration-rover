@@ -8,6 +8,7 @@
 #include "config/sensor_config.h"                           /* センサー安全判定値 */
 #include "ipc/actuator_ipc_client.h"                        /* CPU1実出力状態取得API */
 #include "services/acoustic_feature_assembler.h"            /* 特徴量イベント再組立 */
+#include "services/acoustic_ai_lab_link.h"                  /* J11 PC直結の学習・推論診断 */
 #include "services/odometry.h"                              /* オドメトリ位置姿勢 */
 #include "task_command.h"                                   /* 最新指令状態取得API */
 #include "task_infer.h"                                     /* 完成特徴量を推論タスクへ通知 */
@@ -225,6 +226,7 @@ EXPORT void task_acoustic_link_delete(void) {
         (void) g_usb_on_usb.close(&g_basic0_ctrl);
         audio_usb_open = FALSE;
     }
+    acoustic_ai_lab_link_deinit();
 
     if (acoustic_link_mutex_id > 0) {
         (void) tk_del_mtx(acoustic_link_mutex_id);
@@ -671,13 +673,7 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
 
     UB current_peak_bin = 255U;
     if (infer_ready && s_infer_result.summary_valid && (s_infer_result.active_frame_count >= 10U)) {
-        B max_val = -128;
-        for (UW b = 0U; b < 32U; b++) {
-            if (s_infer_result.summary[b] > max_val) {
-                max_val = s_infer_result.summary[b];
-                current_peak_bin = (UB) b;
-            }
-        }
+        current_peak_bin = acoustic_identifier_find_peak_bin(s_infer_result.summary, 1U);
     }
 
     UB const target_peak_bin = proto_ready ? proto_telem.target_peak_bin : 255U;
@@ -697,7 +693,10 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
     }
 
     UH threshold_x1000 = 0U;
-    if (proto_ready && proto_telem.storage_valid) {
+    if (infer_ready && (s_infer_result.identifier.threshold >= 0.0F)) {
+        float const th = s_infer_result.identifier.threshold;
+        threshold_x1000 = (UH) ((th > 2.0F) ? 2000U : (th < 0.0F) ? 0U : (UW) (th * 1000.0F + 0.5F));
+    } else if (proto_ready && proto_telem.storage_valid) {
         float const th = proto_telem.identifier_threshold;
         threshold_x1000 = (UH) ((th > 2.0F) ? 2000U : (th < 0.0F) ? 0U : (UW) (th * 1000.0F + 0.5F));
     }
@@ -897,15 +896,19 @@ LOCAL void task_acoustic_link_entry(INT stacd, void * exinf) {
     (void) stacd;
     (void) exinf;
 
+    /*
+     * J11のAI LabはJ7のReSpeaker linkとは独立に開始する。J7のUSB host
+     * 初期化が失敗しても、PCから学習・推論の診断を続けられるようにする。
+     */
+    acoustic_ai_lab_link_init();
     g_task_acoustic_link_last_error = g_usb_on_usb.open(&g_basic0_ctrl, &g_basic0_cfg);
     if (FSP_SUCCESS != g_task_acoustic_link_last_error) {
         (void) task_think_report_fault(APP_FAULT_USB_INIT);
-        while (1) {
-            (void) tk_dly_tsk(CPU0_AUDIO_USB_POLL_MS);
-        }
+        audio_usb_open = FALSE;
+    } else {
+        audio_usb_open = TRUE;
+        g_task_acoustic_link_usb_state = CPU0_AUDIO_USB_STATE_WAIT_DEVICE;
     }
-    audio_usb_open = TRUE;
-    g_task_acoustic_link_usb_state = CPU0_AUDIO_USB_STATE_WAIT_DEVICE;
 
     while (1) {
         audio_now_ms = task_acoustic_link_monotonic_ms();
@@ -919,7 +922,10 @@ LOCAL void task_acoustic_link_entry(INT stacd, void * exinf) {
                 g_task_acoustic_link_last_event = event;
                 g_task_acoustic_link_event_count++;
             }
-            if (USB_STATUS_CONFIGURED == event) {
+            if (0U == event_info.module_number) {
+                /* USB event queueは全IPで共通。J11イベントをJ7音響linkへ混ぜない。 */
+                acoustic_ai_lab_link_event(&event_info, event, audio_now_ms);
+            } else if (audio_usb_open && (USB_STATUS_CONFIGURED == event)) {
                 ER const lock_err = tk_loc_mtx(acoustic_link_mutex_id, TMO_FEVR);
                 if (E_OK == lock_err) {
                     task_acoustic_link_link_reset();
@@ -930,7 +936,7 @@ LOCAL void task_acoustic_link_entry(INT stacd, void * exinf) {
                     audio_configured_at_ms = audio_now_ms;
                     (void) tk_unl_mtx(acoustic_link_mutex_id);
                 }
-            } else if (USB_STATUS_READ_COMPLETE == event) {
+            } else if (audio_usb_open && (USB_STATUS_READ_COMPLETE == event)) {
                 audio_read_pending = FALSE;
                 if ((USB_CLASS_HCDC == event_info.type) &&
                     ((FSP_SUCCESS == event_info.status) || (FSP_ERR_USB_SIZE_SHORT == event_info.status))) {
@@ -944,7 +950,7 @@ LOCAL void task_acoustic_link_entry(INT stacd, void * exinf) {
                     g_task_acoustic_link_last_error = event_info.status;
                     audio_continuous_error_count++;
                 }
-            } else if (USB_STATUS_WRITE_COMPLETE == event) {
+            } else if (audio_usb_open && (USB_STATUS_WRITE_COMPLETE == event)) {
                 audio_write_pending = FALSE;
                 if ((USB_CLASS_HCDC == event_info.type) && (FSP_SUCCESS == event_info.status)) {
                     g_task_acoustic_link_telemetry_send_count++;
@@ -953,9 +959,9 @@ LOCAL void task_acoustic_link_entry(INT stacd, void * exinf) {
                     g_task_acoustic_link_last_error = event_info.status;
                     audio_continuous_error_count++;
                 }
-            } else if (USB_STATUS_REQUEST_COMPLETE == event) {
+            } else if (audio_usb_open && (USB_STATUS_REQUEST_COMPLETE == event)) {
                 task_acoustic_link_control_complete(&event_info);
-            } else if (USB_STATUS_DETACH == event) {
+            } else if (audio_usb_open && (USB_STATUS_DETACH == event)) {
                 ER const lock_err = tk_loc_mtx(acoustic_link_mutex_id, TMO_FEVR);
                 if (E_OK == lock_err) {
                     task_acoustic_link_link_reset();
@@ -1007,6 +1013,9 @@ LOCAL void task_acoustic_link_entry(INT stacd, void * exinf) {
                 audio_continuous_error_count++;
             }
         }
+
+        /* snapshot、現在特徴量、保存見本の送信はJ7制御を妨げない時だけ進める。 */
+        acoustic_ai_lab_link_poll(audio_now_ms);
 
         (void) tk_dly_tsk(CPU0_AUDIO_USB_POLL_MS);
     }

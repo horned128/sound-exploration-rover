@@ -10,9 +10,11 @@ int main(void)
         "{"
         "\"sound_follow_input_t\":{\"size\":%zu,\"link_ready\":%zu,\"new_observation\":%zu,"
         "\"fault_active\":%zu,\"motion_allowed\":%zu,\"observation\":%zu,"
-        "\"match_required\":%zu,\"target_sound_matched\":%zu},"
+        "\"match_required\":%zu,\"target_sound_matched\":%zu,\"imu_valid\":%zu,"
+        "\"gyro_z_dps_x10\":%zu,\"imu_update_count\":%zu},"
         "\"sound_follow_output_t\":{\"size\":%zu,\"state\":%zu,\"steering_deg\":%zu,"
-        "\"left_rpm\":%zu,\"right_rpm\":%zu,\"actuator_enable\":%zu,\"emergency_stop\":%zu},"
+        "\"is_spin_turn\":%zu,\"left_rpm\":%zu,\"right_rpm\":%zu,\"actuator_enable\":%zu,"
+        "\"emergency_stop\":%zu},"
         "\"acoustic_observation_t\":{\"size\":%zu,\"doa_deg\":%zu,\"level_dbfs_x100\":%zu,"
         "\"peak_dbfs_x100\":%zu,\"vad\":%zu,\"xvf_status\":%zu,\"audio_flags\":%zu,"
         "\"xvf_raw_status\":%zu,\"audio_frame_count\":%zu},"
@@ -29,9 +31,12 @@ int main(void)
         offsetof(sound_follow_input_t, new_observation), offsetof(sound_follow_input_t, fault_active),
         offsetof(sound_follow_input_t, motion_allowed), offsetof(sound_follow_input_t, observation),
         offsetof(sound_follow_input_t, match_required), offsetof(sound_follow_input_t, target_sound_matched),
+        offsetof(sound_follow_input_t, imu_valid), offsetof(sound_follow_input_t, gyro_z_dps_x10),
+        offsetof(sound_follow_input_t, imu_update_count),
         sizeof(sound_follow_output_t), offsetof(sound_follow_output_t, state),
-        offsetof(sound_follow_output_t, steering_deg), offsetof(sound_follow_output_t, left_rpm),
-        offsetof(sound_follow_output_t, right_rpm), offsetof(sound_follow_output_t, actuator_enable),
+        offsetof(sound_follow_output_t, steering_deg), offsetof(sound_follow_output_t, is_spin_turn),
+        offsetof(sound_follow_output_t, left_rpm), offsetof(sound_follow_output_t, right_rpm),
+        offsetof(sound_follow_output_t, actuator_enable),
         offsetof(sound_follow_output_t, emergency_stop), sizeof(acoustic_observation_t),
         offsetof(acoustic_observation_t, doa_deg), offsetof(acoustic_observation_t, level_dbfs_x100),
         offsetof(acoustic_observation_t, peak_dbfs_x100), offsetof(acoustic_observation_t, vad),

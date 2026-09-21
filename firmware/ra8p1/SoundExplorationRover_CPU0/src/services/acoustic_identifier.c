@@ -7,6 +7,7 @@
 #include <string.h>                                         /* 要約初期化 */
 
 LOCAL B acoustic_identifier_int8_round(float value, B minimum); /* 仕様どおりのint8丸め */
+LOCAL UW acoustic_identifier_peak_bin_delta(UB left, UB right); /* peak binの絶対差 */
 
 /** =================================================================*
  * @brief  float値を最も近いint8へ半端をゼロから遠ざけて丸める
@@ -25,6 +26,16 @@ LOCAL B acoustic_identifier_int8_round(float value, B minimum) {
         rounded = (W) minimum;
     }
     return (B) rounded;
+}
+
+/** =================================================================*
+ * @brief 2つのpeak binの絶対差を安全に求める
+ * @param[in] left 比較する左側のbin
+ * @param[in] right 比較する右側のbin
+ * @return bin番号の絶対差
+ * ================================================================= */
+LOCAL UW acoustic_identifier_peak_bin_delta(UB left, UB right) {
+    return (left >= right) ? (UW) (left - right) : (UW) (right - left);
 }
 
 /** =================================================================*
@@ -319,14 +330,17 @@ EXPORT void acoustic_identifier_summary_classify(const B * p_summary,
     p_output->active_frame_count = active_frame_count;
     p_output->sample_index = ~(UW) 0U;
     p_output->minimum_cosine_distance = -1.0F;
-    p_output->threshold = threshold;
+    /* 保存済み見本が旧版の広いしきい値を持っていても、現行上限を越えない。 */
+    float effective_threshold = (threshold > CPU0_ACOUSTIC_IDENTIFIER_THRESHOLD_MAX) ?
+                                        CPU0_ACOUSTIC_IDENTIFIER_THRESHOLD_MAX : threshold;
+    p_output->threshold = effective_threshold;
     p_output->status = CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_INVALID;
     if (!summary_valid) {
         p_output->status = CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_INDETERMINATE;
         return;
     }
     if ((NULL == p_summary) || (NULL == p_samples) || (sample_count < 2U) ||
-        (sample_count > CPU0_ACOUSTIC_SAMPLE_COUNT) || (threshold < 0.0F)) {
+        (sample_count > CPU0_ACOUSTIC_SAMPLE_COUNT) || (effective_threshold < 0.0F)) {
         p_output->status = CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_NOT_READY;
         return;
     }
@@ -357,7 +371,16 @@ EXPORT void acoustic_identifier_summary_classify(const B * p_summary,
         p_output->status = CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_NOT_READY;
         return;
     }
-    p_output->status = (p_output->minimum_cosine_distance <= threshold) ?
+
+    /*
+     * Cosine距離だけでは、低域優勢の話声などが高域ピークの見本へ近く見える。
+     * 代表ピークが離れた音は、距離が近くても別音として確実に拒否する。
+     */
+    UB target_peak_bin = acoustic_identifier_find_peak_bin(p_samples, sample_count);
+    UB current_peak_bin = acoustic_identifier_find_peak_bin(p_summary, 1U);
+    BOOL peak_matches = acoustic_identifier_peak_bin_delta(target_peak_bin, current_peak_bin) <=
+                              CPU0_ACOUSTIC_IDENTIFIER_PEAK_TOLERANCE_BINS;
+    p_output->status = peak_matches && (p_output->minimum_cosine_distance <= effective_threshold) ?
                            CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_TARGET :
                            CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_NOT_TARGET;
 }

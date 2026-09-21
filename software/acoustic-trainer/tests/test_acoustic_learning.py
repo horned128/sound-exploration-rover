@@ -24,10 +24,12 @@ from acoustic_learning import (  # noqa: E402
     active_summary,
     cosine_distance,
     fixed_encoder,
+    find_peak_bin,
     identify,
     is_active_frame,
     leave_one_out_threshold,
     normalize_feature,
+    peak_bins_match,
 )
 
 
@@ -170,6 +172,24 @@ class ActiveFrameIdentifierReferenceTest(unittest.TestCase):
         non_target = identify(other_patch, samples)
         self.assertEqual(non_target.status, Identification.NOT_TARGET)
         self.assertGreater(non_target.minimum_distance or 0.0, 0.2)
+
+    def test_peak_gate_rejects_a_cosine_nearby_sound_in_a_different_band(self) -> None:
+        # ほぼ同じベクトルでも、主ピークが口笛帯域から音声低域へ移ればTARGETにしない。
+        reference = np.full(SUMMARY_DIMENSION, 10, dtype=np.int8)
+        reference[2 * FEATURE_BINS + 14] = 30
+        reference[5 * FEATURE_BINS + 14] = 30
+        candidate = np.array(reference, copy=True)
+        candidate[2 * FEATURE_BINS + 14] = 10
+        candidate[5 * FEATURE_BINS + 14] = 10
+        candidate[2 * FEATURE_BINS + 1] = 30
+        candidate[5 * FEATURE_BINS + 1] = 30
+        samples = np.stack([reference] * 5)
+
+        self.assertFalse(peak_bins_match(14, 1))
+        self.assertLess(cosine_distance(reference, candidate) or 1.0, 0.20)
+
+        # summaryから直接識別するC APIと同じpeak gateの契約を関数単位で確認する。
+        self.assertNotEqual(find_peak_bin(samples), find_peak_bin(np.expand_dims(candidate, axis=0)))
 
     def test_not_ready_and_zero_vector_are_never_silently_accepted(self) -> None:
         reference = active_summary(_patch(MIN_ACTIVE_FRAMES))

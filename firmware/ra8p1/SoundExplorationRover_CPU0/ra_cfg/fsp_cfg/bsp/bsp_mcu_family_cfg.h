@@ -100,8 +100,8 @@
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 7) /* IIC2 */ | \
             (((1 > 0) ? 0U : 1U) << 8) /* IIC1 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 9) /* IIC0 */ | \
-            (((1 > 0) ? 0U : 1U) << 11) /* USBFS */ | \
-            (((1 > 0) ? 0U : 1U) << 12) /* USBHS */ | \
+            (((2 > 0) ? 0U : 1U) << 11) /* USBFS */ | \
+            (((2 > 0) ? 0U : 1U) << 12) /* USBHS */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 16) /* OSPI0 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 17) /* OSPI1 */ | \
             (((RA_NOT_DEFINED > 0) ? 0U : 1U) << 18) /* SPI1 */ | \

@@ -29,17 +29,22 @@ IMPORT bsp_leds_t g_bsp_leds;                               /**< BSPのLED構成
 
 LOCAL void task_think_entry(INT stacd, void * exinf);       /* 思考タスク本体 */
 LOCAL ER task_think_publish_target(const sound_follow_output_t * p_output); /* 追従指令の4輪展開 */
-LOCAL ER task_think_publish_motion(H steering_deg, H left_rpm, H right_rpm, BOOL actuator_enable,
-                                   BOOL emergency_stop);   /* 共通走行指令の4輪展開 */
+LOCAL ER task_think_publish_motion(H steering_deg, BOOL is_spin_turn, H left_rpm, H right_rpm,
+                                   BOOL actuator_enable, BOOL emergency_stop); /* 4輪目標展開 */
 /* 音源追従の近接安全判定 */
 LOCAL BOOL task_think_sound_motion_allowed(const sensor_snapshot_t * p_snapshot); /* 音源追従走行可否判定 */
 LOCAL void task_think_led_write(BOOL blue_on, BOOL green_on); /* 2LED一括更新 */
 LOCAL void task_think_learning_capture(const task_acoustic_link_snapshot_t * p_snapshot,
                                        BOOL observation_usable); /* 新規特徴量パッチの学習 */
+LOCAL void task_think_learning_start(void);                  /* 新しい見本収集を初期化 */
+LOCAL void task_think_learning_commit(void);                 /* 5見本をMRAMへ保存 */
+LOCAL void task_think_learning_cancel(void);                 /* 未保存見本を破棄 */
+LOCAL void task_think_learning_command_apply(void);          /* キュー済み学習操作を反映 */
 
 LOCAL UW learning_button_press_ms;                          /**< SW1継続押下時間[ms] */
 LOCAL BOOL learning_button_handled;                         /**< 同一押下の多重切替防止 */
 LOCAL UW learning_last_feature_generation;                  /**< 最後に収集した特徴量世代 */
+LOCAL volatile task_think_learning_command_t learning_command_pending; /**< 次周期に反映する外部操作 */
 LOCAL prototype_storage_data_t storage_data;                /**< 読込済みまたは保存対象プロトタイプ */
 LOCAL prototype_storage_data_t storage_candidate;           /**< 保存処理用の作業コピー */
 LOCAL UW task_think_fault_code(UW fault_flags);             /* LED表示用異常番号 */
@@ -150,6 +155,7 @@ EXPORT app_fault_t task_think_create(void) {
     g_task_think_learning_samples = 0U;
     g_task_think_storage_valid = FALSE;
     g_task_think_storage_result = CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
+    learning_command_pending = TASK_THINK_LEARNING_COMMAND_NONE;
     sound_follow_controller_init();
 #if (CPU0_SENSOR_I2C_ENABLED != 0U)
     obstacle_avoidance_controller_init();
@@ -224,6 +230,103 @@ EXPORT ER task_think_report_fault(app_fault_t fault) {
 }
 
 /** =================================================================*
+ * @brief 現場学習の開始・保存・取消を思考タスクへ依頼
+ * @details USB受信taskはMRAMや見本バッファを直接触らず、思考周期の先頭で
+ *          処理させる。これによりSW1とPC操作の競合を避ける。
+ * @param[in] command 現場学習操作
+ * @return μT-Kernelエラーコード
+ * ================================================================= */
+EXPORT ER task_think_learning_request(task_think_learning_command_t command) {
+    if ((TASK_THINK_LEARNING_COMMAND_START != command) &&
+        (TASK_THINK_LEARNING_COMMAND_COMMIT != command) &&
+        (TASK_THINK_LEARNING_COMMAND_CANCEL != command)) {
+        return E_PAR;
+    }
+    if (!think_task_started) {
+        return E_NOEXS;
+    }
+    learning_command_pending = command;
+    return E_OK;
+}
+
+/** =================================================================*
+ * @brief 新しい現場見本の収集を開始
+ * ================================================================= */
+LOCAL void task_think_learning_start(void) {
+    if (g_task_think_learning_mode) {
+        return;
+    }
+    g_task_think_learning_mode = TRUE;
+    g_task_think_learning_samples = 0U;
+    learning_last_feature_generation = g_task_infer_feature_generation;
+    storage_data.sample_count = 0U;
+    memset(storage_data.samples, 0, sizeof(storage_data.samples));
+}
+
+/** =================================================================*
+ * @brief 完成した5見本を検証してMRAMへ保存
+ * @details 見本が不足した保存要求は収集状態を維持する。以前の有効なMRAM
+ *          見本は、保存成功まで推論タスクから取り除かれない。
+ * ================================================================= */
+LOCAL void task_think_learning_commit(void) {
+    if (!g_task_think_learning_mode) {
+        return;
+    }
+    if (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT != g_task_think_learning_samples) {
+        g_task_think_storage_result = CPU0_PROTOTYPE_STORAGE_EMPTY;
+        return;
+    }
+
+    storage_candidate = storage_data;
+    UB peak_bin = acoustic_identifier_find_peak_bin((const B *) storage_candidate.samples,
+                                                          storage_candidate.sample_count);
+    storage_candidate.target_peak_bin = peak_bin;
+    LOCAL float bin_weights[CPU0_ACOUSTIC_FEATURE_BIN_COUNT];
+    acoustic_identifier_build_weights(peak_bin, bin_weights);
+    float threshold = 0.0F;
+    if (acoustic_identifier_leave_one_out_threshold((const B *) storage_candidate.samples,
+                                                    storage_candidate.sample_count,
+                                                    bin_weights, &threshold) &&
+        (E_OK == task_infer_background_export(&storage_candidate))) {
+        storage_candidate.identifier_threshold = threshold;
+        g_task_think_storage_result = prototype_storage_save(&storage_candidate);
+        if (CPU0_PROTOTYPE_STORAGE_OK == g_task_think_storage_result) {
+            storage_data = storage_candidate;
+            g_task_think_storage_valid = TRUE;
+            (void) task_infer_prototype_set(&storage_data, TRUE);
+        }
+    } else {
+        g_task_think_storage_result = CPU0_PROTOTYPE_STORAGE_EMPTY;
+    }
+    g_task_think_learning_mode = FALSE;
+}
+
+/** =================================================================*
+ * @brief 未保存の現場見本を破棄
+ * ================================================================= */
+LOCAL void task_think_learning_cancel(void) {
+    g_task_think_learning_mode = FALSE;
+    g_task_think_learning_samples = 0U;
+    storage_data.sample_count = 0U;
+    memset(storage_data.samples, 0, sizeof(storage_data.samples));
+}
+
+/** =================================================================*
+ * @brief 保留中のPC/SW1学習操作を思考タスク文脈で反映
+ * ================================================================= */
+LOCAL void task_think_learning_command_apply(void) {
+    task_think_learning_command_t command = learning_command_pending;
+    learning_command_pending = TASK_THINK_LEARNING_COMMAND_NONE;
+    if (TASK_THINK_LEARNING_COMMAND_START == command) {
+        task_think_learning_start();
+    } else if (TASK_THINK_LEARNING_COMMAND_COMMIT == command) {
+        task_think_learning_commit();
+    } else if (TASK_THINK_LEARNING_COMMAND_CANCEL == command) {
+        task_think_learning_cancel();
+    }
+}
+
+/** =================================================================*
  * @brief  最新の96次元要約を1回だけ現場見本として取り込む
  * @details 能動フレーム不足は判定不能なので、零ベクトルを見本として保存しない。
  * ================================================================= */
@@ -274,7 +377,7 @@ EXPORT ER task_think_clear_fault(app_fault_t fault) {
 
 /** =================================================================*
  * @brief  追従指令の4輪展開
- * @details 前後輪を逆相操舵し、左右DCモーターを同じ更新で指令する。
+ * @details 通常時は前後輪を逆相操舵し、その場旋回時はハの字へ展開する。
  * @param[in] p_output 音源追従状態機械の出力
  * @return μT-Kernelエラーコード
  * ================================================================= */
@@ -283,22 +386,23 @@ LOCAL ER task_think_publish_target(const sound_follow_output_t * p_output) {
         return E_PAR;
     }
 
-    return task_think_publish_motion(p_output->steering_deg, p_output->left_rpm, p_output->right_rpm,
-                                     p_output->actuator_enable, p_output->emergency_stop);
+    return task_think_publish_motion(p_output->steering_deg, p_output->is_spin_turn, p_output->left_rpm,
+                                     p_output->right_rpm, p_output->actuator_enable, p_output->emergency_stop);
 }
 
 /** =================================================================*
  * @brief  共通走行指令を4輪操舵・左右DCモーターの目標へ展開
- * @details 前後輪を逆相操舵し、左右DCモーターを同じ更新で指令する。
+ * @details 通常時は前後輪逆相、その場旋回時はハの字操舵で左右DCモーターを指令する。
  * @param[in] steering_deg 右正の車体操舵角
+ * @param[in] is_spin_turn その場旋回のハの字操舵を選択する状態
  * @param[in] left_rpm 論理左モーター目標RPM
  * @param[in] right_rpm 論理右モーター目標RPM
  * @param[in] actuator_enable 出力許可
  * @param[in] emergency_stop 非常停止指定
  * @return μT-Kernelエラーコード
  * ================================================================= */
-LOCAL ER task_think_publish_motion(H steering_deg, H left_rpm, H right_rpm, BOOL actuator_enable,
-                                   BOOL emergency_stop) {
+LOCAL ER task_think_publish_motion(H steering_deg, BOOL is_spin_turn, H left_rpm, H right_rpm,
+                                   BOOL actuator_enable, BOOL emergency_stop) {
 
     rover_motion_target_t target = {
         .left_target_rpm = left_rpm,
@@ -307,15 +411,25 @@ LOCAL ER task_think_publish_motion(H steering_deg, H left_rpm, H right_rpm, BOOL
         .emergency_stop = emergency_stop,
     };
 
-    H const front_steering_deg = (H) (CPU0_STEERING_SERVO_OUTPUT_SIGN * steering_deg);
-    /* FR */
-    target.servo_target_deg[0] = front_steering_deg;
-    /* FL */
-    target.servo_target_deg[1] = front_steering_deg;
-    /* RR */
-    target.servo_target_deg[2] = (H) -front_steering_deg;
-    /* RL */
-    target.servo_target_deg[3] = (H) -front_steering_deg;
+    if (is_spin_turn) {
+        /*
+         * 車体中心を回る接線方向へ向ける。サーボ出力符号をここで一度だけ適用する。
+         * FR, FL, RR, RL = -, +, +, - は、Papayaの既存手動Spin
+         * (RF-, LF+, RB+, LB-) と同じ物理的な向きである。
+         */
+        H spin_servo_deg = (H) (CPU0_STEERING_SERVO_OUTPUT_SIGN * CPU0_SOUND_SPIN_SERVO_DEG);
+        /* サーボ番号はFR、FL、RR、RLの順に固定されている。 */
+        target.servo_target_deg[0] = spin_servo_deg;
+        target.servo_target_deg[1] = (H) -spin_servo_deg;
+        target.servo_target_deg[2] = (H) -spin_servo_deg;
+        target.servo_target_deg[3] = spin_servo_deg;
+    } else {
+        H front_steering_deg = (H) (CPU0_STEERING_SERVO_OUTPUT_SIGN * steering_deg);
+        target.servo_target_deg[0] = front_steering_deg;
+        target.servo_target_deg[1] = front_steering_deg;
+        target.servo_target_deg[2] = (H) -front_steering_deg;
+        target.servo_target_deg[3] = (H) -front_steering_deg;
+    }
 
     return task_command_set_target(&target);
 }
@@ -395,10 +509,12 @@ LOCAL void task_think_led_update(UW state_elapsed_ms, UW heartbeat_elapsed_ms, U
             break;
 
         case CPU0_THINK_STATE_STEER_PREP:
+        case CPU0_THINK_STATE_SPIN_PREP:
             blue_on = 0U == ((state_elapsed_ms / CPU0_LED_STEER_BLINK_MS) & 1U);
             break;
 
         case CPU0_THINK_STATE_MOVE_STEP:
+        case CPU0_THINK_STATE_SPIN_STEP:
             blue_on = TRUE;
             break;
 
@@ -481,42 +597,22 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             }
         }
 
+        /* PC直結AIラボの要求は、SW1判定より先に同じ思考文脈で適用する。 */
+        task_think_learning_command_apply();
+
         bsp_io_level_t sw1_level = BSP_IO_LEVEL_HIGH;
         (void) g_ioport.p_api->pinRead(g_ioport.p_ctrl, BSP_IO_PORT_00_PIN_09, &sw1_level);
         if (BSP_IO_LEVEL_LOW == sw1_level) {
             if (!learning_button_handled) {
                 learning_button_press_ms += CPU0_THINK_PERIOD_MS;
                 if (learning_button_press_ms >= 2000U) {
-                    g_task_think_learning_mode = !g_task_think_learning_mode;
                     learning_button_handled = TRUE;
                     if (!g_task_think_learning_mode) {
-                        if (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT == g_task_think_learning_samples) {
-                            storage_candidate = storage_data;
-                            UB const peak_bin = acoustic_identifier_find_peak_bin((const B *) storage_candidate.samples,
-                                                                                  storage_candidate.sample_count);
-                            storage_candidate.target_peak_bin = peak_bin;
-                            /* 保存前の見本群から周波数binごとの重みを再計算する領域。 */
-                            LOCAL float bin_weights[CPU0_ACOUSTIC_FEATURE_BIN_COUNT];
-                            acoustic_identifier_build_weights(peak_bin, bin_weights);
-                            float threshold = 0.0F;
-                            if (acoustic_identifier_leave_one_out_threshold((const B *) storage_candidate.samples,
-                                                                            storage_candidate.sample_count,
-                                                                            bin_weights, &threshold) &&
-                                (E_OK == task_infer_background_export(&storage_candidate))) {
-                                storage_candidate.identifier_threshold = threshold;
-                                g_task_think_storage_result = prototype_storage_save(&storage_candidate);
-                                if (CPU0_PROTOTYPE_STORAGE_OK == g_task_think_storage_result) {
-                                    storage_data = storage_candidate;
-                                    g_task_think_storage_valid = TRUE;
-                                    (void) task_infer_prototype_set(&storage_data, TRUE);
-                                }
-                            }
-                        }
+                        task_think_learning_start();
+                    } else if (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT == g_task_think_learning_samples) {
+                        task_think_learning_commit();
                     } else {
-                        g_task_think_learning_samples = 0U;
-                        learning_last_feature_generation = g_task_infer_feature_generation;
-                        storage_data.sample_count = 0U;
-                        memset(storage_data.samples, 0, sizeof(storage_data.samples));
+                        task_think_learning_cancel();
                     }
                 }
             }
@@ -570,15 +666,18 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             if (infer_result.feature_generation != last_infer_generation) {
                 last_infer_generation = infer_result.feature_generation;
                 if (CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_TARGET == infer_result.identifier.status) {
+                    /* peak帯域と距離を通過済みの新しいTARGETは、直ちにDoA取得へ渡す。 */
                     target_sound_matched = TRUE;
                     target_sound_match_timer_ms = CPU0_SOUND_IDENTIFIER_TIMEOUT_MS;
-                } else if (CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_NOT_TARGET == infer_result.identifier.status) {
+                } else {
                     target_sound_matched = FALSE;
                     target_sound_match_timer_ms = 0U;
                 }
             }
         }
-        if (target_sound_match_timer_ms >= CPU0_THINK_PERIOD_MS) {
+        if (0U == target_sound_match_timer_ms) {
+            target_sound_matched = FALSE;
+        } else if (target_sound_match_timer_ms >= CPU0_THINK_PERIOD_MS) {
             target_sound_match_timer_ms -= CPU0_THINK_PERIOD_MS;
         } else {
             target_sound_match_timer_ms = 0U;
@@ -597,6 +696,10 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             .observation = snapshot.observation,
             .match_required = match_required,
             .target_sound_matched = target_sound_matched,
+            .imu_valid = sensor_fresh &&
+                         (0U != (sensor_snapshot.valid_flags & CPU0_SENSOR_VALID_IMU)),
+            .gyro_z_dps_x10 = sensor_snapshot.gyro_dps_x10[CPU0_SENSOR_YAW_AXIS],
+            .imu_update_count = sensor_snapshot.update_count,
         };
         /* 音源追従コントローラの出力を回避制御へ引き渡す領域。 */
         LOCAL sound_follow_output_t sf_output;
@@ -618,6 +721,7 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         LOCAL sound_follow_output_t output;
         memset(&output, 0, sizeof(output));
         BOOL const tracking_active = (CPU0_THINK_STATE_MOVE_STEP == sf_output.state);
+        BOOL spin_active = (CPU0_THINK_STATE_SPIN_STEP == sf_output.state);
         BOOL const avoidance_active = (oa_output.rule == CPU0_SENSOR_RULE_BACKUP) ||
                                       (oa_output.rule == CPU0_SENSOR_RULE_PIVOT_LEFT) ||
                                       (oa_output.rule == CPU0_SENSOR_RULE_PIVOT_RIGHT);
@@ -645,8 +749,12 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             output.right_rpm       = oa_output.right_rpm;
             output.actuator_enable = TRUE;
             output.emergency_stop  = FALSE;
-        } else if (CPU0_THINK_STATE_STEER_PREP == sf_output.state) {
-            /* 初回音源検知時の操舵整定（前進せず舵角のみ準備） */
+        } else if (spin_active && oa_output.actuator_enable) {
+            /* その場旋回は回避走行の操舵と混合せず、独立した左右逆回転を維持する。 */
+            output = sf_output;
+        } else if ((CPU0_THINK_STATE_STEER_PREP == sf_output.state) ||
+                   (CPU0_THINK_STATE_SPIN_PREP == sf_output.state)) {
+            /* 初回音源検知時は停車したまま操舵を整定する。 */
             output = sf_output;
             output.left_rpm        = 0;
             output.right_rpm       = 0;

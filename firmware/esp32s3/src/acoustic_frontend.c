@@ -243,21 +243,21 @@ static void acoustic_frontend_task(void * context) {
     uint32_t last_health_ms = 0U;
     uint32_t last_hello_ms = 0U;
     uint32_t last_observation_ms = 0U;
+    uint32_t last_feature_event_started_ms = 0U;
     bool hello_pending = false;
-    bool feature_trigger_latched = false;
 
     while (true) {
         if (usb_link_take_new_session()) {
             audio_capture_feature_event_discard();
             s_feature_burst.active = false;
-            feature_trigger_latched = false;
+            last_feature_event_started_ms = 0U;
             hello_pending = true;
             last_hello_ms = 0U;
         }
         if (!usb_link_is_mounted()) {
             audio_capture_feature_event_discard();
             s_feature_burst.active = false;
-            feature_trigger_latched = false;
+            last_feature_event_started_ms = 0U;
             vTaskDelay(pdMS_TO_TICKS(APP_OBSERVATION_PERIOD_MS));
             continue;
         }
@@ -305,11 +305,14 @@ static void acoustic_frontend_task(void * context) {
 
             bool const feature_trigger_active = frontend_feature_trigger_active(i2s_stale, &audio);
             if (!feature_trigger_active) {
-                feature_trigger_latched = false;
-            } else if (!feature_trigger_latched &&
+                /* 無音後は次の音量立ち上がりを即座に新イベントとして収集する。 */
+                last_feature_event_started_ms = 0U;
+            } else if (((0U == last_feature_event_started_ms) ||
+                        ((uint32_t) (now_ms - last_feature_event_started_ms) >=
+                         APP_FEATURE_RETRIGGER_PERIOD_MS)) &&
                        (audio.feature_ring_frames >= APP_FEATURE_PRE_TRIGGER_FRAMES)) {
                 if (audio_capture_feature_event_start(s_next_feature_event_id) == ESP_OK) {
-                    feature_trigger_latched = true;
+                    last_feature_event_started_ms = now_ms;
                     s_next_feature_event_id++;
                 }
             }

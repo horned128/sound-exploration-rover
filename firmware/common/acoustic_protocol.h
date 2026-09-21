@@ -31,6 +31,12 @@
 #define ACOUSTIC_ROVER_TELEMETRY_PAYLOAD_SIZE (96U)
 #define ACOUSTIC_ACTUATOR_TELEMETRY_PAYLOAD_SIZE (24U)
 #define ACOUSTIC_POSE_TELEMETRY_PAYLOAD_SIZE (36U)
+#define ACOUSTIC_AI_LAB_SNAPSHOT_PAYLOAD_SIZE        (48U) /**< snapshot長[byte] */
+#define ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE              (64U) /**< chunkデータ長[byte] */
+#define ACOUSTIC_AI_LAB_SUMMARY_CHUNK_PAYLOAD_SIZE   (8U + ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE) /**< 要約chunk長 */
+#define ACOUSTIC_AI_LAB_PROFILE_CHUNK_PAYLOAD_SIZE   (8U + ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE) /**< 保存見本chunk長 */
+#define ACOUSTIC_AI_LAB_COMMAND_PAYLOAD_SIZE         (1U)  /**< 操作要求長[byte] */
+#define ACOUSTIC_AI_LAB_COMMAND_RESULT_PAYLOAD_SIZE  (4U)  /**< 操作結果長[byte] */
 
 #define ACOUSTIC_POSE_FLAG_STATIONARY      (1U << 0)
 #define ACOUSTIC_POSE_FLAG_CALIBRATED      (1U << 1)
@@ -70,8 +76,29 @@ typedef enum e_acoustic_message_type {
     ACOUSTIC_MESSAGE_ROVER_TELEMETRY = 0x20U,
     ACOUSTIC_MESSAGE_ACTUATOR_TELEMETRY = 0x21U,
     ACOUSTIC_MESSAGE_POSE_TELEMETRY = 0x22U,
+    ACOUSTIC_MESSAGE_AI_LAB_SNAPSHOT = 0x30U,             /**< AIラボsnapshot */
+    ACOUSTIC_MESSAGE_AI_LAB_SUMMARY_CHUNK = 0x31U,       /**< AIラボ要約chunk */
+    ACOUSTIC_MESSAGE_AI_LAB_COMMAND = 0x32U,              /**< AIラボ操作要求 */
+    ACOUSTIC_MESSAGE_AI_LAB_COMMAND_RESULT = 0x33U,      /**< AIラボ操作結果 */
+    ACOUSTIC_MESSAGE_AI_LAB_PROFILE_CHUNK = 0x34U,        /**< AIラボ保存見本chunk */
     ACOUSTIC_MESSAGE_LOG = 0x7FU,
 } acoustic_message_type_t;
+
+/**< PC直結の音響AIラボからCPU0へ送る操作種別 */
+typedef enum e_acoustic_ai_lab_command {
+    ACOUSTIC_AI_LAB_COMMAND_STATUS = 0U,                    /**< 即時snapshot要求 */
+    ACOUSTIC_AI_LAB_COMMAND_LEARNING_START = 1U,            /**< 新しい見本収集開始 */
+    ACOUSTIC_AI_LAB_COMMAND_LEARNING_COMMIT = 2U,           /**< 5見本をMRAMへ保存 */
+    ACOUSTIC_AI_LAB_COMMAND_LEARNING_CANCEL = 3U,           /**< 未保存収集を破棄 */
+    ACOUSTIC_AI_LAB_COMMAND_PROFILE_READ = 4U,              /**< 保存済み5見本の読出し */
+} acoustic_ai_lab_command_t;
+
+/**< AIラボ操作の受付結果 */
+typedef enum e_acoustic_ai_lab_command_result {
+    ACOUSTIC_AI_LAB_COMMAND_ACCEPTED = 0U,                  /**< CPU0思考タスクへ受付済み */
+    ACOUSTIC_AI_LAB_COMMAND_REJECTED = 1U,                  /**< 状態または引数が不正 */
+    ACOUSTIC_AI_LAB_COMMAND_UNAVAILABLE = 2U,               /**< 推論サービス未初期化 */
+} acoustic_ai_lab_command_result_t;
 
 typedef enum e_acoustic_xvf_status {
     ACOUSTIC_XVF_STATUS_STARTING = 0U,
@@ -188,6 +215,42 @@ typedef struct st_acoustic_pose_telemetry {
     uint32_t uptime_ms;
 } acoustic_pose_telemetry_t;
 
+/**< PC上の音響AIラボが継続記録する、CPU0推論の縮約snapshot */
+typedef struct st_acoustic_ai_lab_snapshot {
+    uint8_t schema_version;                                 /**< 通信schema版数 */
+    uint8_t flags;                                          /**< 状態bit */
+    uint8_t think_state;                                    /**< 音源追従状態 */
+    uint8_t infer_status;                                   /**< 音響識別判定状態 */
+    uint16_t doa_deg;                                       /**< 最新DoA */
+    int16_t level_dbfs_x100;                                /**< 最新レベル */
+    int16_t peak_dbfs_x100;                                 /**< 最新ピーク */
+    uint8_t vad;                                            /**< XVF VAD */
+    uint8_t xvf_status;                                     /**< XVF状態 */
+    uint8_t audio_flags;                                    /**< フロントエンド異常bit */
+    uint8_t learning_samples;                               /**< 現在収集済み見本数 */
+    uint8_t target_peak_bin;                                /**< 保存見本の代表ピークbin */
+    uint8_t current_peak_bin;                               /**< 今回特徴量のピークbin */
+    uint8_t nearest_sample;                                 /**< 最近傍見本番号 */
+    uint8_t active_frame_count;                             /**< 80 frame中の能動frame数 */
+    uint16_t cosine_distance_x1000;                         /**< 最小cosine距離を1000倍した値 */
+    uint16_t identifier_threshold_x1000;                    /**< 実効受理しきい値 */
+    uint16_t similarity_permille;                           /**< 1000から距離を引いた類似度 */
+    uint16_t background_mse_x1000;                          /**< 背景再構成MSE */
+    uint16_t background_threshold_x1000;                    /**< 背景異常しきい値 */
+    uint32_t observation_sequence;                          /**< 音響観測sequence */
+    uint32_t feature_generation;                            /**< 最新80フレーム特徴量世代 */
+    uint32_t inference_count;                               /**< 推論回数 */
+    uint32_t match_count;                                   /**< TARGET累積回数 */
+    uint8_t storage_result;                                 /**< MRAM直近結果 */
+    uint8_t reserved[3];                                    /**< 将来拡張 */
+} acoustic_ai_lab_snapshot_t;
+
+#define ACOUSTIC_AI_LAB_FLAG_LINK_READY          (1U << 0) /**< PC直結リンク確立済み */
+#define ACOUSTIC_AI_LAB_FLAG_SUMMARY_VALID       (1U << 1) /**< 要約が有効 */
+#define ACOUSTIC_AI_LAB_FLAG_BACKGROUND_ANOMALY  (1U << 2) /**< 背景異常を検出 */
+#define ACOUSTIC_AI_LAB_FLAG_LEARNING_ACTIVE     (1U << 3) /**< 現場学習中 */
+#define ACOUSTIC_AI_LAB_FLAG_STORAGE_VALID       (1U << 4) /**< 保存見本が有効 */
+
 typedef struct st_acoustic_frame {
     uint8_t version;
     acoustic_message_type_t type;
@@ -238,6 +301,9 @@ size_t acoustic_protocol_encode_actuator_telemetry(uint32_t sequence, uint32_t u
 size_t acoustic_protocol_encode_pose_telemetry(uint32_t sequence, uint32_t uptime_ms,
                                                const acoustic_pose_telemetry_t * p_telemetry,
                                                uint8_t * p_output, size_t output_capacity);
+size_t acoustic_protocol_encode_ai_lab_snapshot(uint32_t sequence, uint32_t uptime_ms,
+                                                const acoustic_ai_lab_snapshot_t * p_snapshot,
+                                                uint8_t * p_output, size_t output_capacity); /* AIラボsnapshot */
 void acoustic_protocol_parser_init(acoustic_protocol_parser_t * p_parser); /* パーサー初期化 */
 acoustic_parse_result_t acoustic_protocol_parser_push(acoustic_protocol_parser_t * p_parser, uint8_t byte,
                                                             /* 1 byte受信 */

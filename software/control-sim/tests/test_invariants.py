@@ -9,7 +9,7 @@ from controlsim.invariants import assert_same_sound_outputs, assert_steering_wit
 
 def usable_loud_observation() -> AcousticObservation:
     return AcousticObservation(
-        doa_deg=100,
+        doa_deg=90,
         level_dbfs_x100=-3000,
         peak_dbfs_x100=-2800,
         vad=1,
@@ -195,4 +195,3 @@ def test_identifier_match_lost_initiates_settle_after_timeout() -> None:
     assert outputs[-1].state in (1, 4, 5)
     assert outputs[-1].left_rpm == 0
     assert outputs[-1].right_rpm == 0
-

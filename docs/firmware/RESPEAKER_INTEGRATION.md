@@ -50,11 +50,16 @@ flowchart LR
     ACT -->|"左右代表encoder"| C1
 ```
 
-現行実装の制御経路は`XVF3800 → ESP32S3 → USB CDC → CPU0 → IPC → CPU1`である。診断経路はCPU0が同じCDCのBulk OUTで診断snapshotをESP32S3へ返し、ESP32S3がWi-Fi UDP JSON LinesとしてPCへ送信する。Wi-Fiの再接続やUDP送信は低優先度の独立taskで行い、音響観測とCPU1の実時間制御へ直接入れない。主な実装位置は次のとおりである。
+現行実装の制御経路は`XVF3800 → ESP32S3 → USB CDC → CPU0 → IPC → CPU1`である。診断経路はCPU0が同じCDCのBulk OUTで診断snapshotをESP32S3へ返し、ESP32S3がWi-Fi UDP JSON LinesとしてPCへ送信する。Wi-Fiの再接続やUDP送信は低優先度の独立taskで行い、音響観測とCPU1の実時間制御へ直接入れない。
+
+音源識別の学習・推論品質を調べるときだけは、J11のUSB Full-SpeedをCPU0のCDC **device**として使い、PC上の[`Acoustic AI Lab`](../../software/acoustic-ai-lab/README.md)へ直結する。この経路は既存のUDP/Rover Monitorを代替しない。J7/IP1の音響入力を変更せず、`task_acoustic_link`がUSBイベントqueueを一元的にpollし、IP0/J11イベントだけを低優先度の診断serviceへ振り分ける。AI Labから許可する操作は学習開始・保存・取消・保存済み見本の読出しだけであり、走行指令は受け付けない。
+
+主な実装位置は次のとおりである。
 
 - 共有protocol: [`acoustic_protocol.h`](../../firmware/common/acoustic_protocol.h)、[`acoustic_protocol.c`](../../firmware/common/acoustic_protocol.c)
 - ESP32S3 frontend: [`acoustic_frontend.c`](../../firmware/esp32s3/src/acoustic_frontend.c)、[`xvf3800_control.c`](../../firmware/esp32s3/src/xvf3800_control.c)、[`audio_capture.c`](../../firmware/esp32s3/src/audio_capture.c)、[`usb_link.c`](../../firmware/esp32s3/src/usb_link.c)、[`wifi_telemetry.c`](../../firmware/esp32s3/src/wifi_telemetry.c)
 - CPU0 USB CDCリンク: [`task_acoustic_link.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/task_acoustic_link.c)
+- CPU0 J11 AI Lab link: [`acoustic_ai_lab_link.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/services/acoustic_ai_lab_link.c)
 - CPU0判断: [`task_think.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/task_think.c)
 - CPU0→CPU1指令: [`task_command.c`](../../firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/task_command.c)
 
@@ -99,11 +104,25 @@ EK-RA8P1側はJ7をUSB High Speed hostとして使う。J7のhost modeではPD07
 | VBUS sense | P408 / `USBHS_VBUS` |
 | runtime接続先 | XIAO ESP32S3側USB-C |
 
-J11のUSB Full Speedや`USB_FS_VBUSEN`はこの接続には使わない。USB設定はhost処理を担当するCPU0だけに置き、CPU1へ重複生成しない。物理ピンは従来どおりSolutionを正として一元管理し、Generate Project Content後もCPU1の`pin_data.c`は0ピンを維持する。
+J11のUSB Full SpeedはXIAOとの接続には使わない。音源識別品質の評価時だけ、J11をPC側hostへ接続するCDC deviceとして使う。CPU0ではUSB IP0 / Full Speed / PCDC ACM、P500をdevice用Low、USBFSのmain/resume/D0FIFO/D1FIFO IRQ priorityを12に設定する。J7/IP1のHCDC hostとJ11/IP0のPCDC deviceは別USB IPであり、CPU1へUSB moduleやpinを重複生成しない。物理ピンはSolutionを正として一元管理し、Generate Project Content後もCPU1の`pin_data.c`は0ピンを維持する。
 
 FSPの`BSP_CFG_RTOS`は0のままHCDC ACM hostを使用し、FSPとは独立にμT-Kernelを起動する。`task_acoustic_link`はμT-Kernel task contextからUSB eventをpollし、USB callback/IRQ contextから`tk_loc_mtx()`などのtask APIを直接呼ばない。FSP 6.4で生成したUSB source、config、`hal_data`、`vector_data`はCPU0 projectへ反映し、CPU1とSolutionのpin ownershipは変更しない。
 
-### 4.2 電源条件
+### 4.2 J11 AI Lab直結
+
+| 項目 | 設定 |
+|---|---|
+| EK-RA8P1 connector | J11 / USB Full Speed |
+| RA8P1 role | USB CDC ACM device |
+| PC role | USB host、`software/acoustic-ai-lab`を実行 |
+| FSP USB IP | USB IP0 / Full Speed |
+| FSP class / instance | PCDC ACM / `g_acoustic_ai_lab_usb` |
+| 送受信内容 | 推論snapshot、192次元特徴量要約、保存済み見本、学習操作 |
+| 非対象 | Rover Monitor、UDP、走行・操舵・モーター操作 |
+
+J11はPCとデータ通信可能なケーブルで直結する。J10のJ-Linkデバッグ端子を常用の診断通信へ流用しない。PCのUSB給電と既存のローバ給電が重なる場合は、実機の電源投入前に逆流しない電源構成を確認する。
+
+### 4.3 電源条件
 
 RenesasのマニュアルではJ7 host時のUSB High Speed portに供給可能な合計電流は2 Aである。ただし、これはEK-RA8P1へ入力する電源が基板本体とUSB deviceの両方を賄える場合の上限であり、XIAO ESP32S3、XVF3800、Wi-Fi動作へ常に十分であることを無条件には保証しない。
 
@@ -146,6 +165,11 @@ CRCの多項式は`0x1021`、初期値は`0xFFFF`、refin/refoutはfalse、xorou
 | `0x10` | `SET_CONFIG` | CPU0 → ESP32S3 | type予約。初期実装では未使用 |
 | `0x11` | `ACK` | 双方向 | type予約。初期実装では未使用 |
 | `0x20` | `ROVER_TELEMETRY` | CPU0 → ESP32S3 | 実装済み。250 ms周期の音響・思考・指令診断snapshot |
+| `0x30` | `AI_LAB_SNAPSHOT` | CPU0 → PC / J11 | 実装済み。4 Hzの学習・推論・背景モデル固定小数点snapshot |
+| `0x31` | `AI_LAB_SUMMARY_CHUNK` | CPU0 → PC / J11 | 実装済み。現在特徴量の192次元要約を3 chunkで送信 |
+| `0x32` | `AI_LAB_COMMAND` | PC → CPU0 / J11 | 実装済み。学習開始・保存・取消・profile読出しのみ |
+| `0x33` | `AI_LAB_COMMAND_RESULT` | CPU0 → PC / J11 | 実装済み。操作の受付結果と学習見本数 |
+| `0x34` | `AI_LAB_PROFILE_CHUNK` | CPU0 → PC / J11 | 実装済み。MRAM保存済み見本を3 chunkずつ送信 |
 | `0x7F` | `LOG` | ESP32S3 → CPU0 | type予約。制御用CDCへ通常ログは送らない |
 
 `MANUAL_DRIVE`はまだ割り当てない。手動操作を追加する場合も、ESP32S3からCPU1へ直接送らずCPU0の権限、sequence、timeout、安全状態を通す。

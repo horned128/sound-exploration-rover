@@ -33,6 +33,7 @@
 #define APP_FEATURE_PRE_TRIGGER_FRAMES     (30U)
 #define APP_FEATURE_POST_TRIGGER_FRAMES    (50U)
 #define APP_FEATURE_PACKET_PERIOD_MS       (20U)
+#define APP_FEATURE_RETRIGGER_PERIOD_MS    (1500U)          /**< 継続音の特徴量再送周期[ms] */
 
 /* 接続先PCと同じLANの値を設定する。空文字の間はWi-Fiを開始しない。 */
 #define APP_WIFI_SSID                      "Fight Club"

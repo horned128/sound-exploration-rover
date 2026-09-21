@@ -11,12 +11,21 @@
 #include "task_common.h"                                    /* CPU0タスク共通異常型 */
 #include <tk/tkernel.h>                                     /* μT-Kernel型 */
 
+/**< UIやUSB診断経路から思考タスクへ渡す現場学習操作 */
+typedef enum e_task_think_learning_command {
+    TASK_THINK_LEARNING_COMMAND_NONE = 0U,                 /**< 操作なし */
+    TASK_THINK_LEARNING_COMMAND_START,                     /**< 見本収集開始 */
+    TASK_THINK_LEARNING_COMMAND_COMMIT,                    /**< 見本保存要求 */
+    TASK_THINK_LEARNING_COMMAND_CANCEL,                    /**< 未保存見本破棄 */
+} task_think_learning_command_t;
+
 EXPORT app_fault_t task_think_create(void);                 /* 思考タスクとイベント生成 */
 EXPORT app_fault_t task_think_start(void);                  /* 思考タスク開始 */
 EXPORT void task_think_delete(void);                        /* 思考タスクとイベント解放 */
 EXPORT ER task_think_report_fault(app_fault_t fault);       /* 他タスクからの異常通知 */
 EXPORT ER task_think_clear_fault(app_fault_t fault);        /* 回復確認済み異常の解除通知 */
 EXPORT void task_think_halt(app_fault_t fault);             /* 起動不能時のLED表示 */
+EXPORT ER task_think_learning_request(task_think_learning_command_t command); /* 現場学習操作要求 */
 
 IMPORT volatile sound_follow_state_t g_task_think_state;    /**< 現在の思考状態（Live Watch用） */
 IMPORT volatile UW g_task_think_cycle_count;                /**< 思考周期実行回数（Live Watch用） */

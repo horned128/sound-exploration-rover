@@ -333,6 +333,10 @@
       <description>USB Host Communications Device Class</description>
       <originalPack>Renesas.RA.6.4.0.pack</originalPack>
     </component>
+    <component apiversion="" class="HAL Drivers" condition="" group="all" subgroup="r_usb_pcdc" variant="" vendor="Renesas" version="6.4.0">
+      <description>USB Peripheral Communications Device Class</description>
+      <originalPack>Renesas.RA.6.4.0.pack</originalPack>
+    </component>
     <component apiversion="" class="Projects" condition="" group="all" subgroup="baremetal_blinky" variant="" vendor="Renesas" version="6.4.0">
       <description>Simple application that blinks an LED. No RTOS included.</description>
       <originalPack>Renesas.RA_baremetal_blinky.6.4.0.pack</originalPack>
@@ -419,6 +423,26 @@
       <property id="module.driver.usb_basic.rtos_callback" value="NULL"/>
       <property id="module.driver.usb_basic.other_context" value="NULL"/>
     </module>
+    <module id="module.driver.pcdc_on_usb.0">
+      <property id="module.driver.pcdc.name" value="g_acoustic_ai_lab_pcdc"/>
+    </module>
+    <module id="module.driver.basic_on_usb.1">
+      <property id="module.driver.basic.name" value="g_acoustic_ai_lab_usb"/>
+      <property id="module.driver.usb_basic.usb_mode" value="module.driver.usb_basic.usb_mode.peri"/>
+      <property id="module.driver.usb_basic.usb_speed" value="module.driver.usb_basic.usb_speed.fs"/>
+      <property id="module.driver.usb_basic.usb_modulenumber" value="module.driver.usb_basic.usb_modulenumber.0"/>
+      <property id="module.driver.usb_basic.p_usb_reg" value="NULL"/>
+      <property id="module.driver.usb_basic.complience_cb" value="NULL"/>
+      <property id="module.driver.usb_basic.ipl" value="board.icu.common.irq.priority12"/>
+      <property id="module.driver.usb_basic.ipl_r" value="board.icu.common.irq.priority12"/>
+      <property id="module.driver.usb_basic.ipl_d0" value="board.icu.common.irq.priority12"/>
+      <property id="module.driver.usb_basic.ipl_d1" value="board.icu.common.irq.priority12"/>
+      <property id="module.driver.usb_basic.hsipl" value="_disabled"/>
+      <property id="module.driver.usb_basic.hsipl_d0" value="_disabled"/>
+      <property id="module.driver.usb_basic.hsipl_d1" value="_disabled"/>
+      <property id="module.driver.usb_basic.rtos_callback" value="NULL"/>
+      <property id="module.driver.usb_basic.other_context" value="NULL"/>
+    </module>
     <module id="module.driver.flash_on_mram.0">
       <property id="module.driver.mram.name" value="g_mram0"/>
       <property id="module.driver.mram.p_callback" value="NULL"/>
@@ -431,6 +455,9 @@
       <stack module="module.driver.flash_on_mram.0"/>
       <stack module="module.driver.hcdc_on_usb.0">
         <stack module="module.driver.basic_on_usb.0" requires="module.driver.basic_on_usb.requires.basic"/>
+      </stack>
+      <stack module="module.driver.pcdc_on_usb.0">
+        <stack module="module.driver.basic_on_usb.1" requires="module.driver.basic_on_usb.requires.basic"/>
       </stack>
     </context>
     <config id="config.driver.usb_basic">
@@ -445,7 +472,7 @@
       <property id="config.driver.usb_basic.cntmd" value="config.driver.usb_basic.cntmd.disable"/>
       <property id="config.driver.usb_basic.ldo_regulator" value="config.driver.usb_basic.ldo_regulator.disable"/>
       <property id="config.driver.usb_basic.dma" value="config.driver.usb_basic.dma.disable"/>
-      <property id="config.driver.usb_basic.usb_multiport" value="config.driver.usb_basic.usb_multiport.disable"/>
+      <property id="config.driver.usb_basic.usb_multiport" value="config.driver.usb_basic.usb_multiport.enable"/>
       <property id="config.driver.usb_basic.compliance_mode" value="config.driver.usb_basic.compliance_mode.disable"/>
       <property id="config.driver.usb_basic.tpl_table" value="NULL"/>
     </config>
@@ -460,6 +487,8 @@
     <config id="config.driver.mram">
       <property id="config.driver.mram.param_checking_enable" value="config.mram.param_checking_enable.bsp"/>
     </config>
+    <config id="config.driver.usb_pcdc"/>
+    <config id="config.driver.usb_pcdc_class"/>
     <config id="config.driver.ioport">
       <property id="config.driver.ioport.checking" value="config.driver.ioport.checking.system"/>
       <property id="config.driver.ioport.ccd_support_enable" value="config.driver.ioport.ccd_support_enable.disabled"/>
@@ -778,6 +807,11 @@
       <configSetting altId="p413.irq.irq18" configurationId="p413"/>
       <configSetting altId="p413.gpio_irq.gpio_irq_enabled" configurationId="p413.gpio_irq"/>
       <configSetting altId="p413.gpio_mode.gpio_mode_irq" configurationId="p413.gpio_mode"/>
+      <configSetting altId="p407.usbfs.usb_vbus" configurationId="p407"/>
+      <configSetting altId="p407.gpio_speed.gpio_speed_m" configurationId="p407.gpio_drivecapacity"/>
+      <configSetting altId="p407.gpio_mode.gpio_mode_peripheral" configurationId="p407.gpio_mode"/>
+      <configSetting altId="p500.output.low" configurationId="p500"/>
+      <configSetting altId="p500.gpio_mode.gpio_mode_out.low" configurationId="p500.gpio_mode"/>
       <configSetting altId="p602.gpt7.gtioc7b" configurationId="p602"/>
       <configSetting altId="p602.gpio_speed.gpio_speed_h" configurationId="p602.gpio_drivecapacity"/>
       <configSetting altId="p602.gpio_mode.gpio_mode_peripheral" configurationId="p602.gpio_mode"/>
@@ -801,6 +835,7 @@
       <configSetting altId="sdram.mode.custom.free" configurationId="sdram.mode"/>
       <configSetting altId="ssie.mode.custom.free" configurationId="ssie.mode"/>
       <configSetting altId="ssie0.mode.custom.free" configurationId="ssie0.mode"/>
+      <configSetting altId="usbfs.mode.custom.free" configurationId="usbfs.mode"/>
       <configSetting altId="usbhs.mode.custom.free" configurationId="usbhs.mode"/>
     </pincfg>
     <pincfg active="false" name="R7KA8P1KFLCAC.pincfg" selected="false" symbol="">

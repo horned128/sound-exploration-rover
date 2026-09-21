@@ -151,3 +151,23 @@ def test_summary_classification_keeps_indeterminate_and_not_ready_distinct_from_
     handle.acoustic_identifier_summary_classify(other, other_valid, int(other_active.value), samples, 5, None, threshold.value, ctypes.byref(output))
     assert output.status == SUMMARY_NOT_TARGET
     assert output.minimum_cosine_distance > 0.2
+
+
+def test_classification_enforces_peak_band_and_runtime_threshold_cap() -> None:
+    handle = library()
+    reference_values = [10] * CPU0_ACOUSTIC_SUMMARY_DIMENSION
+    candidate_values = list(reference_values)
+    for summary_index in (2 * CPU0_ACOUSTIC_FEATURE_BIN_COUNT, 5 * CPU0_ACOUSTIC_FEATURE_BIN_COUNT):
+        reference_values[summary_index + 14] = 30
+        candidate_values[summary_index + 1] = 30
+
+    reference = (ctypes.c_int8 * CPU0_ACOUSTIC_SUMMARY_DIMENSION)(*reference_values)
+    candidate = (ctypes.c_int8 * CPU0_ACOUSTIC_SUMMARY_DIMENSION)(*candidate_values)
+    samples = (ctypes.c_int8 * (5 * CPU0_ACOUSTIC_SUMMARY_DIMENSION))(*list(reference) * 5)
+    output = AcousticIdentifierSummaryOutput()
+
+    # 旧MRAMに保存された0.220のしきい値でも、現行の精度優先上限0.200で照合する。
+    handle.acoustic_identifier_summary_classify(candidate, 1, 80, samples, 5, None, 0.22, ctypes.byref(output))
+    assert abs(output.threshold - 0.20) < 1e-4
+    assert output.minimum_cosine_distance < 0.20
+    assert output.status == SUMMARY_NOT_TARGET

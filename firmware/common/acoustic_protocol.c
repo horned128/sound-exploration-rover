@@ -366,6 +366,55 @@ size_t acoustic_protocol_encode_pose_telemetry(uint32_t sequence, uint32_t uptim
 }
 
 /** =================================================================*
+ * @brief  PC直結音響AIラボ用の推論snapshotを符号化
+ * @details すべての浮動小数値は固定小数点へ縮約し、MCU/PC間で同一の
+ *          診断値を扱う。特徴量本体は別のchunk frameで送る。
+ * @param[in] sequence 送信sequence
+ * @param[in] uptime_ms 送信元の稼働時間[ms]
+ * @param[in] p_snapshot 符号化するsnapshot
+ * @param[out] p_output 出力バッファ
+ * @param[in] output_capacity 出力バッファ容量[byte]
+ * @return 符号化したフレーム長[byte]、失敗時は0
+ * ================================================================= */
+size_t acoustic_protocol_encode_ai_lab_snapshot(uint32_t sequence, uint32_t uptime_ms,
+                                                const acoustic_ai_lab_snapshot_t * p_snapshot,
+                                                uint8_t * p_output, size_t output_capacity) {
+    if (NULL == p_snapshot) {
+        return 0U;
+    }
+
+    uint8_t payload[ACOUSTIC_AI_LAB_SNAPSHOT_PAYLOAD_SIZE] = {0};
+    payload[0] = p_snapshot->schema_version;
+    payload[1] = p_snapshot->flags;
+    payload[2] = p_snapshot->think_state;
+    payload[3] = p_snapshot->infer_status;
+    acoustic_write_u16_le(&payload[4], p_snapshot->doa_deg);
+    acoustic_write_u16_le(&payload[6], (uint16_t) p_snapshot->level_dbfs_x100);
+    acoustic_write_u16_le(&payload[8], (uint16_t) p_snapshot->peak_dbfs_x100);
+    payload[10] = p_snapshot->vad;
+    payload[11] = p_snapshot->xvf_status;
+    payload[12] = p_snapshot->audio_flags;
+    payload[13] = p_snapshot->learning_samples;
+    payload[14] = p_snapshot->target_peak_bin;
+    payload[15] = p_snapshot->current_peak_bin;
+    payload[16] = p_snapshot->nearest_sample;
+    payload[17] = p_snapshot->active_frame_count;
+    acoustic_write_u16_le(&payload[18], p_snapshot->cosine_distance_x1000);
+    acoustic_write_u16_le(&payload[20], p_snapshot->identifier_threshold_x1000);
+    acoustic_write_u16_le(&payload[22], p_snapshot->similarity_permille);
+    acoustic_write_u16_le(&payload[24], p_snapshot->background_mse_x1000);
+    acoustic_write_u16_le(&payload[26], p_snapshot->background_threshold_x1000);
+    acoustic_write_u32_le(&payload[28], p_snapshot->observation_sequence);
+    acoustic_write_u32_le(&payload[32], p_snapshot->feature_generation);
+    acoustic_write_u32_le(&payload[36], p_snapshot->inference_count);
+    acoustic_write_u32_le(&payload[40], p_snapshot->match_count);
+    payload[44] = p_snapshot->storage_result;
+
+    return acoustic_protocol_encode(ACOUSTIC_MESSAGE_AI_LAB_SNAPSHOT, sequence, uptime_ms, payload,
+                                    (uint16_t) sizeof(payload), p_output, output_capacity);
+}
+
+/** =================================================================*
  * @brief  パーサー初期化
  * @param[out] p_parser パーサー状態
  * ================================================================= */

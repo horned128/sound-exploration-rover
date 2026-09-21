@@ -284,7 +284,7 @@
             <div class="panel">
                 <h3 class="panel-title">State & Command</h3>
                 <div class="data-grid">
-                    <span class="data-label" data-help="CPU0の自律制御状態です。WAIT_LINKは音響リンク待ち、SENSOR_*は障害物回避、FAULTは異常停止を表します。">Think State</span><span class="data-value" id="val_think_state">UNKNOWN</span>
+                    <span class="data-label" data-help="CPU0の自律制御状態です。WAIT_LINKは音響リンク待ち、SPIN_*は後方音源に対するその場旋回、SENSOR_*は障害物回避、FAULTは異常停止を表します。">Think State</span><span class="data-value" id="val_think_state">UNKNOWN</span>
                     <span class="data-label" data-help="非常停止要求です。ACTIVEなら安全側としてモーター出力を止めます。学習中はACTIVEが正常です。">E-Stop</span><span class="data-value" id="val_estop">-</span>
                     <span class="data-label" data-help="モーター駆動の許可状態です。ONでのみ目標回転数を出力できます。">Enable</span><span class="data-value" id="val_enable">-</span>
                     <span class="data-label" data-help="CPU0が音響リンクを走行判断に使える状態かを示します。YESなら有効な音響観測を受信しています。">Link Ready</span><span class="data-value" id="val_link_ready">-</span>
@@ -305,12 +305,12 @@
             <div class="panel">
                 <h3 class="panel-title">Acoustic AI & Learning</h3>
                 <div class="data-grid">
-                    <span class="data-label" data-help="音響認識の判定状態です。TARGET（一致）、NOT_TARGET（不一致）、INDETERMINATE（判定不能・無音）、INACTIVE（待機）を表します。">Match Status</span><span class="data-value" id="val_recog_status">-</span>
-                    <span class="data-label" data-help="現在の音が学習したターゲット音とどれくらい似ているかを示す指標（0〜100%）です。しきい値を超えるとTARGET判定になります。">Similarity</span><span class="data-value" id="val_recog_similarity">-</span>
+                    <span class="data-label" data-help="音響認識の判定状態です。TARGETには、距離しきい値と主ピーク周波数帯（±3 bin）の両方が必要です。">Match Status</span><span class="data-value" id="val_recog_status">-</span>
+                    <span class="data-label" data-help="現在の音が学習したターゲット音とどれくらい似ているかを示す指標（0〜100%）です。高くても主ピーク周波数帯が異なればTARGETにはなりません。">Similarity</span><span class="data-value" id="val_recog_similarity">-</span>
                     <span class="data-label" data-help="学習音の最近傍見本との重み付きコサイン距離（0.0〜2.0）です。192次元（時間2スロット）およびピーク周波数重視で計算され、値が小さいほど酷似しています。">Cosine Dist</span><span class="data-value" id="val_recog_distance">-</span>
-                    <span class="data-label" data-help="ターゲット音と判定するためのコサイン距離のしきい値です。距離がこの値以下であればターゲット音と判定します。">Threshold</span><span class="data-value" id="val_recog_threshold">-</span>
-                    <span class="data-label" data-help="学習した音の代表ピーク周波数帯域です。この周波数帯（最大2.5倍）を重点評価し、低周波暗騒音（bin 0〜2: 0.5倍）を抑制します。">Target Peak</span><span class="data-value" id="val_recog_target_peak">-</span>
-                    <span class="data-label" data-help="現在マイクロホンが捉えている音のピーク周波数帯域です。Target Peakと一致していれば目標音である可能性が高くなります。">Current Peak</span><span class="data-value" id="val_recog_current_peak">-</span>
+                    <span class="data-label" data-help="ターゲット音と判定するためのコサイン距離の実効しきい値です。実機の口笛変動を許容しつつ、最大0.200に制限されます。">Threshold</span><span class="data-value" id="val_recog_threshold">-</span>
+                    <span class="data-label" data-help="学習した音の代表ピーク周波数帯域です。この帯域の±3 bin外の音は、類似度にかかわらず拒否します。">Target Peak</span><span class="data-value" id="val_recog_target_peak">-</span>
+                    <span class="data-label" data-help="現在マイクロホンが捉えている音の主ピーク周波数帯域です。Target Peakから±3 bin外ならNOT_TARGETです。">Current Peak</span><span class="data-value" id="val_recog_current_peak">-</span>
                     <span class="data-label" data-help="現場音の見本を収集する学習モードです。ACTIVE中は安全のため非常停止が有効になります。">Learning Mode</span><span class="data-value" id="val_learning_active">-</span>
                     <span class="data-label" data-help="MRAMに、有効な背景モデルと音の見本が保存されているかを示します。VALIDなら次回起動後にも利用できます。">Stored Data</span><span class="data-value" id="val_storage_valid">-</span>
                     <span class="data-label" data-help="MRAMに保存されている学習サンプルの件数です（最大5件）。">Samples</span><span class="data-value" id="val_learning_samples">-</span>
@@ -518,7 +518,7 @@
             0: "WAIT_LINK", 1: "LISTEN", 2: "STEER_PREP", 3: "MOVE_STEP", 4: "SETTLE", 5: "COOLDOWN",
             6: "SENSOR_SAFE_STOP", 7: "SENSOR_FORWARD", 8: "SENSOR_CAUTION_FORWARD",
             9: "SENSOR_TURN_LEFT", 10: "SENSOR_TURN_RIGHT", 11: "SENSOR_BLOCKED_STOP",
-            12: "SENSOR_IMU_STOP", 13: "FAULT",
+            12: "SENSOR_IMU_STOP", 13: "FAULT", 17: "SPIN_PREP", 18: "SPIN_STEP", 19: "SPIN_NO_PROGRESS",
             14: "SENSOR_PIVOT_LEFT", 15: "SENSOR_PIVOT_RIGHT", 16: "SENSOR_BACKUP"
         };
         const CPU0_FAULTS = {
@@ -1189,7 +1189,7 @@
             const threshVal = (recogAvailable && recog.threshold !== undefined) ? Number(recog.threshold) : (learningAvailable ? Number(learning.threshold) : null);
 
             setVal('val_recog_similarity', simVal !== null ? `${simVal.toFixed(1)} %` : '-',
-                simVal !== null && threshVal !== null && distVal !== null ? (distVal <= threshVal ? 'val-ok' : 'val-warn') : '');
+                simVal !== null ? (recogStatus === 'TARGET' ? 'val-ok' : 'val-warn') : '');
             setVal('val_recog_distance', distVal !== null ? distVal.toFixed(3) : '-');
             setVal('val_recog_threshold', threshVal !== null ? threshVal.toFixed(3) : '-');
             setVal('val_recog_frames', recogAvailable ? `${recog.active_frames ?? 0} / 80` : '-');

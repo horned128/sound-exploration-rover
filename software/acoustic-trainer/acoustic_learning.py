@@ -22,8 +22,9 @@ SAMPLE_COUNT = 5
 SUMMARY_DIMENSION = FEATURE_BINS * 3 * 2
 SLOT_FRAME_COUNT = 40
 THRESHOLD_MIN = 0.08
-THRESHOLD_MAX = 0.22
+THRESHOLD_MAX = 0.20
 SIGMA_SCALE = 1.5
+PEAK_TOLERANCE_BINS = 3
 
 
 def _lcg_uniform(seed: int, count: int) -> tuple[np.ndarray, int]:
@@ -188,6 +189,12 @@ def build_bin_weights(peak_bin: int) -> np.ndarray:
     return weights
 
 
+def peak_bins_match(target_peak_bin: int, current_peak_bin: int) -> bool:
+    """代表ピークが近傍binにある場合だけ、同じ対象音の候補として扱う。"""
+
+    return abs(int(target_peak_bin) - int(current_peak_bin)) <= PEAK_TOLERANCE_BINS
+
+
 def cosine_distance(
     left: np.ndarray,
     right: np.ndarray,
@@ -222,7 +229,7 @@ def leave_one_out_threshold(
     samples: np.ndarray,
     bin_weights: np.ndarray | None = None,
 ) -> float | None:
-    """見本ごとの最近傍距離の平均+1.5σを受理しきい値として返す（範囲[0.08, 0.22]にクランプ）。"""
+    """見本ごとの最近傍距離の平均+1.5σを受理しきい値として返す（範囲[0.08, 0.20]にクランプ）。"""
     values = np.asarray(samples, dtype=np.int8)
     if values.ndim != 2 or values.shape[1] != SUMMARY_DIMENSION:
         raise ValueError(f"expected (samples, {SUMMARY_DIMENSION}), got {values.shape}")
@@ -291,5 +298,11 @@ def identify(
     if not valid_distances:
         return IdentificationResult(Identification.NOT_READY, active_count, None, None)
     minimum = min(valid_distances)
-    status = Identification.TARGET if minimum <= threshold else Identification.NOT_TARGET
+    target_peak_bin = find_peak_bin(np.asarray(samples, dtype=np.int8))
+    current_peak_bin = find_peak_bin(np.expand_dims(summary, axis=0))
+    status = (
+        Identification.TARGET
+        if peak_bins_match(target_peak_bin, current_peak_bin) and minimum <= threshold
+        else Identification.NOT_TARGET
+    )
     return IdentificationResult(status, active_count, minimum, threshold)
