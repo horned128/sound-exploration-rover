@@ -24,6 +24,7 @@ from protocol import (
     COMMAND_LEARNING_CANCEL,
     COMMAND_LEARNING_COMMIT,
     COMMAND_LEARNING_START,
+    COMMAND_RESTART,
     COMMAND_PROFILE_READ,
     COMMAND_STATUS,
     Frame,
@@ -47,6 +48,7 @@ COMMANDS = {
     "learn_commit": COMMAND_LEARNING_COMMIT,
     "learn_cancel": COMMAND_LEARNING_CANCEL,
     "profile_read": COMMAND_PROFILE_READ,
+    "restart": COMMAND_RESTART,
 }
 
 

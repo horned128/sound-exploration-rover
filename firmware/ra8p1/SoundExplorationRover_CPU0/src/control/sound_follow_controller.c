@@ -15,18 +15,26 @@ typedef struct st_sound_follow_context {
     BOOL trigger_active;                                    /**< 音源トリガの有効状態 */
     BOOL desired_is_spin_turn;                              /**< 最小並進回頭を要求する状態 */
     BOOL spin_relisten_pending;                             /**< 連続音の再測定要求 */
+    BOOL move_relisten_pending;                             /**< 短距離移動後の再測定要求 */
+    BOOL avoidance_reorient_pending;                        /**< 回避後に音源へ向き直す要求 */
+    UB avoidance_reorient_attempts;                         /**< 回避後の向き直し試行回数 */
     BOOL spin_imu_observed;                                 /**< 有効IMUを受信済み */
     BOOL spin_imu_update_valid;                             /**< 前回IMU更新回数を保持した状態 */
+    BOOL spin_doa_valid;                                    /**< 旋回中DoAの前回値を保持済み */
+    BOOL spin_drive_reversed;                               /**< DoA逆進行を受け一度だけ駆動反転済み */
     B spin_direction;                                       /**< 期待ヨー方向（左負、右正） */
     UB doa_sample_count;                                    /**< 蓄積済みDoAサンプル数 */
     H desired_steering_deg;                                 /**< 内部操舵角目標[deg] */
+    H target_bearing_deg;                                   /**< 静止中に確定した本来のDoA[deg] */
     H desired_left_rpm;                                     /**< 内部左車輪目標RPM */
     H desired_right_rpm;                                    /**< 内部右車輪目標RPM */
     W spin_yaw_mdeg;                                        /**< 期待方向の相対ヨー[mdeg] */
     W spin_target_yaw_mdeg;                                 /**< DoAから決めた今回の目標ヨー[mdeg] */
     W spin_progress_yaw_mdeg;                               /**< 進行確認を始めたヨー[mdeg] */
+    W spin_doa_away_deg;                                    /**< 音源から遠ざかった累積DoA角[deg] */
     UW spin_last_imu_update_count;                          /**< 最後に積分したセンサー更新回数 */
     UW spin_progress_elapsed_ms;                            /**< 進行確認を始めてからの時間[ms] */
+    H spin_last_doa_deg;                                    /**< 旋回中の前回DoA（車体相対、右正） */
     H doa_samples_deg[CPU0_SOUND_DOA_SAMPLE_COUNT];         /**< DoA履歴[deg] */
 } sound_follow_context_t;
 
@@ -34,6 +42,7 @@ LOCAL H sound_follow_angle_normalize(W angle_deg);          /* 角度を-180～1
 LOCAL H sound_follow_angle_delta(H angle_deg, H reference_deg); /* 円周上の符号付き角度差 */
 LOCAL H sound_follow_abs_i16(H value);                      /* int16_t絶対値 */
 LOCAL BOOL sound_follow_observation_usable(const acoustic_observation_t * p_observation); /* DoA品質判定 */
+LOCAL BOOL sound_follow_observation_trackable(const acoustic_observation_t * p_observation); /* 走行に採用できるDoA品質判定 */
 LOCAL BOOL sound_follow_observation_quiet(const acoustic_observation_t * p_observation); /* release条件判定 */
 LOCAL void sound_follow_detection_reset(void);              /* 音量・DoA履歴初期化 */
 LOCAL void sound_follow_doa_push(H angle_deg);              /* DoA履歴追加 */
@@ -44,6 +53,7 @@ LOCAL void sound_follow_motion_from_doa(H doa_deg);         /* DoAから操舵�
 LOCAL void sound_follow_state_enter(sound_follow_state_t state); /* 状態遷移 */
 LOCAL void sound_follow_spin_yaw_update(const sound_follow_input_t * p_input, UW elapsed_ms); /* IMU旋回量積分 */
 LOCAL void sound_follow_spin_command_update(void);          /* 残ヨーに応じた旋回RPM更新 */
+LOCAL BOOL sound_follow_spin_doa_update(const sound_follow_input_t * p_input); /* DoAで旋回方向・完了を監視 */
 LOCAL void sound_follow_output_update(sound_follow_output_t * p_output); /* 状態から指令生成 */
 
 LOCAL sound_follow_context_t controller;                    /**< 音源追従状態 */
@@ -113,17 +123,32 @@ LOCAL BOOL sound_follow_observation_usable(const acoustic_observation_t * p_obse
 }
 
 /** =================================================================*
+ * @brief  走行判断に十分な品質のDoAか判定
+ * @details XVF3800のフォールバックDoAはVADが断続的に0になるため、VADでは
+ *          除外しない。学習済み音の一致と循環DoA品質で誤検知を防ぐ。
+ * @param[in] p_observation 音響観測
+ * @return 走行DoAとして採用できるならtrue
+ * ================================================================= */
+LOCAL BOOL sound_follow_observation_trackable(const acoustic_observation_t * p_observation) {
+    return sound_follow_observation_usable(p_observation) &&
+           (p_observation->raw_doa_deg < 360U) &&
+           (p_observation->doa_confidence >= CPU0_SOUND_TRACK_MIN_CONFIDENCE) &&
+           (sound_follow_abs_i16(sound_follow_angle_delta((H) p_observation->doa_deg,
+                                                          (H) p_observation->raw_doa_deg)) <=
+            CPU0_SOUND_RAW_FILTER_MAX_DELTA_DEG);
+}
+
+/** =================================================================*
  * @brief  音源追従解除に十分な静音か判定
  * @param[in] p_observation 音響観測
- * @return VADが非検出かつrelease閾値以下ならtrue
+ * @return release閾値以下ならtrue
  * ================================================================= */
 LOCAL BOOL sound_follow_observation_quiet(const acoustic_observation_t * p_observation) {
     if (NULL == p_observation) {
         return TRUE;
     }
 
-    return (0U == p_observation->vad) &&
-           (p_observation->level_dbfs_x100 <= CPU0_SOUND_RELEASE_DBFS_X100);
+    return p_observation->level_dbfs_x100 <= CPU0_SOUND_RELEASE_DBFS_X100;
 }
 
 /** =================================================================*
@@ -224,11 +249,32 @@ LOCAL W sound_follow_spin_target_from_doa(H doa_deg) {
  * @param[in] doa_deg 車体正面基準の相対DoA
  * ================================================================= */
 LOCAL void sound_follow_motion_from_doa(H doa_deg) {
-    if (sound_follow_abs_i16(doa_deg) > CPU0_SOUND_SPIN_THRESHOLD_DEG) {
+    controller.target_bearing_deg = doa_deg;
+    /* 回避ピボットは空き側へ出ることが目的で、音源を向くこととは分ける。
+     * 回避完了後は新しく静止取得したDoAが正面域に収まるまで、最大二回だけ
+     * 左右符号へ向き直してから前進する。試行回数を制限して無限旋回を防ぐ。 */
+    BOOL const outside_reorient_front = sound_follow_abs_i16(doa_deg) >
+                                      CPU0_SOUND_AVOID_REORIENT_THRESHOLD_DEG;
+    BOOL const reorient_after_avoidance = controller.avoidance_reorient_pending &&
+                                          outside_reorient_front &&
+                                          (controller.avoidance_reorient_attempts <
+                                           CPU0_SOUND_AVOID_REORIENT_MAX_ATTEMPTS);
+    if (reorient_after_avoidance) {
+        controller.avoidance_reorient_attempts++;
+    } else if (controller.avoidance_reorient_pending) {
+        controller.avoidance_reorient_pending = FALSE;
+        controller.avoidance_reorient_attempts = 0U;
+    }
+    if ((sound_follow_abs_i16(doa_deg) > CPU0_SOUND_SPIN_THRESHOLD_DEG) ||
+        reorient_after_avoidance) {
         controller.desired_steering_deg = 0;
         controller.desired_is_spin_turn = TRUE;
         controller.spin_direction = (doa_deg > 0) ? 1 : -1;
         controller.spin_target_yaw_mdeg = sound_follow_spin_target_from_doa(doa_deg);
+        controller.spin_doa_valid = TRUE;
+        controller.spin_last_doa_deg = doa_deg;
+        controller.spin_doa_away_deg = 0;
+        controller.spin_drive_reversed = FALSE;
         sound_follow_spin_command_update();
         return;
     }
@@ -269,8 +315,13 @@ LOCAL void sound_follow_state_enter(sound_follow_state_t state) {
     }
     if ((CPU0_THINK_STATE_LISTEN == state) || (CPU0_THINK_STATE_COOLDOWN == state) ||
         (CPU0_THINK_STATE_SPIN_NO_PROGRESS == state) || (CPU0_THINK_STATE_WAIT_LINK == state) ||
-        (CPU0_THINK_STATE_FAULT == state)) {
+        (CPU0_THINK_STATE_FAULT == state) || (CPU0_THINK_STATE_WAIT_RESTART == state)) {
         controller.spin_relisten_pending = FALSE;
+        controller.move_relisten_pending = FALSE;
+        if (CPU0_THINK_STATE_LISTEN != state) {
+            controller.avoidance_reorient_pending = FALSE;
+            controller.avoidance_reorient_attempts = 0U;
+        }
     }
     if ((CPU0_THINK_STATE_LISTEN == state) || (CPU0_THINK_STATE_WAIT_LINK == state) ||
         (CPU0_THINK_STATE_COOLDOWN == state) || (CPU0_THINK_STATE_MOVE_STEP == state) ||
@@ -305,7 +356,9 @@ LOCAL void sound_follow_spin_yaw_update(const sound_follow_input_t * p_input, UW
         return;
     }
 
-    controller.spin_yaw_mdeg += (W) gyro * CPU0_SENSOR_YAW_RIGHT_SIGN * (W) controller.spin_direction *
+    B const drive_direction = controller.spin_drive_reversed ? (B) -controller.spin_direction :
+                                                               controller.spin_direction;
+    controller.spin_yaw_mdeg += (W) gyro * CPU0_SENSOR_YAW_RIGHT_SIGN * (W) drive_direction *
                                 (W) elapsed_ms / 10;
     if (controller.spin_yaw_mdeg > 360000) {
         controller.spin_yaw_mdeg = 360000;
@@ -323,8 +376,54 @@ LOCAL void sound_follow_spin_command_update(void) {
         controller.spin_target_yaw_mdeg - controller.spin_yaw_mdeg : 0;
     H rpm = (remaining_yaw_mdeg <= CPU0_SOUND_SPIN_SLOWDOWN_MDEG) ? CPU0_SOUND_SPIN_SLOW_RPM :
                                                                            CPU0_SOUND_SPIN_RPM;
-    controller.desired_left_rpm = (controller.spin_direction > 0) ? rpm : (H) -rpm;
+    B const drive_direction = controller.spin_drive_reversed ? (B) -controller.spin_direction :
+                                                               controller.spin_direction;
+    controller.desired_left_rpm = (drive_direction > 0) ? rpm : (H) -rpm;
     controller.desired_right_rpm = (H) -controller.desired_left_rpm;
+}
+
+/** =================================================================*
+ * @brief 最小並進旋回中のDoAを使い、旋回方向と完了を確認する
+ * @details IMUは車体が回った量の安全監視に使うが、音源に向いたかどうかは
+ *          DoAでしか分からない。DoAが指令方向と逆へ連続して動く場合だけ
+ *          一回反転し、観測ノイズによる左右往復は起こさない。
+ * @param[in] p_input 最新の音響入力
+ * @return DoAで正面域へ到達して旋回を終了した場合TRUE
+ * ================================================================= */
+LOCAL BOOL sound_follow_spin_doa_update(const sound_follow_input_t * p_input) {
+    if ((NULL == p_input) || !p_input->new_observation ||
+        !sound_follow_observation_trackable(&p_input->observation) ||
+        (p_input->observation.level_dbfs_x100 < CPU0_SOUND_TRIGGER_DBFS_X100)) {
+        return FALSE;
+    }
+
+    H const doa_deg = sound_follow_doa_to_relative(p_input->observation.doa_deg);
+    if (controller.spin_doa_valid) {
+        H const delta_deg = sound_follow_angle_delta(doa_deg, controller.spin_last_doa_deg);
+        W const directed_delta_deg = (W) delta_deg * (W) controller.spin_direction;
+        if (!controller.spin_drive_reversed && (directed_delta_deg > 0)) {
+            controller.spin_doa_away_deg += directed_delta_deg;
+            if (controller.spin_doa_away_deg >= CPU0_SOUND_SPIN_DOA_REVERSE_DEG) {
+                /* IMUの進行量も新しい駆動向きで測り直す。 */
+                controller.spin_drive_reversed = TRUE;
+                controller.spin_yaw_mdeg = 0;
+                controller.spin_progress_yaw_mdeg = 0;
+                controller.spin_progress_elapsed_ms = 0U;
+                sound_follow_spin_command_update();
+            }
+        } else if (directed_delta_deg < 0) {
+            controller.spin_doa_away_deg = 0;
+        }
+    }
+    controller.spin_last_doa_deg = doa_deg;
+    controller.spin_doa_valid = TRUE;
+
+    /* 5点の安定DoAで正面域を確認してから停止する。単発の反射や回転中の
+     * 平滑化遅れで早期停止しないよう、LISTENと同じ円周安定判定を使う。 */
+    sound_follow_doa_push(doa_deg);
+    H stable_doa_deg = 0;
+    return sound_follow_doa_stable(&stable_doa_deg) &&
+           (sound_follow_abs_i16(stable_doa_deg) <= CPU0_SOUND_SPIN_DOA_FRONT_DEG);
 }
 
 /** =================================================================*
@@ -334,6 +433,7 @@ EXPORT void sound_follow_controller_init(void) {
     controller = (sound_follow_context_t){
         .state = CPU0_THINK_STATE_WAIT_LINK,
         .desired_steering_deg = 0,
+        .target_bearing_deg = 0,
         .desired_left_rpm = 0,
         .desired_right_rpm = 0,
         .desired_is_spin_turn = FALSE,
@@ -348,10 +448,11 @@ LOCAL void sound_follow_output_update(sound_follow_output_t * p_output) {
     *p_output = (sound_follow_output_t){
         .state = controller.state,
         .steering_deg = 0,
+        .target_bearing_deg = controller.target_bearing_deg,
         .is_spin_turn = FALSE,
         .left_rpm = 0,
         .right_rpm = 0,
-        .actuator_enable = TRUE,
+        .actuator_enable = FALSE,
         .emergency_stop = FALSE,
     };
 
@@ -360,18 +461,22 @@ LOCAL void sound_follow_output_update(sound_follow_output_t * p_output) {
         p_output->emergency_stop = TRUE;
     } else if (CPU0_THINK_STATE_STEER_PREP == controller.state) {
         p_output->steering_deg = controller.desired_steering_deg;
+        p_output->actuator_enable = TRUE;
     } else if (CPU0_THINK_STATE_SPIN_PREP == controller.state) {
         p_output->is_spin_turn = TRUE;
+        p_output->actuator_enable = TRUE;
     } else if (CPU0_THINK_STATE_MOVE_STEP == controller.state) {
         p_output->steering_deg = controller.desired_steering_deg;
         p_output->left_rpm = controller.desired_left_rpm;
         p_output->right_rpm = controller.desired_right_rpm;
+        p_output->actuator_enable = TRUE;
     } else if (CPU0_THINK_STATE_SPIN_STEP == controller.state) {
         p_output->is_spin_turn = TRUE;
         p_output->left_rpm = controller.desired_left_rpm;
         p_output->right_rpm = controller.desired_right_rpm;
+        p_output->actuator_enable = TRUE;
     } else if (CPU0_THINK_STATE_SPIN_NO_PROGRESS == controller.state) {
-        /* 停止中も舵角を保ち、ログ上で進行不足を明示する。 */
+        /* 出力を止め、ログ上で進行不足を明示する。 */
         p_output->is_spin_turn = TRUE;
     }
 }
@@ -395,6 +500,22 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
         controller.link_stable_ms = 0U;
         controller.quiet_elapsed_ms = 0U;
         sound_follow_state_enter(CPU0_THINK_STATE_WAIT_LINK);
+    } else if (p_input->restart_request) {
+        sound_follow_detection_reset();
+        controller.quiet_elapsed_ms = 0U;
+        controller.avoidance_reorient_pending = FALSE;
+        controller.avoidance_reorient_attempts = 0U;
+        sound_follow_state_enter(CPU0_THINK_STATE_LISTEN);
+    } else if (p_input->avoidance_relisten) {
+        /* 回避中の車体姿勢・モーター雑音で得た方位は使い回さない。 */
+        sound_follow_detection_reset();
+        controller.quiet_elapsed_ms = 0U;
+        controller.move_relisten_pending = TRUE;
+        controller.avoidance_reorient_pending = TRUE;
+        controller.avoidance_reorient_attempts = 0U;
+        sound_follow_state_enter(CPU0_THINK_STATE_SETTLE);
+    } else if (CPU0_THINK_STATE_WAIT_RESTART == controller.state) {
+        /* 停止シーケンス後は、外部からの明示再開まで停止を保つ。 */
     } else if (p_input->arrived) {
         if (CPU0_THINK_STATE_ARRIVED != controller.state) {
             sound_follow_state_enter(CPU0_THINK_STATE_ARRIVED);
@@ -422,19 +543,22 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
                                                  (CPU0_THINK_STATE_SPIN_STEP == controller.state))) {
             sound_follow_state_enter(CPU0_THINK_STATE_SETTLE);
         } else if ((CPU0_THINK_STATE_LISTEN == controller.state) && p_input->new_observation) {
-            BOOL const usable = sound_follow_observation_usable(&p_input->observation);
+            BOOL const usable = sound_follow_observation_trackable(&p_input->observation);
             BOOL const loud = p_input->observation.level_dbfs_x100 >= CPU0_SOUND_TRIGGER_DBFS_X100;
             BOOL const sound_allowed = !p_input->match_required || p_input->target_sound_matched;
 
             if (!controller.trigger_active) {
-                if (usable && loud && (0U != p_input->observation.vad) && sound_allowed) {
+                if (usable && loud && sound_allowed) {
                     controller.trigger_active = TRUE;
                     controller.trigger_elapsed_ms = 0U;
                     controller.doa_sample_count = 0U;
                 }
-            } else if (!usable || !sound_allowed) {
+            } else if (!sound_follow_observation_usable(&p_input->observation) || !sound_allowed ||
+                       sound_follow_observation_quiet(&p_input->observation)) {
                 sound_follow_detection_reset();
-            } else {
+            } else if (usable) {
+                /* フォールバックDoAの一時的な品質低下（40未満）は、連続音の
+                 * 取得を最初からやり直さず、この1サンプルだけ捨てる。 */
                 controller.trigger_elapsed_ms += elapsed_ms;
                 if (controller.trigger_elapsed_ms >= CPU0_SOUND_DOA_SETTLE_MS) {
                     sound_follow_doa_push(sound_follow_doa_to_relative(p_input->observation.doa_deg));
@@ -461,8 +585,10 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
                    (controller.state_elapsed_ms >= CPU0_SOUND_STEER_SETTLE_MS)) {
             sound_follow_state_enter(CPU0_THINK_STATE_SPIN_STEP);
         } else if (CPU0_THINK_STATE_MOVE_STEP == controller.state) {
-            /* S4: 走行中も音源を追跡し、連続追従を行う（ながら動作） */
+            /* 停止聴取シーケンス有効時は直前の静止DoAだけを使う。連続追従モードでは
+             * 以下の新しい有効DoAで、今回の操舵・MLP入力を更新し続ける。 */
             BOOL const sound_allowed = !p_input->match_required || p_input->target_sound_matched;
+#if (CPU0_SOUND_USE_LOCALIZATION_FOR_STEERING != 0U)
             if (p_input->navigation_target_valid) {
                 /* navigation bearingは操舵角の更新にのみ使用し、spin turnは発動しない。
                  * bearingが後方を示しても前進しながら最大旋回で追従する。推定精度が
@@ -477,18 +603,21 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
                 controller.desired_is_spin_turn = FALSE;
                 controller.quiet_elapsed_ms = 0U;
             }
+#endif
             if (p_input->new_observation) {
-                BOOL const usable = sound_follow_observation_usable(&p_input->observation);
+                BOOL const usable = sound_follow_observation_trackable(&p_input->observation);
                 BOOL const loud = p_input->observation.level_dbfs_x100 >= CPU0_SOUND_TRIGGER_DBFS_X100;
                 BOOL const quiet = sound_follow_observation_quiet(&p_input->observation);
 
-                if (usable && loud && (0U != p_input->observation.vad) && sound_allowed) {
-                    /* 有効音源の受信中: DoA履歴を更新し操舵角へ追従 */
+                if (usable && loud && sound_allowed) {
+                    /* 連続追従モードでは安定DoAに合わせて今回の走行指令を更新する。 */
+#if (CPU0_SOUND_STOP_AND_LISTEN_ENABLE == 0U)
                     sound_follow_doa_push(sound_follow_doa_to_relative(p_input->observation.doa_deg));
                     H mean_doa_deg = 0;
                     if (sound_follow_doa_stable(&mean_doa_deg)) {
                         sound_follow_motion_from_doa(mean_doa_deg);
                     }
+#endif
                     controller.quiet_elapsed_ms = 0U;
                 } else if (quiet || !sound_allowed) {
                     controller.quiet_elapsed_ms += elapsed_ms;
@@ -528,11 +657,23 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
             if (controller.quiet_elapsed_ms >= CPU0_SOUND_LOST_TIMEOUT_MS) {
                 sound_follow_state_enter(CPU0_THINK_STATE_SETTLE);
             }
+#if (CPU0_SOUND_STOP_AND_LISTEN_ENABLE != 0U)
+            else if (controller.state_elapsed_ms >= CPU0_SOUND_MOVE_STEP_MS) {
+                controller.move_relisten_pending = TRUE;
+                sound_follow_state_enter(CPU0_THINK_STATE_SETTLE);
+            }
+#endif
         } else if (CPU0_THINK_STATE_SPIN_STEP == controller.state) {
             sound_follow_spin_yaw_update(p_input, elapsed_ms);
             sound_follow_spin_command_update();
             controller.spin_progress_elapsed_ms += elapsed_ms;
-            if (controller.spin_yaw_mdeg >= controller.spin_target_yaw_mdeg) {
+            BOOL const sound_allowed = !p_input->match_required || p_input->target_sound_matched;
+            BOOL const doa_aligned = sound_allowed && sound_follow_spin_doa_update(p_input);
+            if (doa_aligned) {
+                /* 目標ヨー値は安全上限であり、DoA正面化を優先して即座に再聴取する。 */
+                controller.spin_relisten_pending = TRUE;
+                sound_follow_state_enter(CPU0_THINK_STATE_SETTLE);
+            } else if (controller.spin_yaw_mdeg >= controller.spin_target_yaw_mdeg) {
                 controller.spin_relisten_pending = TRUE;
                 sound_follow_state_enter(CPU0_THINK_STATE_SETTLE);
             } else if (controller.state_elapsed_ms >= CPU0_SOUND_SPIN_MAX_MS) {
@@ -551,14 +692,35 @@ EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input, U
         } else if ((CPU0_THINK_STATE_SPIN_NO_PROGRESS == controller.state) &&
                    (controller.state_elapsed_ms >= CPU0_SOUND_SPIN_FAILURE_HOLD_MS)) {
             sound_follow_state_enter(CPU0_THINK_STATE_COOLDOWN);
-        } else if ((CPU0_THINK_STATE_SETTLE == controller.state) &&
-                   (controller.state_elapsed_ms >= CPU0_SOUND_LISTEN_SETTLE_MS)) {
-            /* 成功した後方旋回は、音が続いていても新しいDoAをすぐ測る。 */
-            if (controller.spin_relisten_pending) {
-                sound_follow_state_enter(CPU0_THINK_STATE_LISTEN);
+        } else if (CPU0_THINK_STATE_SETTLE == controller.state) {
+            BOOL const sound_allowed = !p_input->match_required || p_input->target_sound_matched;
+            if (p_input->new_observation) {
+                BOOL const usable = sound_follow_observation_trackable(&p_input->observation);
+                BOOL const loud = p_input->observation.level_dbfs_x100 >= CPU0_SOUND_TRIGGER_DBFS_X100;
+                if (usable && loud && sound_allowed) {
+                    controller.quiet_elapsed_ms = 0U;
+                } else {
+                    controller.quiet_elapsed_ms += elapsed_ms;
+                }
             } else {
-                /* 音源消失後の静定を終えて静音確認へ */
-                sound_follow_state_enter(CPU0_THINK_STATE_COOLDOWN);
+                controller.quiet_elapsed_ms += elapsed_ms;
+            }
+            if (controller.state_elapsed_ms >= CPU0_SOUND_LISTEN_SETTLE_MS) {
+                /* 後方回頭・短距離移動・回避終了は、連続音でも新しいDoAを測る。 */
+                if (controller.spin_relisten_pending || controller.move_relisten_pending) {
+#if (CPU0_SOUND_STOP_AND_LISTEN_ENABLE != 0U)
+                    if (controller.quiet_elapsed_ms >= CPU0_SOUND_LOST_TIMEOUT_MS) {
+                        sound_follow_state_enter(CPU0_THINK_STATE_WAIT_RESTART);
+                    } else {
+                        sound_follow_state_enter(CPU0_THINK_STATE_LISTEN);
+                    }
+#else
+                    sound_follow_state_enter(CPU0_THINK_STATE_LISTEN);
+#endif
+                } else {
+                    /* 音源消失後の静定を終えて静音確認へ */
+                    sound_follow_state_enter(CPU0_THINK_STATE_COOLDOWN);
+                }
             }
         } else if ((CPU0_THINK_STATE_COOLDOWN == controller.state) && p_input->new_observation) {
             BOOL const quiet = sound_follow_observation_quiet(&p_input->observation);

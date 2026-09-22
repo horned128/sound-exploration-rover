@@ -60,15 +60,17 @@ def test_malformed_trace_is_rejected_or_explicitly_skipped() -> None:
     assert records[0].payload["sensors"]["valid_flags"] == 0
 
 
-def test_recorded_wall_loop_does_not_claim_escape_without_heading_progress() -> None:
+def test_recorded_wall_loop_uses_bounded_backup_then_stops_without_heading_progress() -> None:
     source = Path(__file__).parent / "fixtures/wall_loop_20260915.jsonl"
     outputs = replay_obstacle_avoidance(source)
     assert len(outputs) == 72
     first_escape = next(i for i, output in enumerate(outputs) if output.rule in (7, 8))
     assert all(output.actuator_enable for output in outputs[:first_escape])
-    # 有効な回頭量がなくても、クリアランス不足や試行回数だけでは停止しない。
-    assert all(output.rule in (7, 8) for output in outputs[first_escape:])
-    assert outputs[-1].rule in (7, 8) and outputs[-1].actuator_enable
+    # 有効な回頭量がない壁際では、短距離後退を二回試してから安全停止する。
+    backups = [output for output in outputs[first_escape:] if output.rule == 9]
+    assert len(backups) > 1
+    assert all(output.left_rpm == output.right_rpm < 0 for output in backups)
+    assert outputs[-1].rule == 5 and not outputs[-1].actuator_enable
 
 
 def test_replay_uses_cpu_time_and_does_not_advance_on_duplicate_packets() -> None:

@@ -19,6 +19,7 @@ LOCAL BOOL s_initialized = FALSE;                           /**< TFLM推論器�
 LOCAL tflm_runtime_info_t s_model_info;                     /**< モデル入出力量子化情報 */
 LOCAL float s_current_steering_deg = 0.0f;                  /**< 直前の決定操舵角 [deg] */
 LOCAL float s_current_speed_scale = 0.0f;                   /**< 直前の決定速度スケール [0.0, 1.0] */
+LOCAL B s_guard_direction = 0;                              /**< 正面障害物の回避側（左負、右正） */
 
 /** =================================================================*
  * @brief  浮動小数点クランプ関数
@@ -48,6 +49,60 @@ LOCAL float control_mlp_rate_limit(float target, float current, float max_change
 }
 
 /** =================================================================*
+ * @brief 正面障害物に対する回避側を、十分なクリアランスが得られるまで保持する
+ * @details 左右ToFの一時的な交差やMLPの量子化誤差で、回避中の操舵が反転・減衰する
+ *          ことを防ぐ。正面と両側が開けた時だけラッチを解除する。
+ * ================================================================= */
+LOCAL void control_mlp_clearance_guard(float left_mm, float center_mm, float right_mm,
+                                       float target_heading_deg, float * p_steering_deg,
+                                       float * p_speed_scale) {
+    if ((NULL == p_steering_deg) || (NULL == p_speed_scale)) {
+        return;
+    }
+
+    if ((0 != s_guard_direction) &&
+        (center_mm >= CONTROL_MLP_GUARD_RELEASE_CENTER_MM) &&
+        (left_mm >= CONTROL_MLP_GUARD_RELEASE_SIDE_MM) &&
+        (right_mm >= CONTROL_MLP_GUARD_RELEASE_SIDE_MM)) {
+        s_guard_direction = 0;
+    }
+
+    if (center_mm >= CONTROL_MLP_GUARD_ENTER_CENTER_MM) {
+        return;
+    }
+
+    if (0 == s_guard_direction) {
+        if ((right_mm - left_mm) > CONTROL_MLP_GUARD_SIDE_DELTA_MM) {
+            s_guard_direction = 1;
+        } else if ((left_mm - right_mm) > CONTROL_MLP_GUARD_SIDE_DELTA_MM) {
+            s_guard_direction = -1;
+        } else if (fabsf(s_current_steering_deg) >= 5.0f) {
+            s_guard_direction = (s_current_steering_deg > 0.0f) ? 1 : -1;
+        } else if (fabsf(target_heading_deg) >= 5.0f) {
+            s_guard_direction = (target_heading_deg > 0.0f) ? 1 : -1;
+        } else {
+            /* 完全対称な正面障害物のタイブレーク。毎周期の左右反転を防ぐ。 */
+            s_guard_direction = 1;
+        }
+    }
+
+    float const closeness = control_mlp_clampf(
+        (CONTROL_MLP_GUARD_ENTER_CENTER_MM - center_mm) /
+        (CONTROL_MLP_GUARD_ENTER_CENTER_MM - CONTROL_MLP_CRITICAL_DISTANCE_MM), 0.0f, 1.0f);
+    float const minimum_steer = CONTROL_MLP_GUARD_MIN_STEER_DEG +
+        closeness * (CONTROL_MLP_GUARD_MAX_STEER_DEG - CONTROL_MLP_GUARD_MIN_STEER_DEG);
+    if ((float) s_guard_direction * (*p_steering_deg) < minimum_steer) {
+        *p_steering_deg = (float) s_guard_direction * minimum_steer;
+    }
+
+    /* 回避側を保持している間は、誤った高速前進を許さない。 */
+    float const maximum_speed = 0.60f - 0.30f * closeness;
+    if (*p_speed_scale > maximum_speed) {
+        *p_speed_scale = maximum_speed;
+    }
+}
+
+/** =================================================================*
  * @brief  制御MLPプランナ初期化
  * @return 成功時TRUE、初期化失敗時FALSE
  * ================================================================= */
@@ -55,6 +110,7 @@ EXPORT BOOL control_mlp_planner_init(void) {
     s_initialized = FALSE;
     s_current_steering_deg = 0.0f;
     s_current_speed_scale = 0.0f;
+    s_guard_direction = 0;
 
     INT const init_err = tflm_runtime_init(g_control_mlp_model, g_control_mlp_model_len);
     if (TFLM_RUNTIME_OK != init_err) {
@@ -82,6 +138,7 @@ EXPORT void control_mlp_planner_reset(void) {
     s_initialized = FALSE;
     s_current_steering_deg = 0.0f;
     s_current_speed_scale = 0.0f;
+    s_guard_direction = 0;
     tflm_runtime_reset();
 }
 
@@ -194,8 +251,19 @@ EXPORT void control_mlp_planner_step(const sensor_snapshot_t * p_snapshot,
                                              CONTROL_MLP_MAX_STEERING_DEG);
     float raw_speed = control_mlp_clampf(speed_norm, 0.0f, 1.0f);
 
-    /* 開けた直進空間での量子化残留不感帯（850mm以上かつ目標直進時） */
-    if ((min_tof_mm >= 850.0f) && (fabsf(target_heading_deg) < 1.0f) && (fabsf(raw_steer_deg) < 4.0f)) {
+    /* MLP出力を回避側ラッチで下から支え、壁際で操舵力が抜けないようにする。 */
+    float const guard_left_mm = tof_valid[CPU0_TOF_LEFT] ?
+        (float) p_snapshot->tof_distance_mm[CPU0_TOF_LEFT] : CONTROL_MLP_FAR_DISTANCE_MM;
+    float const guard_center_mm = tof_valid[CPU0_TOF_CENTER] ?
+        (float) p_snapshot->tof_distance_mm[CPU0_TOF_CENTER] : CONTROL_MLP_FAR_DISTANCE_MM;
+    float const guard_right_mm = tof_valid[CPU0_TOF_RIGHT] ?
+        (float) p_snapshot->tof_distance_mm[CPU0_TOF_RIGHT] : CONTROL_MLP_FAR_DISTANCE_MM;
+    control_mlp_clearance_guard(guard_left_mm, guard_center_mm, guard_right_mm,
+                                target_heading_deg, &raw_steer_deg, &raw_speed);
+
+    /* 開けた直進空間での量子化・学習残留不感帯（850mm以上かつ目標直進時）。
+     * 安全ガードが働かない空間での±15度未満は、障害物回避ではなくドリフトとして捨てる。 */
+    if ((min_tof_mm >= 850.0f) && (fabsf(target_heading_deg) < 1.0f) && (fabsf(raw_steer_deg) < 15.0f)) {
         raw_steer_deg = 0.0f;
     }
 

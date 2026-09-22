@@ -166,8 +166,29 @@ def test_classification_enforces_peak_band_and_runtime_threshold_cap() -> None:
     samples = (ctypes.c_int8 * (5 * CPU0_ACOUSTIC_SUMMARY_DIMENSION))(*list(reference) * 5)
     output = AcousticIdentifierSummaryOutput()
 
-    # 旧MRAMに保存された0.220のしきい値でも、現行の精度優先上限0.200で照合する。
+    # 旧MRAMに保存された0.220のしきい値でも、実機識別の受理上限0.055で照合する。
     handle.acoustic_identifier_summary_classify(candidate, 1, 80, samples, 5, None, 0.22, ctypes.byref(output))
-    assert abs(output.threshold - 0.20) < 1e-4
+    assert abs(output.threshold - 0.055) < 1e-4
     assert output.minimum_cosine_distance < 0.20
     assert output.status == SUMMARY_NOT_TARGET
+
+
+def test_classification_accepts_the_measured_six_bin_peak_drift() -> None:
+    """設置位置で生じる±6binのピーク移動は、同一音の照合を切らない。"""
+    handle = library()
+    reference_values = [10] * CPU0_ACOUSTIC_SUMMARY_DIMENSION
+    candidate_values = list(reference_values)
+    for summary_index in (2 * CPU0_ACOUSTIC_FEATURE_BIN_COUNT, 5 * CPU0_ACOUSTIC_FEATURE_BIN_COUNT):
+        reference_values[summary_index + 14] = 30
+        # スペクトル形状は近いまま、最大binだけが6つ移動した実測相当のケース。
+        candidate_values[summary_index + 14] = 30
+        candidate_values[summary_index + 8] = 31
+
+    reference = (ctypes.c_int8 * CPU0_ACOUSTIC_SUMMARY_DIMENSION)(*reference_values)
+    candidate = (ctypes.c_int8 * CPU0_ACOUSTIC_SUMMARY_DIMENSION)(*candidate_values)
+    samples = (ctypes.c_int8 * (5 * CPU0_ACOUSTIC_SUMMARY_DIMENSION))(*list(reference) * 5)
+    output = AcousticIdentifierSummaryOutput()
+
+    handle.acoustic_identifier_summary_classify(candidate, 1, 80, samples, 5, None, 0.20, ctypes.byref(output))
+    assert output.minimum_cosine_distance <= 0.055
+    assert output.status == SUMMARY_TARGET

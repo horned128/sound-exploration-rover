@@ -1,13 +1,14 @@
-"""Train int8 obstacle avoidance MLP via policy distillation and export C header.
+"""Train an int8, clearance-aware obstacle-avoidance MLP and export its C header.
 
-Collects rollouts from the closed-loop wall_world simulator, blends real telemetry
-from fixtures/wall_loop_20260915.jsonl, trains a 10->16->2 MLP, quantizes to full int8,
-and generates control_mlp_model.h for CPU0 firmware.
+The prior trainer distilled a potential-field planner.  Its teacher could reduce an
+already selected avoidance turn when a side-wall measurement changed, so retraining
+on that data only reproduced the same weakness.  This trainer labels synthetic and
+recorded ToF states with a clearance-aware expert: a near center obstacle chooses the
+wider side and keeps a minimum turn until the forward clearance is recovered.
 """
 
 from __future__ import annotations
 
-import ctypes
 import json
 import math
 from pathlib import Path
@@ -23,21 +24,6 @@ import sys
 CONTROL_SIM_DIR = Path(__file__).resolve().parents[1]
 if str(CONTROL_SIM_DIR) not in sys.path:
     sys.path.insert(0, str(CONTROL_SIM_DIR))
-
-try:
-    from controlsim.bindings import (
-        library, SensorSnapshot, ObstacleAvoidanceOutput,
-        SmoothAvoidanceInput, smooth_avoidance_plan_step,
-    )
-    from controlsim.scenarios import sensor_snapshot
-    from controlsim.wall_world import run_wall_approach
-except ImportError:
-    from .bindings import (
-        library, SensorSnapshot, ObstacleAvoidanceOutput,
-        SmoothAvoidanceInput, smooth_avoidance_plan_step,
-    )
-    from .scenarios import sensor_snapshot
-    from .wall_world import run_wall_approach
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
 CPU0_SRC_DIR = ROOT_DIR / "firmware/ra8p1/SoundExplorationRover_CPU0/src"
@@ -79,153 +65,94 @@ def normalize_input(
     return x
 
 
-def collect_simulator_rollouts(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
-    """Simulate approaches toward wall using expert controller and record (input, target) pairs."""
+def clearance_aware_expert(
+    tof_mm: list[float] | tuple[float, ...],
+    tof_valid: list[bool] | tuple[bool, ...],
+    target_heading_deg: float,
+) -> tuple[float, float]:
+    """Return a robust steering/speed label for a single ToF observation.
+
+    A front obstacle within 900 mm selects the wider side once and imposes a
+    28--42 degree minimum turn.  Importantly, attraction toward the sound source
+    cannot cancel that turn.  The firmware adds the same rule as a safety guard,
+    so quantization cannot weaken it at runtime.
+    """
+    distances = [float(tof_mm[i]) if tof_valid[i] else 4000.0 for i in range(3)]
+    left_mm, center_mm, right_mm = distances
+    goal_steer = float(np.clip(target_heading_deg, -45.0, 45.0))
+
+    if center_mm < 900.0:
+        if (right_mm - left_mm) > 75.0:
+            direction = 1.0
+        elif (left_mm - right_mm) > 75.0:
+            direction = -1.0
+        elif abs(goal_steer) >= 5.0:
+            direction = 1.0 if goal_steer > 0.0 else -1.0
+        else:
+            direction = 1.0
+
+        closeness = float(np.clip((900.0 - center_mm) / (900.0 - 150.0), 0.0, 1.0))
+        minimum_steer = 28.0 + closeness * (42.0 - 28.0)
+        steer_deg = direction * max(minimum_steer, direction * goal_steer)
+        speed_scale = 0.60 - 0.30 * closeness
+    elif (left_mm < 700.0) and ((right_mm - left_mm) > 75.0):
+        closeness = float(np.clip((700.0 - left_mm) / (700.0 - 150.0), 0.0, 1.0))
+        steer_deg = max(goal_steer, 14.0 + 16.0 * closeness)
+        speed_scale = 0.85 - 0.25 * closeness
+    elif (right_mm < 700.0) and ((left_mm - right_mm) > 75.0):
+        closeness = float(np.clip((700.0 - right_mm) / (700.0 - 150.0), 0.0, 1.0))
+        steer_deg = min(goal_steer, -(14.0 + 16.0 * closeness))
+        speed_scale = 0.85 - 0.25 * closeness
+    else:
+        steer_deg = goal_steer
+        speed_scale = 1.0
+
+    return float(np.clip(steer_deg, -45.0, 45.0)), float(np.clip(speed_scale, 0.25, 1.0))
+
+
+def collect_clearance_expert_data(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    """Generate balanced, noisy ToF geometries and label them with the new expert."""
     inputs: list[np.ndarray] = []
     targets: list[np.ndarray] = []
+    distances = np.array([250, 320, 420, 520, 620, 700, 760, 840, 920, 1100, 1500, 2200, 4000])
+    headings = [-45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0]
 
-    speeds = [180, 240, 300]
-    turn_rates = [20, 25, 30]
-    initial_headings = [-15, -10, -5, 0, 5, 10, 15]
-    side_angles = [-5, 0, 5]
-
-    for speed in speeds:
-        for turn_rate in turn_rates:
-            for init_head in initial_headings:
-                for side_ang in side_angles:
-                    handle = library()
-                    handle.obstacle_avoidance_controller_init()
-
-                    current_speed = 0.0
-
-                    def step_wrapper(snapshot: SensorSnapshot, now_ms: int) -> ObstacleAvoidanceOutput:
-                        nonlocal current_speed
-                        out = ObstacleAvoidanceOutput()
-                        handle.obstacle_avoidance_controller_step(
-                            ctypes.byref(snapshot), False, now_ms, ctypes.c_int16(0), ctypes.byref(out)
-                        )
-                        # We distill forward/turning proactive actions (rules: 1, 2, 3, 4)
-                        if out.rule in (1, 2, 3, 4):
-                            steer_norm = float(out.steering_deg) / 45.0
-                            c_dist = float(snapshot.tof_distance_mm[1])
-                            l_dist = float(snapshot.tof_distance_mm[0])
-                            r_dist = float(snapshot.tof_distance_mm[2])
-                            yaw_dps = float(snapshot.gyro_dps_x10[2]) / 10.0
-                            if c_dist < 900.0 and abs(l_dist - r_dist) < 25.0 and abs(yaw_dps) < 2.0:
-                                steer_norm = 30.0 / 45.0
-                            if abs(steer_norm) < 0.05 and rng.random() > 0.10:
-                                current_speed = float(max(out.left_rpm, out.right_rpm)) / 100.0 if out.actuator_enable else 0.0
-                                return out
-                            raw_tof = [
-                                float(snapshot.tof_distance_mm[0]) + rng.normal(0, 5.0),
-                                float(snapshot.tof_distance_mm[1]) + rng.normal(0, 5.0),
-                                float(snapshot.tof_distance_mm[2]) + rng.normal(0, 5.0),
-                            ]
-                            yaw_dps = float(snapshot.gyro_dps_x10[2]) / 10.0
-                            in_vec = normalize_input(
-                                tof_mm=raw_tof,
-                                tof_valid=[True, True, True],
-                                target_heading_deg=0.0,
-                                current_speed_scale=current_speed,
-                                yaw_rate_dps=yaw_dps,
-                            )
-                            speed_norm = float(max(out.left_rpm, out.right_rpm)) / 100.0 if out.actuator_enable else 0.0
-                            inputs.append(in_vec)
-                            targets.append(np.array([steer_norm, speed_norm], dtype=np.float32))
-
-                        current_speed = float(max(out.left_rpm, out.right_rpm)) / 100.0 if out.actuator_enable else 0.0
-                        return out
-
-                    run_wall_approach(
-                        speed_mm_s=speed,
-                        turn_rate_dps=turn_rate,
-                        initial_heading_deg=init_head,
-                        side_angle_deg=side_ang,
-                        controller_step=step_wrapper,
+    # Dense coverage around the 700--900 mm handoff prevents a weak-turn band.
+    for left_mm in distances:
+        for center_mm in distances:
+            for right_mm in distances:
+                for heading_deg in headings:
+                    steer_deg, speed_scale = clearance_aware_expert(
+                        [float(left_mm), float(center_mm), float(right_mm)], [True, True, True], heading_deg
                     )
+                    for yaw_dps in (-20.0, 0.0, 20.0):
+                        current_speed = float(rng.choice([0.0, 0.35, 0.7, 1.0]))
+                        noisy_tof = [
+                            float(np.clip(left_mm + rng.normal(0.0, 8.0), 150.0, 4000.0)),
+                            float(np.clip(center_mm + rng.normal(0.0, 8.0), 150.0, 4000.0)),
+                            float(np.clip(right_mm + rng.normal(0.0, 8.0), 150.0, 4000.0)),
+                        ]
+                        inputs.append(normalize_input(noisy_tof, [True, True, True], heading_deg,
+                                                      current_speed, yaw_dps))
+                        targets.append(np.array([steer_deg / 45.0, speed_scale], dtype=np.float32))
 
-    return np.array(inputs, dtype=np.float32), np.array(targets, dtype=np.float32)
-
-
-def collect_expert_scenario_data(rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
-    """Generate comprehensive expert state-action pairs using direct C planner evaluations."""
-    inputs: list[np.ndarray] = []
-    targets: list[np.ndarray] = []
-
-    # 1. Open space navigation toward diverse headings (-45 to +45 deg)
-    for _ in range(4):
-        for head_deg in np.linspace(-45, 45, 31):
-            for speed in [0.0, 0.3, 0.6, 1.0]:
-                for yaw in [-15.0, 0.0, 15.0]:
-                    in_vec = normalize_input(
-                        tof_mm=[4000, 4000, 4000],
-                        tof_valid=[True, True, True],
-                        target_heading_deg=float(head_deg),
-                        current_speed_scale=speed,
-                        yaw_rate_dps=yaw,
-                    )
-                    steer_norm = np.clip(head_deg / 45.0, -1.0, 1.0)
-                    speed_norm = 1.0
-                    inputs.append(in_vec)
-                    targets.append(np.array([steer_norm, speed_norm], dtype=np.float32))
-
-    # 2. Obstacle encounters with varied geometry using smooth_avoidance_plan
-    distances = [260, 350, 500, 650, 800, 1200, 2000]
-    for d_c in distances:
-        for d_l in distances:
-            for d_r in distances:
-                for head_deg in [-20, 0, 20]:
-                    inp = SmoothAvoidanceInput(
-                        tof_distance_mm=(ctypes.c_float * 3)(float(d_l), float(d_c), float(d_r)),
-                        tof_valid=(ctypes.c_int32 * 3)(1, 1, 1),
-                        target_heading_deg=float(head_deg),
-                        current_steering_deg=0.0,
-                        current_speed_scale=0.8,
-                        dt_sec=1.0,
-                    )
-                    out = smooth_avoidance_plan_step(inp)
-                    steer_norm = np.clip(out.steering_deg / 45.0, -1.0, 1.0)
-                    speed_norm = np.clip(out.speed_scale, 0.0, 1.0)
-                    for yaw in [-15.0, 0.0, 15.0]:
-                        in_vec = normalize_input(
-                            tof_mm=[d_l, d_c, d_r],
-                            tof_valid=[True, True, True],
-                            target_heading_deg=float(head_deg),
-                            current_speed_scale=speed_norm,
-                            yaw_rate_dps=yaw,
-                        )
-                        inputs.append(in_vec)
-                        targets.append(np.array([steer_norm, speed_norm], dtype=np.float32))
-
-    # 3. Invalid / missing sensor channels
+    # Missing channels are learned as conservative open-space substitutions; the
+    # firmware's sensor-liveness layer still vetoes motion when safety requires it.
     for mask in [(False, True, True), (True, False, True), (True, True, False)]:
-        for head_deg in [-15, 0, 15]:
-            inp = SmoothAvoidanceInput(
-                tof_distance_mm=(ctypes.c_float * 3)(1000.0, 1000.0, 1000.0),
-                tof_valid=(ctypes.c_int32 * 3)(int(mask[0]), int(mask[1]), int(mask[2])),
-                target_heading_deg=float(head_deg),
-                current_steering_deg=0.0,
-                current_speed_scale=0.8,
-                dt_sec=1.0,
-            )
-            out = smooth_avoidance_plan_step(inp)
-            steer_norm = np.clip(out.steering_deg / 45.0, -1.0, 1.0)
-            speed_norm = np.clip(out.speed_scale, 0.0, 1.0)
-            in_vec = normalize_input(
-                tof_mm=[1000, 1000, 1000],
-                tof_valid=mask,
-                target_heading_deg=float(head_deg),
-                current_speed_scale=0.8,
-                yaw_rate_dps=0.0,
-            )
-            inputs.append(in_vec)
-            targets.append(np.array([steer_norm, speed_norm], dtype=np.float32))
+        for heading_deg in headings:
+            steer_deg, speed_scale = clearance_aware_expert([1000.0, 1000.0, 1000.0], list(mask), heading_deg)
+            inputs.append(normalize_input([1000.0, 1000.0, 1000.0], list(mask), heading_deg, 0.5, 0.0))
+            targets.append(np.array([steer_deg / 45.0, speed_scale], dtype=np.float32))
 
     return np.array(inputs, dtype=np.float32), np.array(targets, dtype=np.float32)
 
 
 def collect_fixture_telemetry() -> tuple[np.ndarray, np.ndarray]:
-    """Blend real rover telemetry from fixture jsonl file."""
+    """Use real ToF distributions while relabeling them with the safety expert.
+
+    The old fixture contains commands from the policy being replaced; using those
+    commands as labels would teach the old weak response back into the new model.
+    """
     inputs: list[np.ndarray] = []
     targets: list[np.ndarray] = []
 
@@ -242,8 +169,6 @@ def collect_fixture_telemetry() -> tuple[np.ndarray, np.ndarray]:
             tof_mm = sensors.get("tof_mm", [1000, 1000, 1000])
             valid_flags = sensors.get("valid_flags", 15)
             gyro = sensors.get("gyro_dps_x10", [0, 0, 0])
-            think = entry.get("think", {})
-            steering_deg = think.get("steering_deg", 0)
             command = entry.get("command", {})
             left_rpm = command.get("left_rpm", 100)
             right_rpm = command.get("right_rpm", 100)
@@ -253,7 +178,9 @@ def collect_fixture_telemetry() -> tuple[np.ndarray, np.ndarray]:
 
             avg_rpm = (abs(left_rpm) + abs(right_rpm)) / 2.0
             speed_scale = np.clip(avg_rpm / 120.0, 0.0, 1.0)
-            steer_norm = np.clip(steering_deg / 45.0, -1.0, 1.0)
+            steering_deg, target_speed = clearance_aware_expert(
+                [float(value) for value in tof_mm], valid, target_heading_deg=0.0
+            )
 
             in_vec = normalize_input(
                 tof_mm=tof_mm,
@@ -263,17 +190,18 @@ def collect_fixture_telemetry() -> tuple[np.ndarray, np.ndarray]:
                 yaw_rate_dps=yaw_dps,
             )
             inputs.append(in_vec)
-            targets.append(np.array([steer_norm, speed_scale], dtype=np.float32))
+            targets.append(np.array([steering_deg / 45.0, target_speed], dtype=np.float32))
 
     return np.array(inputs, dtype=np.float32), np.array(targets, dtype=np.float32)
 
 
 def build_and_train_model(x_train: np.ndarray, y_train: np.ndarray) -> tf.keras.Model:
-    """Build and train 10 -> 16(ReLU) -> 2 MLP model."""
+    """Build and train a 10 -> 24(ReLU) -> 16(ReLU) -> 2 MLP model."""
     tf.keras.utils.set_random_seed(20260920)
 
     model = tf.keras.Sequential([
         tf.keras.layers.Input(batch_shape=(1, 10)),
+        tf.keras.layers.Dense(24, activation="relu"),
         tf.keras.layers.Dense(16, activation="relu"),
         tf.keras.layers.Dense(2),
     ])
@@ -284,7 +212,7 @@ def build_and_train_model(x_train: np.ndarray, y_train: np.ndarray) -> tf.keras.
         metrics=["mae"],
     )
 
-    print(f"Training MLP on {len(x_train)} samples for 60 epochs...")
+    print(f"Training clearance-aware MLP on {len(x_train)} samples for 60 epochs...")
     model.fit(
         x_train,
         y_train,
@@ -377,21 +305,17 @@ def main():
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(20260920)
 
-    print("Collecting training data from simulator rollouts...")
-    x_sim, y_sim = collect_simulator_rollouts(rng)
-    print(f"Simulator rollout samples: {len(x_sim)}")
-
-    print("Collecting expert scenario samples...")
-    x_exp, y_exp = collect_expert_scenario_data(rng)
-    print(f"Expert scenario samples: {len(x_exp)}")
+    print("Collecting clearance-aware expert scenario samples...")
+    x_exp, y_exp = collect_clearance_expert_data(rng)
+    print(f"Clearance-aware expert samples: {len(x_exp)}")
 
     print("Blending real-world telemetry fixtures...")
     x_fix, y_fix = collect_fixture_telemetry()
     print(f"Fixture telemetry samples: {len(x_fix)}")
 
     # Combine datasets
-    x_all = np.vstack([x_sim, x_exp, x_fix])
-    y_all = np.vstack([y_sim, y_exp, y_fix])
+    x_all = np.vstack([x_exp, x_fix])
+    y_all = np.vstack([y_exp, y_fix])
     print(f"Total dataset size: {len(x_all)} samples, input shape {x_all.shape}, target shape {y_all.shape}")
 
     # Train model

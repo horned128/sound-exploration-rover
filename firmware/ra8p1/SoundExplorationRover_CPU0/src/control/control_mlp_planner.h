@@ -20,6 +20,14 @@ extern "C" {
 #define CONTROL_MLP_MAX_STEER_RATE_DPS      (90.0f)         /**< 最大操舵角変化率 [deg/s] */
 #define CONTROL_MLP_MAX_ACCEL_PER_SEC       (1.5f)          /**< 最大速度スケール変化率 [/s] */
 #define CONTROL_MLP_STEP_DT_SEC             (0.10f)         /**< 思考タスク周期時間 [s] */
+/* MLPの量子化誤差や局所的なToF変化で回避操舵が弱まらないよう、正面障害物を
+ * 検出した間は決定論的な最低操舵量を重ねる。MLPはこの安全境界の内側で滑らかさを担う。 */
+#define CONTROL_MLP_GUARD_ENTER_CENTER_MM   (900.0f)        /**< 回避側ラッチ開始の正面距離 [mm] */
+#define CONTROL_MLP_GUARD_RELEASE_CENTER_MM (1100.0f)       /**< 回避側ラッチ解除の正面距離 [mm] */
+#define CONTROL_MLP_GUARD_RELEASE_SIDE_MM   (800.0f)        /**< 回避側ラッチ解除の側方距離 [mm] */
+#define CONTROL_MLP_GUARD_SIDE_DELTA_MM     (75.0f)         /**< 回避側を選ぶ左右差 [mm] */
+#define CONTROL_MLP_GUARD_MIN_STEER_DEG     (28.0f)         /**< 回避中に保証する最小操舵 [deg] */
+#define CONTROL_MLP_GUARD_MAX_STEER_DEG     (42.0f)         /**< 接近時の最大最低操舵 [deg] */
 
 /**< 制御MLPプランナ出力 */
 typedef struct st_control_mlp_output {

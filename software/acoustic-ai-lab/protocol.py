@@ -11,7 +11,8 @@ import struct
 from typing import Iterable
 
 MAGIC = b"SR"
-VERSION = 1
+# Keep this in sync with ACOUSTIC_PROTOCOL_VERSION in firmware/common/acoustic_protocol.h.
+VERSION = 2
 HEADER_SIZE = 14
 CRC_SIZE = 2
 MAX_PAYLOAD_SIZE = 96
@@ -27,6 +28,7 @@ COMMAND_LEARNING_START = 1
 COMMAND_LEARNING_COMMIT = 2
 COMMAND_LEARNING_CANCEL = 3
 COMMAND_PROFILE_READ = 4
+COMMAND_RESTART = 5
 
 SNAPSHOT_FLAGS = {
     "link_ready": 1 << 0,
@@ -183,7 +185,7 @@ def decode_command_result(payload: bytes) -> dict[str, int]:
 
 
 def make_command(command: int, sequence: int, uptime_ms: int = 0) -> bytes:
-    if command not in range(5):
+    if command not in range(6):
         raise ValueError("unknown AI Lab command")
     return encode_frame(MESSAGE_COMMAND, sequence, uptime_ms, bytes([command]))
 

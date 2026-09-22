@@ -89,7 +89,7 @@ static char const * wifi_telemetry_think_state(uint8_t state) {
         "SENSOR_FORWARD", "SENSOR_CAUTION_FORWARD", "SENSOR_TURN_LEFT", "SENSOR_TURN_RIGHT",
         "SENSOR_BLOCKED_STOP", "SENSOR_IMU_STOP", "FAULT",
         "SENSOR_PIVOT_LEFT", "SENSOR_PIVOT_RIGHT", "SENSOR_BACKUP",
-        "SPIN_PREP", "SPIN_STEP", "SPIN_NO_PROGRESS", "ARRIVAL_VERIFY", "ARRIVED",
+        "SPIN_PREP", "SPIN_STEP", "SPIN_NO_PROGRESS", "ARRIVAL_VERIFY", "ARRIVED", "WAIT_RESTART",
     };
     return (state < (sizeof(names) / sizeof(names[0]))) ? names[state] : "UNKNOWN";
 }

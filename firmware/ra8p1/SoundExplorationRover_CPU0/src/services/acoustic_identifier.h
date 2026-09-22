@@ -18,8 +18,9 @@
 #define CPU0_ACOUSTIC_ACTIVE_STDDEV_LSB    (12.0F)          /**< 有効フレーム判定σ[LSB] */
 #define CPU0_ACOUSTIC_IDENTIFIER_THRESHOLD_MIN (0.08F)      /**< 音響識別しきい値の下限 */
 #define CPU0_ACOUSTIC_IDENTIFIER_THRESHOLD_MAX (0.20F)      /**< 音響識別しきい値の上限 */
+#define CPU0_ACOUSTIC_IDENTIFIER_ACCEPTANCE_THRESHOLD_MAX (0.055F) /**< 実機照合でTARGETを受理する距離上限 */
 #define CPU0_ACOUSTIC_IDENTIFIER_SIGMA_SCALE (1.5F)         /**< 音響識別しきい値の標準偏差倍率 */
-#define CPU0_ACOUSTIC_IDENTIFIER_PEAK_TOLERANCE_BINS (3U)   /**< TARGETを許す代表ピークbinの差 */
+#define CPU0_ACOUSTIC_IDENTIFIER_PEAK_TOLERANCE_BINS (6U)   /**< TARGETを許す代表ピークbinの差 */
 
 /**< 音響要約と現場見本照合の判定状態 */
 typedef enum e_acoustic_identifier_summary_status {

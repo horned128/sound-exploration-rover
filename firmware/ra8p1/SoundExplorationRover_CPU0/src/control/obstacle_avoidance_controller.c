@@ -11,6 +11,7 @@ typedef enum e_avoidance_escape_phase {
     AVOIDANCE_ESCAPE_NONE = 0,                              /**< 通常走行中 */
     AVOIDANCE_ESCAPE_STEER,                                 /**< 操舵脱出中 */
     AVOIDANCE_ESCAPE_PIVOT,                                 /**< ピボット脱出中 */
+    AVOIDANCE_ESCAPE_BACKUP,                                /**< 正面近接からの短距離後退中 */
     AVOIDANCE_ESCAPE_BLOCKED,                               /**< 脱出不能で停止 */
 } avoidance_escape_phase_t;
 
@@ -19,15 +20,18 @@ typedef struct st_avoidance_controller {
     avoidance_escape_phase_t phase;                         /**< 現在の脱出段階 */
     B direction;                                            /**< 回避方向（左負、右正） */
     UW phase_ms;                                            /**< 段階開始からの経過時間[ms] */
+    UW session_ms;                                          /**< 回避開始からの経過時間[ms] */
     UW progress_ms;                                         /**< 進行観測からの経過時間[ms] */
     W yaw_mdeg;                                             /**< 現在の相対ヨー角[mdeg] */
     W progress_yaw_mdeg;                                    /**< 進行判定基準のヨー角[mdeg] */
     UB frontal_collision_count;                             /**< 正面近接の連続確認回数 */
+    UB recovery_attempts;                                   /**< 後退・再旋回の試行回数 */
     UW last_ms;                                             /**< 前回制御時刻[ms] */
     UW last_sample_ms;                                      /**< 前回センサー観測時刻[ms] */
     UW last_update_count;                                   /**< 前回センサー更新回数 */
     BOOL clock_valid;                                       /**< 制御時刻の有効状態 */
     BOOL sample_valid;                                      /**< 最新センサー観測の有効状態 */
+    BOOL session_active;                                    /**< 音源追従中に始めた回避シーケンス */
 } avoidance_controller_t;
 
 LOCAL avoidance_controller_t avoidance;                     /**< 回避方向、回頭量、脱出履歴 */
@@ -97,11 +101,28 @@ LOCAL void obstacle_avoidance_output_pivot(BOOL moving, obstacle_avoidance_outpu
         .left_rpm = moving ? (left ? -CPU0_SENSOR_ESCAPE_TURN_RPM : CPU0_SENSOR_ESCAPE_TURN_RPM) : 0,
         .right_rpm = moving ? (left ? CPU0_SENSOR_ESCAPE_TURN_RPM : -CPU0_SENSOR_ESCAPE_TURN_RPM) : 0,
         .actuator_enable = TRUE,
+        .avoidance_in_progress = TRUE,
     };
 }
 
 /** =================================================================*
- * @brief  正面衝突候補の連続確認による停止
+ * @brief  正面近接から距離を取るための短距離後退指令生成
+ * @param[out] p_output 後退指令
+ * ================================================================= */
+LOCAL void obstacle_avoidance_output_backup(obstacle_avoidance_output_t * p_output) {
+    *p_output = (obstacle_avoidance_output_t){
+        .state = CPU0_THINK_STATE_SENSOR_BACKUP,
+        .rule = CPU0_SENSOR_RULE_BACKUP,
+        .steering_deg = 0,
+        .left_rpm = -CPU0_SENSOR_BACKUP_RPM,
+        .right_rpm = -CPU0_SENSOR_BACKUP_RPM,
+        .actuator_enable = TRUE,
+        .avoidance_in_progress = TRUE,
+    };
+}
+
+/** =================================================================*
+ * @brief  後退・再旋回の試行上限に達した場合の安全停止
  * @param[out] p_output 停止指令
  * ================================================================= */
 LOCAL void obstacle_avoidance_block(obstacle_avoidance_output_t * p_output) {
@@ -110,20 +131,76 @@ LOCAL void obstacle_avoidance_block(obstacle_avoidance_output_t * p_output) {
 }
 
 /** =================================================================*
+ * @brief  近傍の空きと停止中に確定した音源方位から脱出方向を選ぶ
+ * @details 音源側に脱出可能な横クリアランスがあれば、多少反対側が広くても
+ *          音源側を優先する。十分な空間があるのに反対側の壁沿いへ逃げると、
+ *          再聴取後に大きな向き直しが必要になり袋小路へ入りやすいためである。
+ *          音源側が狭い場合だけ空き側を選び、安全性を優先する。
+ * @param[in] left_mm 左ToF距離[mm]
+ * @param[in] right_mm 右ToF距離[mm]
+ * @param[in] target_steering_deg 静止中に確定した音源方位（右正）[deg]
+ * @param[in] fallback_direction いずれも決め手がない場合の継続方向
+ * @return 脱出方向（左負、右正）
+ * ================================================================= */
+LOCAL B obstacle_avoidance_choose_escape_direction(UH left_mm, UH right_mm, H target_steering_deg,
+                                                    B fallback_direction) {
+    if (obstacle_avoidance_abs_i16(target_steering_deg) >= CPU0_SENSOR_ESCAPE_TARGET_DEADBAND_DEG) {
+        BOOL const target_on_left = target_steering_deg < 0;
+        UH const target_side_mm = target_on_left ? left_mm : right_mm;
+        if (target_side_mm >= CPU0_SENSOR_ESCAPE_SIDE_MM) {
+            return target_on_left ? -1 : 1;
+        }
+    }
+    W const side_difference_mm = (left_mm >= right_mm) ?
+        (W) left_mm - (W) right_mm : (W) right_mm - (W) left_mm;
+    if (side_difference_mm >= (W) CPU0_SENSOR_ESCAPE_DIRECTION_SIDE_DELTA_MM) {
+        return (left_mm >= right_mm) ? -1 : 1;
+    }
+    if (0 != fallback_direction) {
+        return fallback_direction;
+    }
+    return (left_mm >= right_mm) ? -1 : 1;
+}
+
+/** =================================================================*
  * @brief  最小並進旋回開始
- * @param[in] change_direction 回頭できなかった方向を変更するならTRUE
+ * @param[in] left_mm 左ToF距離[mm]
+ * @param[in] right_mm 右ToF距離[mm]
+ * @param[in] target_steering_deg 静止中に確定した音源方位（右正）[deg]
  * @param[out] p_output 操舵整定または上限停止指令
  * ================================================================= */
-LOCAL void obstacle_avoidance_start_turn(BOOL change_direction, obstacle_avoidance_output_t * p_output) {
-    if (change_direction) {
-        avoidance.direction = (B) -avoidance.direction;
-        avoidance.yaw_mdeg = 0;
-    }
+LOCAL void obstacle_avoidance_start_turn(UH left_mm, UH right_mm, H target_steering_deg,
+                                         obstacle_avoidance_output_t * p_output) {
+    avoidance.direction = obstacle_avoidance_choose_escape_direction(left_mm, right_mm, target_steering_deg,
+                                                                      avoidance.direction);
+    avoidance.yaw_mdeg = 0;
     avoidance.phase = AVOIDANCE_ESCAPE_STEER;
+    avoidance.session_active = TRUE;
     avoidance.phase_ms = 0U;
     avoidance.progress_ms = 0U;
     avoidance.progress_yaw_mdeg = avoidance.yaw_mdeg;
     obstacle_avoidance_output_pivot(FALSE, p_output);
+}
+
+/** =================================================================*
+ * @brief  衝突候補または回頭不成立から後退復帰を開始
+ * @details 後退後の旋回方向は新しいToFと音源方位で選び直す。試行回数を
+ *          制限し、壁際での無限ピボットを安全停止へ収束させる。
+ * @param[out] p_output 後退または安全停止指令
+ * ================================================================= */
+LOCAL void obstacle_avoidance_start_backup(obstacle_avoidance_output_t * p_output) {
+    if (avoidance.recovery_attempts >= CPU0_SENSOR_MAX_RECOVERY_ATTEMPTS) {
+        obstacle_avoidance_block(p_output);
+        return;
+    }
+    avoidance.recovery_attempts++;
+    avoidance.frontal_collision_count = 0U;
+    avoidance.phase = AVOIDANCE_ESCAPE_BACKUP;
+    avoidance.phase_ms = 0U;
+    avoidance.progress_ms = 0U;
+    avoidance.progress_yaw_mdeg = avoidance.yaw_mdeg;
+    avoidance.session_active = TRUE;
+    obstacle_avoidance_output_backup(p_output);
 }
 
 /** =================================================================*
@@ -190,13 +267,16 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
     UH const left_mm = p_snapshot->tof_distance_mm[CPU0_TOF_LEFT];
     UH const center_mm = p_snapshot->tof_distance_mm[CPU0_TOF_CENTER];
     UH const right_mm = p_snapshot->tof_distance_mm[CPU0_TOF_RIGHT];
-    BOOL const frontal_collision = center_mm <= CPU0_SENSOR_CRITICAL_STOP_DISTANCE_MM;
+    BOOL const frontal_collision = center_mm <= CPU0_SENSOR_BACKUP_TRIGGER_DISTANCE_MM;
+    BOOL avoidance_completed = FALSE;
 
-    /* 250mm到達だけでは停止しない。正面の極近接だけを新しいセンサー観測で
-     * 連続確認した場合に限り、衝突候補として停止をラッチする。側面接近は
-     * 回避旋回を継続する。 */
+    /* 壁面へ正対したときは、正面300mm以内を新しい観測で連続確認して後退する。
+     * 確認後は停止固定ではなく短距離後退へ移る。後退中の前方ToFは同じ壁を
+     * 見続けるため、次の復帰試行へ持ち越さない。 */
     if (new_sample) {
-        if (frontal_collision) {
+        if (AVOIDANCE_ESCAPE_BACKUP == avoidance.phase) {
+            avoidance.frontal_collision_count = 0U;
+        } else if (frontal_collision) {
             if (avoidance.frontal_collision_count < CPU0_SENSOR_COLLISION_CONFIRM_COUNT) {
                 avoidance.frontal_collision_count++;
             }
@@ -204,8 +284,9 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
             avoidance.frontal_collision_count = 0U;
         }
     }
-    if (avoidance.frontal_collision_count >= CPU0_SENSOR_COLLISION_CONFIRM_COUNT) {
-        obstacle_avoidance_block(p_output);
+    if ((AVOIDANCE_ESCAPE_BACKUP != avoidance.phase) &&
+        (avoidance.frontal_collision_count >= CPU0_SENSOR_COLLISION_CONFIRM_COUNT)) {
+        obstacle_avoidance_start_backup(p_output);
         return;
     }
 
@@ -227,6 +308,17 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
                                 (center_mm <= CPU0_SENSOR_ESCAPE_FRONT_MM));
     if (AVOIDANCE_ESCAPE_NONE != avoidance.phase) {
         avoidance.phase_ms += elapsed_ms;
+    }
+    if ((0 != avoidance.direction) || (AVOIDANCE_ESCAPE_NONE != avoidance.phase)) {
+        avoidance.session_ms += elapsed_ms;
+    }
+    if (AVOIDANCE_ESCAPE_BACKUP == avoidance.phase) {
+        if (avoidance.phase_ms >= CPU0_SENSOR_BACKUP_MS) {
+            obstacle_avoidance_start_turn(left_mm, right_mm, target_steering_deg, p_output);
+        } else {
+            obstacle_avoidance_output_backup(p_output);
+        }
+        return;
     }
     if (AVOIDANCE_ESCAPE_STEER == avoidance.phase) {
         if (avoidance.phase_ms >= CPU0_SENSOR_SETTLE_MS) {
@@ -254,7 +346,7 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
             BOOL const no_progress = (avoidance.progress_ms >= CPU0_SENSOR_PIVOT_PROGRESS_MS) &&
                 (avoidance.yaw_mdeg - avoidance.progress_yaw_mdeg < CPU0_SENSOR_PIVOT_PROGRESS_MDEG);
             if (no_progress || (avoidance.phase_ms >= CPU0_SENSOR_PIVOT_MAX_MS)) {
-                obstacle_avoidance_start_turn(TRUE, p_output);
+                obstacle_avoidance_start_backup(p_output);
                 return;
             }
             if (avoidance.progress_ms >= CPU0_SENSOR_PIVOT_PROGRESS_MS) {
@@ -266,33 +358,54 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
         }
     }
 
-    /* 前方に障害物がある場合、回避方向をラッチしてすり抜け中の自爆逆ステアを防止 */
-    BOOL const center_obstacle = (center_mm < 750U);
+    /* 前方に障害物がある場合、回避方向をラッチしてすり抜け中の自爆逆ステアを防止。
+     * 左右どちらかが十分広い場合は800mmから先行して回避側を確定するため、
+     * 直進のまま注意距離へ突入しない。左右対称な開けた通路では従来の700mmを維持する。 */
+    W const side_difference_mm = (left_mm >= right_mm) ?
+        (W) left_mm - (W) right_mm : (W) right_mm - (W) left_mm;
+    BOOL const early_avoid = (center_mm < CPU0_SENSOR_EARLY_AVOID_DISTANCE_MM) &&
+                             (side_difference_mm >= (W) CPU0_SENSOR_EARLY_AVOID_SIDE_DELTA_MM);
+    BOOL const center_obstacle = (center_mm < CPU0_SENSOR_CAUTION_DISTANCE_MM) || early_avoid;
     if ((0 == avoidance.direction) && (center_obstacle || escape_trigger)) {
-        avoidance.direction = (left_mm >= right_mm) ? -1 : 1;
+        avoidance.direction = obstacle_avoidance_choose_escape_direction(left_mm, right_mm,
+                                                                          target_steering_deg, 0);
+        avoidance.session_active = TRUE;
         avoidance.phase_ms = 0U;
+        avoidance.session_ms = 0U;
         avoidance.progress_ms = 0U;
         avoidance.progress_yaw_mdeg = avoidance.yaw_mdeg;
     }
 
-    /* 前方および左右のクリアランスが完全に開けたら、方向ラッチを解除して音源追従に復帰 */
-    BOOL const clearance_safe = (center_mm >= 700U) && (left_mm >= 500U) && (right_mm >= 500U);
+    /* 前方および左右のクリアランスが完全に開けたら、方向ラッチを解除して音源追従に復帰。
+     * 側壁を認識し続ける通路でも、前方が安全で十分に回避済みなら停止して
+     * 新しいDoAを聴き直す。これにより一定方向へ曲がり続けて壁へ寄るのを防ぐ。 */
+    BOOL const clearance_safe = (center_mm >= CPU0_SENSOR_AVOID_CLEAR_DISTANCE_MM) &&
+                                (left_mm >= CPU0_SENSOR_AVOID_CLEAR_SIDE_MM) &&
+                                (right_mm >= CPU0_SENSOR_AVOID_CLEAR_SIDE_MM);
+    BOOL const bounded_relisten = avoidance.session_active &&
+                                  (avoidance.session_ms >= CPU0_SENSOR_AVOID_RELISTEN_MS) &&
+                                  (center_mm >= CPU0_SENSOR_CAUTION_DISTANCE_MM);
     if ((0 != avoidance.direction) &&
-        (clearance_safe || (avoidance.phase_ms >= CPU0_SENSOR_COMMIT_MAX_MS))) {
+        (clearance_safe || bounded_relisten)) {
+        if (avoidance.session_active) {
+            avoidance_completed = TRUE;
+        }
         avoidance.direction = 0;
         avoidance.yaw_mdeg = 0;
+        avoidance.session_active = FALSE;
+        avoidance.session_ms = 0U;
+        avoidance.recovery_attempts = 0U;
     }
     if (escape_trigger) {
-        obstacle_avoidance_start_turn(FALSE, p_output);
+        obstacle_avoidance_start_turn(left_mm, right_mm, target_steering_deg, p_output);
         return;
     }
     if ((0 != avoidance.direction) && (avoidance.yaw_mdeg < CPU0_SENSOR_COMMIT_YAW_MDEG)) {
-        avoidance.phase_ms += elapsed_ms;
         avoidance.progress_ms += elapsed_ms;
         BOOL const no_progress = (avoidance.progress_ms >= CPU0_SENSOR_PIVOT_PROGRESS_MS) &&
             (avoidance.yaw_mdeg - avoidance.progress_yaw_mdeg < CPU0_SENSOR_PIVOT_PROGRESS_MDEG);
-        if (no_progress || (avoidance.phase_ms >= CPU0_SENSOR_COMMIT_MAX_MS)) {
-            obstacle_avoidance_start_turn(TRUE, p_output);
+        if (no_progress || (avoidance.session_ms >= CPU0_SENSOR_COMMIT_MAX_MS)) {
+            obstacle_avoidance_start_turn(left_mm, right_mm, target_steering_deg, p_output);
             return;
         }
         if (avoidance.progress_ms >= CPU0_SENSOR_PIVOT_PROGRESS_MS) {
@@ -304,22 +417,25 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
     /* 通常走行では距離に応じて減速・操舵する。 */
     /* 左右ToFの反発力（0〜1000スケール固定小数点） */
     W repulse_left = 0;
-    if (left_mm < 850U) {
+    if (left_mm < CPU0_SENSOR_CAUTION_DISTANCE_MM) {
         W const dist = (W) (left_mm < 250U ? 250U : left_mm);
-        repulse_left = ((850 - dist) * 1000) / (850 - 250);
+        repulse_left = (((W) CPU0_SENSOR_CAUTION_DISTANCE_MM - dist) * 1000) /
+                       ((W) CPU0_SENSOR_CAUTION_DISTANCE_MM - 250);
     }
 
     W repulse_right = 0;
-    if (right_mm < 850U) {
+    if (right_mm < CPU0_SENSOR_CAUTION_DISTANCE_MM) {
         W const dist = (W) (right_mm < 250U ? 250U : right_mm);
-        repulse_right = ((850 - dist) * 1000) / (850 - 250);
+        repulse_right = (((W) CPU0_SENSOR_CAUTION_DISTANCE_MM - dist) * 1000) /
+                        ((W) CPU0_SENSOR_CAUTION_DISTANCE_MM - 250);
     }
 
     /* 正面ToFの反発力（0〜1000スケール） */
     W repulse_center = 0;
-    if (center_mm < 950U) {
+    if (center_mm < CPU0_SENSOR_CAUTION_DISTANCE_MM) {
         W const dist = (W) (center_mm < 250U ? 250U : center_mm);
-        repulse_center = ((950 - dist) * 1000) / (950 - 250);
+        repulse_center = (((W) CPU0_SENSOR_CAUTION_DISTANCE_MM - dist) * 1000) /
+                         ((W) CPU0_SENSOR_CAUTION_DISTANCE_MM - 250);
     }
 
     /* 合成操舵力: 左が近ければ右(+), 右が近ければ左(-), 正面が近ければより広い側へ */
@@ -330,7 +446,7 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
                                (W) CPU0_SENSOR_STEERING_MAX_DEG;
     steer_force += attractive_force;
 
-    if (center_mm < 900U) {
+    if (center_mm < CPU0_SENSOR_CAUTION_DISTANCE_MM) {
         W const side_bias = (0 != avoidance.direction) ? avoidance.direction :
                             (target_steering_deg >= 0 ? 1 : -1);
         steer_force += (side_bias * repulse_center * 8) / 10;
@@ -348,11 +464,18 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
     } else if (target_steer_w < -(W) CPU0_SENSOR_STEERING_MAX_DEG) {
         target_steer_w = -(W) CPU0_SENSOR_STEERING_MAX_DEG;
     }
-    /* 前向き3眼では壁と平行に近づくほど測距が伸びるため、側面を */
-    /* 見失っても直進へ戻さない。 */
-    if ((0 != avoidance.direction) && (avoidance.yaw_mdeg < CPU0_SENSOR_COMMIT_YAW_MDEG) &&
-        (target_steer_w * avoidance.direction < CPU0_SENSOR_COMMIT_STEERING_DEG)) {
-        target_steer_w = avoidance.direction * CPU0_SENSOR_COMMIT_STEERING_DEG;
+    /* 前向き3眼では壁と平行に近づくほど測距が伸びるため、側面を
+     * 見失っても音源側への逆ステアには戻さない。ただし回避開始時の強い
+     * 操舵は回頭量30度までに限定し、前方500mm未満を脱した後は小さい
+     * 同方向操舵へ緩める。 */
+    W const directional_min_steering =
+        ((avoidance.yaw_mdeg < CPU0_SENSOR_COMMIT_YAW_MDEG) &&
+         (avoidance.session_ms < CPU0_SENSOR_COMMIT_MAX_MS)) ||
+        (center_mm < CPU0_SENSOR_PIVOT_DISTANCE_MM) ?
+            CPU0_SENSOR_COMMIT_STEERING_DEG : CPU0_SENSOR_COMMIT_HOLD_STEERING_DEG;
+    if ((0 != avoidance.direction) &&
+        (target_steer_w * avoidance.direction < directional_min_steering)) {
+        target_steer_w = avoidance.direction * directional_min_steering;
     }
     H const steering_deg = (H) target_steer_w;
 
@@ -430,5 +553,8 @@ EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snaps
         .right_rpm = right_rpm,
         .actuator_enable = TRUE,
         .emergency_stop = FALSE,
+        .avoidance_in_progress = (AVOIDANCE_ESCAPE_NONE != avoidance.phase) ||
+                                 (0 != avoidance.direction),
+        .avoidance_completed = avoidance_completed,
     };
 }

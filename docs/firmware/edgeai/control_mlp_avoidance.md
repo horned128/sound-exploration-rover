@@ -1,10 +1,10 @@
 # TFLM 障害物回避制御 MLP（Policy Distillation）設計書
 
-最終更新: 2026-09-20
+最終更新: 2026-09-22
 
 ## 1. 概要と目的
 
-本設計は、Renesas RA8P1 CPU0 上に既に配備されている **TFLM（TensorFlow Lite for Microcontrollers）** と **96 KiB 静的テンソルアリーナ** を活用し、従来のルールベース障害物回避制御（ポテンシャル場 + 反発ベクトル法）を模倣学習（**Policy Distillation: 方策蒸留**）した **完全 int8 量子化 制御 MLP** を実装・統合したものです。
+本設計は、Renesas RA8P1 CPU0 上の **TFLM（TensorFlow Lite for Microcontrollers）** と **96 KiB 静的テンソルアリーナ** を活用する完全 int8 量子化制御 MLP です。2026-09-22の再学習では、旧ポテンシャル場の出力をそのまま蒸留せず、正面障害物では広い側を選び、通路が回復するまで必要な操舵量を保つ clearance-aware 教師方策へ切り替えました。
 
 音響エッジ AI（Log-Mel スペクトログラム CNN）に続く第2のエッジ AI 機能として、センサー・オドメトリ・目標音源方位を統合した滑らかな連続軌道計画をマイコン内で完結して実行します。
 
@@ -18,7 +18,7 @@ graph LR
 
     subgraph MLP ["TFLM 制御MLP (CPU0)"]
         PRE["前処理・正規化<br/>control_mlp_planner.c"]
-        TFLM_CORE["int8 MLP 推論<br/>Dense(32)→Dense(16)→Dense(2)<br/>アリーナ使用量 1.1 KiB"]
+        TFLM_CORE["int8 MLP 推論<br/>Dense(24)→Dense(16)→Dense(2)"]
         POST["逆量子化・始動トルク保証<br/>左右差動配分"]
     end
 
@@ -58,14 +58,13 @@ graph LR
 
 ### 2.2 ネットワーク構造と量子化
 
-- **構造**: `Dense(32, ReLU) -> Dense(16, ReLU) -> Dense(2)`
+- **構造**: `Dense(24, ReLU) -> Dense(16, ReLU) -> Dense(2)`
 - **出力 (2次元)**:
   1. `steer_norm`: $[-1.0, 1.0]$ （操舵角 $[-45^\circ, +45^\circ]$ へスケーリング）
   2. `speed_scale`: $[0.0, 1.0]$ （前進速度スケーリング）
 - **量子化形式**: 完全 `int8` 量子化（入力・中間活性化・重み・バイアス・出力すべて int8）
-- **モデルサイズ**: **2,304 バイト**（フラットバッファ形式、4 バイトアライメント）
-- **テンソルアリーナ消費量**: **1,120 バイト**（静的確保済みの 96 KiB アリーナのわずか **1.16%**）
-- **格納場所**: [`firmware/ra8p1/SoundExplorationRover_CPU0/src/control/control_mlp_model.h`](file:///Users/hino/.gemini/antigravity/worktrees/sound-exploration-rover/tflm_obstacle_avoidance_mlp/firmware/ra8p1/SoundExplorationRover_CPU0/src/control/control_mlp_model.h)
+- **モデルサイズ**: **3,880 バイト**（2026-09-22生成、フラットバッファ形式）
+- **格納場所**: `firmware/ra8p1/SoundExplorationRover_CPU0/src/control/control_mlp_model.h`
 
 ---
 
@@ -116,7 +115,7 @@ if (outer_rpm > 130) {
 int8 量子化の丸め誤差（1〜2 LSB）に起因して、障害物のない開けた直進空間で車体が微小旋回ドリフト（半径約 1 m の旋回運動）を起こすのを防止するため、以下の不感帯を [`control_mlp_planner.c`](file:///Users/hino/.gemini/antigravity/worktrees/sound-exploration-rover/tflm_obstacle_avoidance_mlp/firmware/ra8p1/SoundExplorationRover_CPU0/src/control/control_mlp_planner.c) に設けています：
 
 ```c
-if ((min_tof_mm >= 850.0f) && (fabsf(target_heading_deg) < 1.0f) && (fabsf(raw_steer_deg) < 4.0f)) {
+if ((min_tof_mm >= 850.0f) && (fabsf(target_heading_deg) < 1.0f) && (fabsf(raw_steer_deg) < 15.0f)) {
     raw_steer_deg = 0.0f;
 }
 ```
@@ -131,8 +130,9 @@ if ((min_tof_mm >= 850.0f) && (fabsf(target_heading_deg) < 1.0f) && (fabsf(raw_s
 |---|---|---|
 | **Level 1 (最上位)** | [`safety_arbiter.c`](file:///Users/hino/.gemini/antigravity/worktrees/sound-exploration-rover/tflm_obstacle_avoidance_mlp/firmware/ra8p1/SoundExplorationRover_CPU0/src/control/safety_arbiter.c) | いずれかの有効 ToF $\le 250\,\text{mm}$、センサー途絶（タイムアウト）、または異常検知時にモーター出力を物理遮断・即時緊急停止（Hardware Veto） |
 | **Level 2** | ルールベース・エスケープ | 車両が袋小路や至近障害物に遭遇し、反転・ピボット・バック操作が必要と判定された場合（`rule >= 3`）、MLP をバイパスして確定的な脱出動作を実行 |
-| **Level 3** | TFLM 制御 MLP | 通常走行域（$250\,\text{mm} < \text{ToF} \le 4000\,\text{mm}$）における連続ポテンシャル場回避・音源目標方位へのスムーズな追従 |
-| **Level 4** | スルーレートリミッタ | 1 制御周期（100 ms）あたりの最大舵角変化量を $9.0^\circ$（最大 $90^\circ/\text{s}$）に制限し、急旋回による車輪スリップや転倒を防止 |
+| **Level 3** | 回避側ラッチ・最低操舵ガード | 正面900 mm以内では広い側を保持し、28〜42°未満へ操舵が弱まらないよう制約する。正面900 mm・側方600 mm以上まで復帰しない。 |
+| **Level 4** | TFLM 制御 MLP | 通常走行域で音源目標方位への滑らかな追従を行う。Level 3の安全境界を越える出力は採用しない。 |
+| **Level 5** | スルーレートリミッタ | 1 制御周期（100 ms）あたりの最大舵角変化量を $9.0^\circ$（最大 $90^\circ/\text{s}$）に制限し、急旋回による車輪スリップや転倒を防止 |
 
 ---
 
@@ -146,9 +146,9 @@ uv run python -m controlsim.train_control_mlp
 ```
 
 ### パイプライン構成
-1. **シミュレータロールアウト収集**: 閉ループシミュレータ環境における壁面アプローチ走行データの収集
-2. **エキスパート方策走査**: 左右距離・進入角・速度を網羅した包括的シナリオデータ生成（対称アプローチ時の決定論的タイブレーカー適用）
-3. **実機ログ混合**: 実機走行フィクスチャ（`wall_loop_20260915.jsonl`）のブレンド
+1. **clearance-aware エキスパート走査**: 左右・正面の全距離格子、目標方位、速度、ヨーレートにノイズを加えた46,158サンプルを生成する。
+2. **安全教師ラベル**: 正面900 mm以内では広い側を選び、28〜42°の最低操舵と0.30〜0.60の速度上限を付与する。目標方位は回避側を打ち消せない。
+3. **実機ToF分布の混合**: `wall_loop_20260915.jsonl` の72観測は旧指令を教師にせず、同じ安全教師で再ラベルする。
 4. **Keras 学習**: MSE 損失による学習（Adam, 60 epochs）
 5. **int8 代表データセット量子化**: TFLite Converter による完全 int8 変換
 6. **Cヘッダ出力**: `firmware/ra8p1/SoundExplorationRover_CPU0/src/control/control_mlp_model.h` を直接出力
@@ -166,7 +166,7 @@ uv run pytest tests/test_control_mlp.py
 
 - **ASan / UBSan スモーク**: メモリリーク 0、未定義動作 0 の検証（`sanitized_smoke.c`）
 - **TFLM C ABI 契約**: 静的 96 KiB アリーナ境界、初期化・リセット・エラー戻り値契約の検証
-- **数値パリティ**: Python TFLite リファレンスと C 実行時の出力一致度（誤差 $\le 1\,\text{LSB}$、一致率 96% 以上）
+- **数値パリティ**: Python TFLite リファレンスと C 実行時の出力差が $\le 2\,\text{LSB}$ であることを検証
 - **閉ループ壁面接近 (54条件)**:
   - 車速 100 / 200 RPM
   - 進入角度 $-45^\circ \sim +45^\circ$

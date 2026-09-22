@@ -2,9 +2,11 @@ import struct
 import unittest
 
 from protocol import (
+    COMMAND_RESTART,
     COMMAND_LEARNING_START,
     MESSAGE_COMMAND,
     MESSAGE_SNAPSHOT,
+    VERSION,
     FrameParser,
     decode_profile_chunk,
     decode_snapshot,
@@ -15,6 +17,9 @@ from protocol import (
 
 
 class ProtocolTest(unittest.TestCase):
+    def test_wire_version_matches_cpu0_protocol(self) -> None:
+        self.assertEqual(VERSION, 2)
+
     def test_fragmented_round_trip(self) -> None:
         wire = encode_frame(MESSAGE_COMMAND, 42, 1234, bytes([COMMAND_LEARNING_START]))
         parser = FrameParser()
@@ -31,6 +36,12 @@ class ProtocolTest(unittest.TestCase):
         self.assertEqual(parser.feed(bytes(damaged)), [])
         self.assertEqual(parser.crc_errors, 1)
         self.assertEqual(len(parser.feed(make_command(COMMAND_LEARNING_START, 5))), 1)
+
+    def test_restart_uses_a_distinct_command_code(self) -> None:
+        parser = FrameParser()
+        frames = parser.feed(make_command(COMMAND_RESTART, 6))
+        self.assertEqual(len(frames), 1)
+        self.assertEqual(frames[0].payload, bytes([COMMAND_RESTART]))
 
     def test_snapshot_fixed_point_fields(self) -> None:
         payload = bytearray(48)

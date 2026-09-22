@@ -44,8 +44,8 @@ def test_same_initialized_input_trace_has_same_output_trace() -> None:
     assert_same_sound_outputs(first, second)
 
 
-def test_continuous_sound_tracking_maintains_motion_beyond_1_second() -> None:
-    """S4検証: 音源が継続している間、1秒バーストで強制停止せず連続走行を維持すること"""
+def test_continuous_target_sound_keeps_moving_and_updates_the_direction() -> None:
+    """対象音が続く間は、1秒ごとに止まらずDoAを追従し続ける。"""
     obs = usable_loud_observation()
     # リンク確立 (500ms)
     trace = [(SoundFollowInput(link_ready=1, motion_allowed=1), 500)]
@@ -55,15 +55,95 @@ def test_continuous_sound_tracking_maintains_motion_beyond_1_second() -> None:
         for _ in range(60)
     )
     outputs = sound_follow_trace(trace)
-    # STEER_PREP (500ms) 後に MOVE_STEP (state=3) に遷移
-    # 3000msの間音が鳴り続けているので、1000ms(20ステップ)を超えても MOVE_STEP を維持
-    move_step_outputs = [o for o in outputs if o.state == 3]
-    # MOVE_STEP が 30 ステップ以上 (1500ms以上) 継続すること
-    assert len(move_step_outputs) >= 30
-    # 最後のステップでも依然として走行中（MOVE_STEP）であること
+    move_step_outputs = [output for output in outputs if output.state == 3]
+    assert len(move_step_outputs) >= 30  # 1500 ms以上、停止せず追従する。
     assert outputs[-1].state == 3
-    assert outputs[-1].actuator_enable == 1
+    assert outputs[-1].actuator_enable
     assert outputs[-1].left_rpm > 0 and outputs[-1].right_rpm > 0
+
+
+def test_continuous_learned_sound_does_not_require_vad() -> None:
+    """XVFフォールバックでVADが0でも、対象音とDoA品質があれば追従を継続する。"""
+    observation = usable_loud_observation()
+    observation.vad = 0
+    observation.doa_confidence = 40
+    trace = [(SoundFollowInput(link_ready=1, motion_allowed=1), 500)]
+    trace.extend(
+        (SoundFollowInput(link_ready=1, new_observation=1, motion_allowed=1, observation=observation), 50)
+        for _ in range(60)
+    )
+
+    outputs = sound_follow_trace(trace)
+    assert outputs[-1].state == 3
+    assert outputs[-1].actuator_enable
+
+
+def test_sound_follow_rejects_doa_when_raw_and_filtered_values_disagree() -> None:
+    """平滑DoAが生DoAから大きくずれたフレームでは、古い方位へ走行開始しない。"""
+    observation = usable_loud_observation()
+    observation.doa_deg = 90
+    observation.raw_doa_deg = 270
+    observation.doa_confidence = 90
+    trace = [(SoundFollowInput(link_ready=1, motion_allowed=1), 500)]
+    trace.extend(
+        (SoundFollowInput(link_ready=1, new_observation=1, motion_allowed=1, observation=observation), 50)
+        for _ in range(45)
+    )
+
+    outputs = sound_follow_trace(trace)
+    assert all(output.state not in (2, 3, 17, 18) for output in outputs)
+    assert all(output.left_rpm == 0 and output.right_rpm == 0 for output in outputs)
+
+
+def test_sound_follow_ignores_navigation_bearing_while_moving() -> None:
+    """位置推定の目標が反対側を指しても、走行中の操舵を上書きしない。"""
+    observation = usable_loud_observation()
+    trace = [(SoundFollowInput(link_ready=1, motion_allowed=1), 500)]
+    trace.extend(
+        (SoundFollowInput(link_ready=1, new_observation=1, motion_allowed=1, observation=observation), 100)
+        for _ in range(16)
+    )
+    trace.append((SoundFollowInput(
+        link_ready=1,
+        motion_allowed=1,
+        navigation_target_valid=1,
+        navigation_bearing_deg=-45,
+    ), 100))
+
+    outputs = sound_follow_trace(trace)
+    move_outputs = [output for output in outputs if output.state == 3]
+    assert move_outputs
+    assert all(output.steering_deg == -45 for output in move_outputs)
+    assert all(output.target_bearing_deg == -90 for output in move_outputs)
+
+
+def test_target_sound_loss_stops_motion_after_the_existing_timeout() -> None:
+    loud = usable_loud_observation()
+    quiet = AcousticObservation(
+        doa_deg=0,
+        raw_doa_deg=0,
+        level_dbfs_x100=-6000,
+        peak_dbfs_x100=-6000,
+        vad=0,
+        doa_confidence=90,
+        xvf_status=ACOUSTIC_XVF_STATUS_READY,
+    )
+    trace = [(SoundFollowInput(link_ready=1, motion_allowed=1), 500)]
+    trace.extend(
+        (SoundFollowInput(link_ready=1, new_observation=1, motion_allowed=1, observation=loud), 100)
+        for _ in range(15)
+    )
+    trace.extend(
+        (SoundFollowInput(link_ready=1, new_observation=1, motion_allowed=1, observation=quiet), 100)
+        for _ in range(16)
+    )
+    trace.extend((SoundFollowInput(link_ready=1, motion_allowed=1), 100) for _ in range(6))
+
+    outputs = sound_follow_trace(trace)
+    assert any(output.state == 4 for output in outputs)
+    assert outputs[-1].state in (1, 4, 5)
+    assert outputs[-1].left_rpm == outputs[-1].right_rpm == 0
+    assert not outputs[-1].actuator_enable
 
 
 def test_identifier_match_required_blocks_motion_when_unmatched() -> None:
@@ -209,4 +289,4 @@ def test_arrival_states_stop_without_reporting_emergency_or_obstacle_stop() -> N
     assert outputs[-2].state == 20
     assert outputs[-1].state == 21
     assert all(output.left_rpm == output.right_rpm == 0 for output in outputs[-2:])
-    assert all(output.actuator_enable and not output.emergency_stop for output in outputs[-2:])
+    assert all(not output.actuator_enable and not output.emergency_stop for output in outputs[-2:])

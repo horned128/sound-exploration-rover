@@ -33,7 +33,9 @@ EXPORT volatile BOOL g_drive_measurement_stop_capture_valid = FALSE;
 #endif
 
 LOCAL UW g_command_elapsed_ms;                              /**< 最終指令受信からの経過時間 */
+LOCAL UW g_boot_center_elapsed_ms;                          /**< 電源投入時の0度整定経過時間 */
 LOCAL BOOL g_emergency_stop_latched;                        /**< 緊急停止ラッチ状態 */
+LOCAL BOOL g_boot_center_active;                            /**< 電源投入時の0度整定中 */
 LOCAL BOOL g_initialized;                                   /**< アクチュエータ初期化完了状態 */
 LOCAL BOOL g_actuator_output_enabled;                       /**< 有効な通常指令を受信済み */
 #if DRIVE_MEASUREMENT_TEST_ENABLE
@@ -78,6 +80,41 @@ LOCAL void actuator_service_safe_stop(void) {
             g_actuator_service_last_error = servo_err;
             g_actuator_service_fault_flags |= ACTUATOR_FAULT_DRIVER;
         }
+    }
+}
+
+/** =================================================================*
+ * @brief  電源投入時に全操舵サーボを中央へ整定する
+ * @details 駆動モーターは常に停止したまま、前回の電源断時に残った舵角だけを
+ *          0度へ戻す。保持時間の終了時は必ずPWMを停止する。
+ * @return FSPエラーコード
+ * ================================================================= */
+LOCAL fsp_err_t actuator_service_boot_center_start(void) {
+    for (UW i = 0U; i < SERVO_COUNT; i++) {
+        fsp_err_t const err = servo_set_target_deg(i, STEERING_CENTER_DEG);
+        if (FSP_SUCCESS != err) {
+            return err;
+        }
+    }
+    g_boot_center_elapsed_ms = 0U;
+    g_boot_center_active = TRUE;
+    return FSP_SUCCESS;
+}
+
+/** =================================================================*
+ * @brief  電源投入時の0度整定時間を進める
+ * @param[in] elapsed_ms 前回更新からの実経過時間[ms]
+ * ================================================================= */
+LOCAL void actuator_service_boot_center_update(UW elapsed_ms) {
+    if (!g_boot_center_active) {
+        return;
+    }
+
+    UW const remaining = UINT32_MAX - g_boot_center_elapsed_ms;
+    g_boot_center_elapsed_ms += (elapsed_ms < remaining) ? elapsed_ms : remaining;
+    if (g_boot_center_elapsed_ms >= ACTUATOR_BOOT_CENTER_HOLD_MS) {
+        g_boot_center_active = FALSE;
+        actuator_service_safe_stop();
     }
 }
 
@@ -181,6 +218,7 @@ LOCAL void actuator_service_apply_command(const actuator_command_t * p_received)
     g_actuator_service_applied_sequence = command.sequence_number;
 
     if (0U != command.emergency_stop) {
+        g_boot_center_active = FALSE;
         g_emergency_stop_latched = TRUE;
         g_actuator_service_fault_flags |= ACTUATOR_FAULT_EMERGENCY_STOP_ACTIVE;
         actuator_service_safe_stop();
@@ -198,9 +236,16 @@ LOCAL void actuator_service_apply_command(const actuator_command_t * p_received)
     }
 
     if (0U == command.actuator_enable) {
-        actuator_service_safe_stop();
+        /* 起動直後だけは、LISTENの無効指令より0度整定を優先する。
+         * モーターは有効化していないため、この間も走行しない。 */
+        if (!g_boot_center_active) {
+            actuator_service_safe_stop();
+        }
         return;
     }
+
+    /* 有効な走行指令は起動整定より優先する。 */
+    g_boot_center_active = FALSE;
 
     for (UW i = 0U; i < SERVO_COUNT; i++) {
         fsp_err_t const err = servo_set_target_deg(i, command.servo_target_deg[i]);
@@ -229,7 +274,9 @@ LOCAL void actuator_service_apply_command(const actuator_command_t * p_received)
 EXPORT fsp_err_t actuator_service_init(void) {
     g_initialized = FALSE;
     g_command_elapsed_ms = 0U;
+    g_boot_center_elapsed_ms = 0U;
     g_emergency_stop_latched = FALSE;
+    g_boot_center_active = FALSE;
     g_actuator_service_last_error = FSP_SUCCESS;
     g_actuator_service_fault_flags = ACTUATOR_FAULT_NONE;
     g_actuator_service_applied_sequence = 0U;
@@ -264,8 +311,15 @@ EXPORT fsp_err_t actuator_service_init(void) {
         return err;
     }
 
-    /* 完全な有効指令を受信するまで出力を無効にする。 */
+    /* 駆動を止めたまま、前回電源断時の操舵角を0度へ一度だけ戻す。 */
     actuator_service_safe_stop();
+    err = actuator_service_boot_center_start();
+    if (FSP_SUCCESS != err) {
+        g_actuator_service_last_error = err;
+        g_actuator_service_fault_flags |= ACTUATOR_FAULT_DRIVER;
+        actuator_service_safe_stop();
+        return err;
+    }
     g_initialized = TRUE;
     return FSP_SUCCESS;
 }
@@ -311,6 +365,7 @@ EXPORT void actuator_service_update(UW elapsed_ms) {
     if (received) {
         actuator_service_apply_command(&command);
     }
+    actuator_service_boot_center_update(elapsed_ms);
 #if DRIVE_MEASUREMENT_TEST_ENABLE
     actuator_service_apply_measurement_test();
 #endif

@@ -330,9 +330,14 @@ EXPORT void acoustic_identifier_summary_classify(const B * p_summary,
     p_output->active_frame_count = active_frame_count;
     p_output->sample_index = ~(UW) 0U;
     p_output->minimum_cosine_distance = -1.0F;
-    /* 保存済み見本が旧版の広いしきい値を持っていても、現行上限を越えない。 */
+    /* 保存済み見本が旧版の広いしきい値を持っていても、現行上限を越えない。
+     * 鈴付き楽器はpeak帯域が近くても距離0.057以上だったため、実機でTARGETを
+     * 受理する照合は現場ログから定めた0.055までさらに制限する。 */
     float effective_threshold = (threshold > CPU0_ACOUSTIC_IDENTIFIER_THRESHOLD_MAX) ?
                                         CPU0_ACOUSTIC_IDENTIFIER_THRESHOLD_MAX : threshold;
+    if (effective_threshold > CPU0_ACOUSTIC_IDENTIFIER_ACCEPTANCE_THRESHOLD_MAX) {
+        effective_threshold = CPU0_ACOUSTIC_IDENTIFIER_ACCEPTANCE_THRESHOLD_MAX;
+    }
     p_output->threshold = effective_threshold;
     p_output->status = CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_INVALID;
     if (!summary_valid) {

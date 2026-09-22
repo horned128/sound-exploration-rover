@@ -53,6 +53,8 @@ class SoundFollowInput(ctypes.Structure):
         ("navigation_bearing_deg", ctypes.c_int16),
         ("arrival_verify", BOOL),
         ("arrived", BOOL),
+        ("avoidance_relisten", BOOL),
+        ("restart_request", BOOL),
         ("imu_valid", BOOL),
         ("gyro_z_dps_x10", ctypes.c_int16),
         ("imu_update_count", ctypes.c_uint32),
@@ -63,6 +65,7 @@ class SoundFollowOutput(ctypes.Structure):
     _fields_ = [
         ("state", ctypes.c_int32),
         ("steering_deg", ctypes.c_int16),
+        ("target_bearing_deg", ctypes.c_int16),
         ("is_spin_turn", BOOL),
         ("left_rpm", ctypes.c_int16),
         ("right_rpm", ctypes.c_int16),
@@ -107,6 +110,8 @@ class ObstacleAvoidanceOutput(ctypes.Structure):
         ("right_rpm", ctypes.c_int16),
         ("actuator_enable", BOOL),
         ("emergency_stop", BOOL),
+        ("avoidance_in_progress", BOOL),
+        ("avoidance_completed", BOOL),
     ]
 
 
@@ -477,10 +482,11 @@ def obstacle_avoidance_trace(
     return outputs
 
 
-def sound_output_values(output: SoundFollowOutput) -> tuple[int, int, int, int, int, int, int]:
+def sound_output_values(output: SoundFollowOutput) -> tuple[int, int, int, int, int, int, int, int]:
     return (
         output.state,
         output.steering_deg,
+        output.target_bearing_deg,
         output.is_spin_turn,
         output.left_rpm,
         output.right_rpm,

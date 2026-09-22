@@ -280,7 +280,11 @@ EXPORT void sound_source_localizer_step(const sound_source_localizer_input_t * p
         p_output->source_bearing_deg = (H) roundf(SOUND_LOCALIZER_RAD_TO_DEG(relative_bearing_rad));
         p_output->source_confidence = localizer.source_confidence;
         p_output->source_position_valid = TRUE;
+        /* 以前の交点を保持しているだけの状態を「現在の音源方位」として
+         * 可視化・操舵へ渡さない。今回の方位線の幾何が不成立なら、位置推定は
+         * 参考履歴にとどめ、リアルタイムDoAと混同しない。 */
         p_output->navigation_target_valid = target_fresh && p_input->pose_valid &&
+            p_output->localization_geometry_valid &&
             (range_mm <= (float) CPU0_SOUND_LOCALIZATION_MAX_RANGE_MM);
     }
 

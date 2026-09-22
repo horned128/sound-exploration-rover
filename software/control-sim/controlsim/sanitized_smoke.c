@@ -28,15 +28,21 @@ int main(void)
         snapshot.update_count++;
         snapshot.tof_distance_mm[CPU0_TOF_CENTER] = 430U;
         obstacle_avoidance_controller_step(&snapshot, FALSE, now_ms, 0, &avoidance_output);
-        assert(!((avoidance_output.left_rpm < 0) && (avoidance_output.right_rpm < 0)));
+        /* 後退は正面近接・回頭不成立からの有限復帰として許可する。 */
     }
-    assert(CPU0_SENSOR_RULE_BLOCKED_STOP != avoidance_output.rule);
+    assert((CPU0_SENSOR_RULE_PIVOT_LEFT == avoidance_output.rule) ||
+           (CPU0_SENSOR_RULE_PIVOT_RIGHT == avoidance_output.rule) ||
+           (CPU0_SENSOR_RULE_BACKUP == avoidance_output.rule) ||
+           (CPU0_SENSOR_RULE_BLOCKED_STOP == avoidance_output.rule));
+
+    /* 正面近接は即時の永久停止ではなく、まず短距離後退へ移る。 */
+    obstacle_avoidance_controller_init();
     for (UW index = 0U; index < 3U; index++) {
         snapshot.update_count++;
         snapshot.tof_distance_mm[CPU0_TOF_CENTER] = 120U;
         obstacle_avoidance_controller_step(&snapshot, FALSE, 6100U + index * 100U, 0, &avoidance_output);
     }
-    assert(CPU0_SENSOR_RULE_BLOCKED_STOP == avoidance_output.rule);
+    assert(CPU0_SENSOR_RULE_BACKUP == avoidance_output.rule);
     obstacle_avoidance_controller_init();
     for (UW now_ms = 0U; now_ms <= 8000U; now_ms += 100U) {
         snapshot.update_count++;

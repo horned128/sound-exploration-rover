@@ -369,6 +369,10 @@ LOCAL void acoustic_ai_lab_command_handle(const acoustic_frame_t * p_frame) {
         } else {
             acoustic_ai_lab_command_result_queue(command, ACOUSTIC_AI_LAB_COMMAND_UNAVAILABLE);
         }
+    } else if (ACOUSTIC_AI_LAB_COMMAND_RESTART == command) {
+        acoustic_ai_lab_command_result_queue(command,
+            (E_OK == task_think_restart_request()) ?
+                ACOUSTIC_AI_LAB_COMMAND_ACCEPTED : ACOUSTIC_AI_LAB_COMMAND_UNAVAILABLE);
     } else {
         task_think_learning_command_t learning_command = TASK_THINK_LEARNING_COMMAND_NONE;
         if (ACOUSTIC_AI_LAB_COMMAND_LEARNING_START == command) {

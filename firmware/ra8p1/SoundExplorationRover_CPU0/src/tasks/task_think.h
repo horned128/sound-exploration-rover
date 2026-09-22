@@ -27,6 +27,7 @@ EXPORT ER task_think_report_fault(app_fault_t fault);       /* 他タスクか�
 EXPORT ER task_think_clear_fault(app_fault_t fault);        /* 回復確認済み異常の解除通知 */
 EXPORT void task_think_halt(app_fault_t fault);             /* 起動不能時のLED表示 */
 EXPORT ER task_think_learning_request(task_think_learning_command_t command); /* 現場学習操作要求 */
+EXPORT ER task_think_restart_request(void);                 /* 停止状態からの明示再開要求 */
 
 IMPORT volatile sound_follow_state_t g_task_think_state;    /**< 現在の思考状態（Live Watch用） */
 IMPORT volatile UW g_task_think_cycle_count;                /**< 思考周期実行回数（Live Watch用） */

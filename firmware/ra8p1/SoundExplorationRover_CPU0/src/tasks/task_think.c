@@ -50,6 +50,7 @@ LOCAL UW learning_button_press_ms;                          /**< SW1継続押下
 LOCAL BOOL learning_button_handled;                         /**< 同一押下の多重切替防止 */
 LOCAL UW learning_last_feature_generation;                  /**< 最後に収集した特徴量世代 */
 LOCAL volatile task_think_learning_command_t learning_command_pending; /**< 次周期に反映する外部操作 */
+LOCAL volatile BOOL restart_request_pending;                /**< 次周期に反映する再開操作 */
 LOCAL prototype_storage_data_t storage_data;                /**< 読込済みまたは保存対象プロトタイプ */
 LOCAL prototype_storage_data_t storage_candidate;           /**< 保存処理用の作業コピー */
 LOCAL UW task_think_fault_code(UW fault_flags);             /* LED表示用異常番号 */
@@ -207,6 +208,7 @@ EXPORT app_fault_t task_think_create(void) {
     g_task_think_storage_valid = FALSE;
     g_task_think_storage_result = CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
     learning_command_pending = TASK_THINK_LEARNING_COMMAND_NONE;
+    restart_request_pending = FALSE;
     sound_follow_controller_init();
     sound_source_localizer_init();
 #if (CPU0_SENSOR_I2C_ENABLED != 0U)
@@ -305,6 +307,19 @@ EXPORT ER task_think_learning_request(task_think_learning_command_t command) {
         return E_NOEXS;
     }
     learning_command_pending = command;
+    return E_OK;
+}
+
+/** =================================================================*
+ * @brief 停止状態からの明示再開を思考タスクへ依頼
+ * @details USB受信taskから直接走行状態を変更せず、次の思考周期でだけ反映する。
+ * @return μT-Kernelエラーコード
+ * ================================================================= */
+EXPORT ER task_think_restart_request(void) {
+    if (!think_task_started) {
+        return E_NOEXS;
+    }
+    restart_request_pending = TRUE;
     return E_OK;
 }
 
@@ -626,6 +641,12 @@ LOCAL void task_think_led_update(UW state_elapsed_ms, UW heartbeat_elapsed_ms, U
             blue_on = 0U == ((state_elapsed_ms / CPU0_LED_SETTLE_BLINK_MS) & 1U);
             break;
 
+        case CPU0_THINK_STATE_WAIT_RESTART:
+            /* 終了停止は、待機やセンサー異常とは異なる両LED消灯で示す。 */
+            green_on = FALSE;
+            blue_on = FALSE;
+            break;
+
         case CPU0_THINK_STATE_SENSOR_SAFE_STOP:
         case CPU0_THINK_STATE_SENSOR_BLOCKED_STOP:
         case CPU0_THINK_STATE_SENSOR_IMU_STOP:
@@ -685,6 +706,7 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
     UW last_infer_generation = 0U;
     UW target_sound_match_timer_ms = 0U;
     BOOL target_sound_matched = FALSE;
+    BOOL avoidance_motion_latched = FALSE;
 
     while (1) {
         UINT fault_pattern = 0U;
@@ -702,6 +724,8 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
 
         /* PC直結AIラボの要求は、SW1判定より先に同じ思考文脈で適用する。 */
         task_think_learning_command_apply();
+        BOOL const restart_request = restart_request_pending;
+        restart_request_pending = FALSE;
 
         bsp_io_level_t sw1_level = BSP_IO_LEVEL_HIGH;
         (void) g_ioport.p_api->pinRead(g_ioport.p_ctrl, BSP_IO_PORT_00_PIN_09, &sw1_level);
@@ -774,10 +798,10 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
                     /* peak帯域と距離を通過済みの新しいTARGETは、直ちにDoA取得へ渡す。 */
                     target_sound_matched = TRUE;
                     target_sound_match_timer_ms = CPU0_SOUND_IDENTIFIER_TIMEOUT_MS;
-                } else {
-                    target_sound_matched = FALSE;
-                    target_sound_match_timer_ms = 0U;
                 }
+                /* 単発のNOT_TARGETは前回TARGETの判定窓を打ち消さない。
+                 * 断続音の無音境界や一フレームの特徴量ぶれは、下の期限処理で
+                 * CPU0_SOUND_IDENTIFIER_TIMEOUT_MS後にだけ追従許可を失う。 */
             }
         }
         if (0U == target_sound_match_timer_ms) {
@@ -852,10 +876,15 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             .observation = snapshot.observation,
             .match_required = match_required,
             .target_sound_matched = target_sound_matched,
-            .navigation_target_valid = localizer_output.navigation_target_valid,
+            .navigation_target_valid = (0U != CPU0_SOUND_USE_LOCALIZATION_FOR_STEERING) &&
+                                       localizer_output.navigation_target_valid,
             .navigation_bearing_deg = localizer_output.source_bearing_deg,
-            .arrival_verify = CPU0_SOUND_ARRIVAL_VERIFY == localizer_output.arrival_state,
-            .arrived = CPU0_SOUND_ARRIVAL_ARRIVED == localizer_output.arrival_state,
+            .arrival_verify = (0U != CPU0_SOUND_USE_LOCALIZATION_FOR_ARRIVAL) &&
+                              (CPU0_SOUND_ARRIVAL_VERIFY == localizer_output.arrival_state),
+            .arrived = (0U != CPU0_SOUND_USE_LOCALIZATION_FOR_ARRIVAL) &&
+                       (CPU0_SOUND_ARRIVAL_ARRIVED == localizer_output.arrival_state),
+            .avoidance_relisten = FALSE,
+            .restart_request = restart_request,
             .imu_valid = sensor_fresh &&
                          (0U != (sensor_snapshot.valid_flags & CPU0_SENSOR_VALID_IMU)),
             .gyro_z_dps_x10 = sensor_snapshot.gyro_dps_x10[CPU0_SENSOR_YAW_AXIS],
@@ -867,20 +896,57 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         sound_follow_state_t const previous_state = g_task_think_state;
         sound_follow_controller_step(&input, CPU0_THINK_PERIOD_MS, &sf_output);
 
-        /* --- S3: 回避コントローラにtarget_steering_degとして音源方向を渡す --- */
+        /* 現在の既定制御では位置推定を操舵に使わないため、ナビゲーション診断の方位欄へ
+         * 静止中に確定したDoAを出す。最終操舵（ToF回避後）とは別に記録されるため、
+         * 走行ログで音源方位の誤認と障害物回避の上書きを判別できる。 */
+        if ((CPU0_THINK_STATE_STEER_PREP == sf_output.state) ||
+            (CPU0_THINK_STATE_MOVE_STEP == sf_output.state) ||
+            (CPU0_THINK_STATE_SPIN_PREP == sf_output.state) ||
+            (CPU0_THINK_STATE_SPIN_STEP == sf_output.state)) {
+            g_task_think_source_bearing_deg = sf_output.target_bearing_deg;
+        }
+
+        /* --- S3: 音源追従中だけ回避を開始し、開始済みなら通過まで保持する --- */
+        BOOL const sound_motion_active = (CPU0_THINK_STATE_MOVE_STEP == sf_output.state) ||
+                                         (CPU0_THINK_STATE_SPIN_STEP == sf_output.state);
+        BOOL const obstacle_motion_context = sound_motion_active || avoidance_motion_latched;
         /* ToF回避コントローラの判断結果を安全調停へ渡す領域。 */
         LOCAL obstacle_avoidance_output_t oa_output;
         memset(&oa_output, 0, sizeof(oa_output));
+        /* 回避がMOVE_STEPを越えて続く間も、直前の停止聴取で確定した音源側を
+         * 脱出方向の同点判定に使う。SETTLE/LISTEN中のsteering_degは0へ戻るため、
+         * ここでそれを渡すとピボットが音源方位を失う。 */
+        H obstacle_target_steering_deg = sf_output.target_bearing_deg;
+        if (obstacle_target_steering_deg > CPU0_SOUND_STEERING_MAX_DEG) {
+            obstacle_target_steering_deg = CPU0_SOUND_STEERING_MAX_DEG;
+        } else if (obstacle_target_steering_deg < -CPU0_SOUND_STEERING_MAX_DEG) {
+            obstacle_target_steering_deg = -CPU0_SOUND_STEERING_MAX_DEG;
+        }
         obstacle_avoidance_controller_step(sensor_fresh ? &sensor_snapshot : NULL,
-                                           (APP_FAULT_NONE != g_task_think_fault_flags) || g_task_think_learning_mode,
-                                           sensor_now_ms, sf_output.steering_deg, &oa_output);
+                                           (APP_FAULT_NONE != g_task_think_fault_flags) || g_task_think_learning_mode ||
+                                           !obstacle_motion_context,
+                                           sensor_now_ms, obstacle_target_steering_deg, &oa_output);
         g_task_think_sensor_rule = oa_output.rule;
+
+        if (sound_motion_active && oa_output.avoidance_in_progress) {
+            avoidance_motion_latched = TRUE;
+        }
+        if (oa_output.avoidance_completed || (CPU0_SENSOR_RULE_BLOCKED_STOP == oa_output.rule) ||
+            (CPU0_SENSOR_RULE_IMU_STOP == oa_output.rule)) {
+            avoidance_motion_latched = FALSE;
+        }
+        if (oa_output.avoidance_completed) {
+            /* 回避を完了した周期に必ず停止し、回避前・回避中のDoAを破棄する。 */
+            input.avoidance_relisten = TRUE;
+            input.restart_request = FALSE;
+            sound_follow_controller_step(&input, 0U, &sf_output);
+        }
 
 #if (CPU0_USE_CONTROL_MLP != 0U)
         LOCAL control_mlp_output_t mlp_output;
         memset(&mlp_output, 0, sizeof(mlp_output));
         control_mlp_planner_step(sensor_fresh ? &sensor_snapshot : NULL,
-                                 (float) sf_output.steering_deg,
+                                 (float) sf_output.target_bearing_deg,
                                  &mlp_output);
 #endif
 
@@ -892,15 +958,16 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         BOOL spin_active = (CPU0_THINK_STATE_SPIN_STEP == sf_output.state);
         BOOL const arrival_stop = (CPU0_THINK_STATE_ARRIVAL_VERIFY == sf_output.state) ||
                                   (CPU0_THINK_STATE_ARRIVED == sf_output.state);
-        BOOL const avoidance_active = (oa_output.rule == CPU0_SENSOR_RULE_PIVOT_LEFT) ||
-                                      (oa_output.rule == CPU0_SENSOR_RULE_PIVOT_RIGHT) ||
-                                      (oa_output.rule == CPU0_SENSOR_RULE_BLOCKED_STOP);
-        BOOL const sensor_stop = (oa_output.rule == CPU0_SENSOR_RULE_SAFE_STOP) ||
-                                 (oa_output.rule == CPU0_SENSOR_RULE_BLOCKED_STOP) ||
-                                 (oa_output.rule == CPU0_SENSOR_RULE_IMU_STOP);
+        BOOL const avoidance_active = obstacle_motion_context && oa_output.avoidance_in_progress;
+        BOOL const sensor_stop = obstacle_motion_context &&
+                                 ((oa_output.rule == CPU0_SENSOR_RULE_SAFE_STOP) ||
+                                  (oa_output.rule == CPU0_SENSOR_RULE_BLOCKED_STOP) ||
+                                  (oa_output.rule == CPU0_SENSOR_RULE_IMU_STOP));
 
 #if (CPU0_USE_CONTROL_MLP != 0U)
-        BOOL const mlp_eligible = tracking_active || (CPU0_THINK_STATE_STEER_PREP == sf_output.state);
+        BOOL const mlp_eligible = ((0U == CPU0_SOUND_STOP_AND_LISTEN_ENABLE) ||
+                                   (0U != CPU0_SOUND_ALLOW_CONTROL_MLP)) &&
+                                  (tracking_active || (CPU0_THINK_STATE_STEER_PREP == sf_output.state));
         if (mlp_eligible && !mlp_output.fallback_required && !avoidance_active && !sensor_stop && !arrival_stop &&
             !oa_output.emergency_stop && !sf_output.emergency_stop &&
             !g_task_think_learning_mode && (APP_FAULT_NONE == g_task_think_fault_flags)) {

@@ -13,7 +13,8 @@
 #include "config/actuator_config.h"
 
 static H left_pwm, right_pwm;
-static int pwm_calls, stops, disables, pending, pins[4], rx_fault;
+static int pwm_calls, stops, disables, servo_sets, pending, pins[4], rx_fault;
+static H servo_targets[4];
 static actuator_command_t command;
 static int create_call, fail_create, fail_start, deleted[3], stopped_cycle;
 static void (*task_entry)(INT, void *);
@@ -40,7 +41,7 @@ fsp_err_t bts7960_init(void) { left_pwm=right_pwm=0; return 0; }
 fsp_err_t bts7960_set_signed_duty(H left,H right) { left_pwm=left;right_pwm=right;pwm_calls++;return 0; }
 fsp_err_t bts7960_stop(void) { left_pwm=right_pwm=0;stops++;return 0; }
 fsp_err_t servo_init(void) { return 0; }
-fsp_err_t servo_set_target_deg(UW i,H target) { (void)i;(void)target;return 0; }
+fsp_err_t servo_set_target_deg(UW i,H target) { assert(i<4);servo_targets[i]=target;servo_sets++;return 0; }
 fsp_err_t servo_disable(UW i) { (void)i;disables++;return 0; }
 fsp_err_t actuator_ipc_server_init(void) { pending=0;return 0; }
 BOOL actuator_ipc_server_take_command(actuator_command_t *out) {
@@ -88,8 +89,9 @@ static void send(UW seq,H rpm,UB enable,UB emergency) {
     command.actuator_enable=enable;command.emergency_stop=emergency;pending=1;
 }
 static void reset_fakes(void) {
-    pwm_calls=stops=disables=pending=rx_fault=0;
+    pwm_calls=stops=disables=servo_sets=pending=rx_fault=0;
     memset(pins,0,sizeof(pins));
+    memset(servo_targets,0,sizeof(servo_targets));
 }
 
 static W expected_rpm_x10(W delta, UW elapsed_ms) {
@@ -173,6 +175,29 @@ static void test_watchdog(void) {
     send(9,120,1,0);actuator_service_update(1);
     send(10,120,1,0);actuator_service_update(1500);
     assert(!(g_actuator_service_fault_flags & ACTUATOR_FAULT_COMMAND_TIMEOUT));
+}
+
+static void test_boot_center(void) {
+    reset_fakes();
+    assert(actuator_service_init()==0);
+    assert(servo_sets==4 && left_pwm==0 && right_pwm==0);
+    for (int i=0;i<4;i++) assert(servo_targets[i]==0);
+
+    int const initial_disables=disables;
+    send(1,0,0,0);actuator_service_update(999);
+    /* LISTENの無効指令では、0度へ戻すためのPWMを途中で止めない。 */
+    assert(disables==initial_disables && left_pwm==0 && right_pwm==0);
+    actuator_service_update(1);
+    assert(disables==initial_disables+4 && left_pwm==0 && right_pwm==0);
+
+    reset_fakes();
+    assert(actuator_service_init()==0);
+    int const preempt_disables=disables;
+    send(2,0,1,0);command.servo_target_deg[0]=15;actuator_service_update(1);
+    assert(servo_targets[0]==15);
+    actuator_service_update(ACTUATOR_BOOT_CENTER_HOLD_MS);
+    /* 有効な走行指令が先に来た場合は、起動整定が後から停止しない。 */
+    assert(disables==preempt_disables && left_pwm==0 && right_pwm==0);
 }
 
 #if DRIVE_MEASUREMENT_TEST_ENABLE
@@ -286,7 +311,7 @@ int main(void) {
     if (DRIVE_SPEED_FEEDBACK_ENABLE) {
         test_feedback_delay();
     } else {
-        test_encoder();test_drive();test_watchdog();test_task();
+        test_encoder();test_drive();test_watchdog();test_boot_center();test_task();
     }
 #if DRIVE_MEASUREMENT_TEST_ENABLE
     test_measurement_override();

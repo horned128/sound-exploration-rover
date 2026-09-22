@@ -401,8 +401,8 @@
                             <div style="position: absolute; top: 10px; left: 10px; font-size: 11px; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 5px 8px; border-radius: 4px; border: 1px solid #444;">
                                 <div style="color: #e0e0e0; font-weight: bold; margin-bottom: 3px;">ローバー中心ビュー (Rover-Centric View)</div>
                                 <div style="color: #4caf50; font-size: 10px;">■ Steering 操舵目標 (実線)</div>
-                                <div style="color: #ff9800; font-size: 10px;">■ Audio DoA 音源方位 (点線)</div>
-                                <div style="color: #03a9f4; font-size: 10px;">■ Source bearing 推定音源方位</div>
+                                <div style="color: #ff9800; font-size: 10px;">■ Audio DoA 車体座標へ変換した音源方位 (点線)</div>
+                                <div style="color: #03a9f4; font-size: 10px;">■ Source bearing 追従に使うDoA方位</div>
                                 <div style="color: #2196f3; font-size: 10px;">● Obstacles (ToF L/C/R 平行ビーム)</div>
                                 <div style="color: #f44336; font-size: 10px;">-- 250mm 停止 / 234mm 交差ライン</div>
                             </div>
@@ -539,7 +539,7 @@
             9: "SENSOR_TURN_LEFT", 10: "SENSOR_TURN_RIGHT", 11: "SENSOR_BLOCKED_STOP",
             12: "SENSOR_IMU_STOP", 13: "FAULT", 17: "SPIN_PREP", 18: "SPIN_STEP", 19: "SPIN_NO_PROGRESS",
             14: "SENSOR_PIVOT_LEFT", 15: "SENSOR_PIVOT_RIGHT", 16: "SENSOR_BACKUP",
-            20: "ARRIVAL_VERIFY", 21: "ARRIVED"
+            20: "ARRIVAL_VERIFY", 21: "ARRIVED", 22: "WAIT_RESTART"
         };
         const CPU0_FAULTS = {
             1: "TASK_CREATE", 2: "TASK_START", 4: "IPC_INIT", 8: "IPC_SEND",
@@ -822,18 +822,23 @@
             let audioLenFactor = (latestAudioLevel + 100) / 100;
             audioLenFactor = Math.max(0.15, Math.min(1.0, audioLenFactor));
 
+            // CPU0のsound_follow_doa_to_relative()と同じ変換。XVFの生DoAを
+            // そのまま描くと、鏡映取付け補正後の操舵・Source bearingと左右が
+            // 逆に見えるため、ローバー座標（前0°、右正）だけをレーダーに描く。
+            const doaToRoverBearing = (doa) => {
+                let bearing = -Number(doa); // CPU0_SOUND_DOA_CLOCKWISE_POSITIVE == 0
+                while (bearing >= 180) bearing -= 360;
+                while (bearing < -180) bearing += 360;
+                return bearing;
+            };
             if (latestAudioDoa !== 65535) {
-                drawArrow(latestAudioDoa, '#ff9800', true, audioLenFactor, true);
+                const trackedBearing = doaToRoverBearing(latestAudioDoa);
+                drawArrow(trackedBearing, '#ff9800', true, audioLenFactor, true);
+                // 位置推定器の過去推定値ではなく、実際に追従判断へ入れる
+                // 現在DoAをSource bearingとして重ねる。
+                drawArrow(trackedBearing, '#03a9f4', false, 0.85);
             }
             drawArrow(latestSteer, '#4caf50', false, 1.0);
-
-            const navigationFresh = latestNavigation?.valid && Number(latestNavigation.age_ms) <= 1000;
-            if (navigationFresh && latestNavigation.target_valid) {
-                const sourceBearing = Number(latestNavigation.bearing_deg);
-                if (Number.isFinite(sourceBearing)) {
-                    drawArrow(sourceBearing, '#03a9f4', false, 0.85);
-                }
-            }
             
             // ローバー原点マーク
             ctx.fillStyle = '#4caf50'; ctx.beginPath(); ctx.arc(ox, oy, 4, 0, 2 * Math.PI); ctx.fill();

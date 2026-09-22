@@ -103,6 +103,7 @@ typedef enum e_acoustic_ai_lab_command {
     ACOUSTIC_AI_LAB_COMMAND_LEARNING_COMMIT = 2U,           /**< 5見本をMRAMへ保存 */
     ACOUSTIC_AI_LAB_COMMAND_LEARNING_CANCEL = 3U,           /**< 未保存収集を破棄 */
     ACOUSTIC_AI_LAB_COMMAND_PROFILE_READ = 4U,              /**< 保存済み5見本の読出し */
+    ACOUSTIC_AI_LAB_COMMAND_RESTART = 5U,                   /**< 停止・待機状態から走行再開 */
 } acoustic_ai_lab_command_t;
 
 /**< AIラボ操作の受付結果 */
