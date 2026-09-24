@@ -6,6 +6,8 @@
 #define SEROV_CPU0_ACOUSTIC_AI_LAB_LINK_H
 
 #include "hal_data.h"                                     /* USBイベント型 */
+#include "tasks/task_infer.h"                             /* 推論snapshot型 */
+#include "../../../common/acoustic_protocol.h"            /* AI Lab snapshot wire型 */
 #include <tk/tkernel.h>                                    /* μT-Kernel基本型 */
 
 /* USB event queueは既存のtask_acoustic_linkだけが消費する。 */
@@ -14,6 +16,8 @@ EXPORT void acoustic_ai_lab_link_deinit(void);              /* J11 CDC終了 */
 EXPORT void acoustic_ai_lab_link_event(const usb_event_info_t * p_event_info, usb_status_t event,
                                        UW now_ms);           /* 共有USBイベント配信 */
 EXPORT void acoustic_ai_lab_link_poll(UW now_ms);           /* snapshot/chunk送信進行 */
+EXPORT ER acoustic_ai_lab_snapshot_build(const task_infer_result_t * p_infer,
+                                         acoustic_ai_lab_snapshot_t * p_snapshot); /* CPU0診断snapshot生成 */
 
 IMPORT volatile BOOL g_acoustic_ai_lab_usb_open;            /**< J11 USB driver open済み */
 IMPORT volatile BOOL g_acoustic_ai_lab_usb_configured;      /**< PC CDC列挙済み */

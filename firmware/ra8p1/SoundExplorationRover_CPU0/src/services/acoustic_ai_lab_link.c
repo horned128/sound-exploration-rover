@@ -121,11 +121,28 @@ EXPORT volatile fsp_err_t g_acoustic_ai_lab_last_error;      /**< 直近USBエ�
 
 LOCAL void acoustic_ai_lab_read_start(void);                 /* 次のPC command受信を開始 */
 LOCAL void acoustic_ai_lab_snapshot_queue(UW now_ms);        /* snapshot送信をキュー */
+LOCAL void acoustic_ai_lab_snapshot_capture(const task_infer_result_t * p_infer,
+                                            acoustic_ai_lab_snapshot_t * p_snapshot); /* snapshot化 */
 LOCAL void acoustic_ai_lab_summary_queue(void);              /* 要約chunk送信をキュー */
 LOCAL void acoustic_ai_lab_command_handle(const acoustic_frame_t * p_frame); /* PC操作を処理 */
 LOCAL void acoustic_ai_lab_command_result_queue(UB command, acoustic_ai_lab_command_result_t result); /* 結果 */
 LOCAL BOOL acoustic_ai_lab_write(const UB * p_bytes, UW length); /* PCDC Bulk IN送信開始 */
 LOCAL UH acoustic_ai_lab_float_x1000(float value);           /**< floatを診断wire値へ縮約 */
+
+/** =================================================================*
+ * @brief 現在のCPU0音響・推論状態をAI Lab snapshotへ変換
+ * @param[in] p_infer 対象generationの推論結果。NULLなら最新値を取得
+ * @param[out] p_snapshot 48 byte AI Lab snapshot構造
+ * @return μT-Kernelエラーコード
+ * ================================================================= */
+EXPORT ER acoustic_ai_lab_snapshot_build(const task_infer_result_t * p_infer,
+                                         acoustic_ai_lab_snapshot_t * p_snapshot) {
+    if (NULL == p_snapshot) {
+        return E_PAR;
+    }
+    acoustic_ai_lab_snapshot_capture(p_infer, p_snapshot);
+    return E_OK;
+}
 
 /** =================================================================*
  * @brief 0..65.535のfloatをu16のx1000固定小数点へ変換
@@ -239,19 +256,21 @@ LOCAL BOOL acoustic_ai_lab_write(const UB * p_bytes, UW length) {
 }
 
 /** =================================================================*
- * @brief 現在の音響・推論・学習状態をsnapshotとして送信
- * @param[in] now_ms 現在時刻[ms]
+ * @brief 現在の音響・推論・学習状態をsnapshot化
+ * @return 現在状態のsnapshot
  * ================================================================= */
-LOCAL void acoustic_ai_lab_snapshot_queue(UW now_ms) {
+LOCAL void acoustic_ai_lab_snapshot_capture(const task_infer_result_t * p_infer,
+                                            acoustic_ai_lab_snapshot_t * p_snapshot) {
     task_acoustic_link_snapshot_t audio = {0};
-    task_infer_result_t infer = {0};
+    task_infer_result_t infer_storage = {0};
     task_infer_prototype_telemetry_t prototype = {0};
     BOOL audio_ready = (E_OK == task_acoustic_link_snapshot_get(&audio));
-    BOOL infer_ready = (E_OK == task_infer_result_get(&infer));
+    BOOL infer_ready = (NULL != p_infer) || (E_OK == task_infer_result_get(&infer_storage));
+    task_infer_result_t const * const p_current_infer = (NULL != p_infer) ? p_infer : &infer_storage;
     BOOL prototype_ready = (E_OK == task_infer_prototype_telemetry_get(&prototype));
 
     acoustic_ai_lab_snapshot_t snapshot = {0};
-    snapshot.schema_version = 1U;
+    snapshot.schema_version = 2U;
     snapshot.think_state = (UB) g_task_think_state;
     snapshot.doa_deg = audio_ready ? audio.observation.doa_deg : ACOUSTIC_PROTOCOL_DOA_INVALID;
     snapshot.level_dbfs_x100 = audio_ready ? audio.observation.level_dbfs_x100 : 0;
@@ -267,10 +286,14 @@ LOCAL void acoustic_ai_lab_snapshot_queue(UW now_ms) {
     snapshot.identifier_threshold_x1000 = prototype_ready ?
         acoustic_ai_lab_float_x1000(prototype.identifier_threshold) : 0U;
     snapshot.observation_sequence = audio_ready ? audio.observation_sequence : 0U;
-    snapshot.feature_generation = infer_ready ? infer.feature_generation : 0U;
+    snapshot.feature_generation = infer_ready ? p_current_infer->feature_generation : 0U;
     snapshot.inference_count = g_task_infer_inference_count;
     snapshot.match_count = g_task_infer_match_count;
     snapshot.storage_result = (UB) g_task_think_storage_result;
+    /* baseline制御には一致保持状態がない。診断wire上ではUNKNOWNを明示する。 */
+    snapshot.reserved[0] = ACOUSTIC_AI_LAB_MATCH_UNKNOWN;
+    snapshot.reserved[1] = (UB) ACOUSTIC_AI_LAB_MATCH_AGE_INVALID;
+    snapshot.reserved[2] = (UB) (ACOUSTIC_AI_LAB_MATCH_AGE_INVALID >> 8U);
 
     if (g_task_think_link_ready) {
         snapshot.flags |= ACOUSTIC_AI_LAB_FLAG_LINK_READY;
@@ -282,33 +305,44 @@ LOCAL void acoustic_ai_lab_snapshot_queue(UW now_ms) {
         snapshot.flags |= ACOUSTIC_AI_LAB_FLAG_STORAGE_VALID;
     }
     if (infer_ready) {
-        snapshot.infer_status = (UB) infer.identifier.status;
-        snapshot.active_frame_count = infer.active_frame_count;
-        snapshot.background_mse_x1000 = acoustic_ai_lab_float_x1000(infer.event_mse);
-        snapshot.background_threshold_x1000 = infer.background_threshold_valid ?
-            acoustic_ai_lab_float_x1000(infer.background_threshold) : 0U;
-        if (infer.summary_valid) {
+        snapshot.infer_status = (UB) p_current_infer->identifier.status;
+        snapshot.active_frame_count = p_current_infer->active_frame_count;
+        snapshot.background_mse_x1000 = acoustic_ai_lab_float_x1000(p_current_infer->event_mse);
+        snapshot.background_threshold_x1000 = p_current_infer->background_threshold_valid ?
+            acoustic_ai_lab_float_x1000(p_current_infer->background_threshold) : 0U;
+        if (p_current_infer->summary_valid) {
             snapshot.flags |= ACOUSTIC_AI_LAB_FLAG_SUMMARY_VALID;
         }
-        if (infer.background_anomaly) {
+        if (p_current_infer->background_anomaly) {
             snapshot.flags |= ACOUSTIC_AI_LAB_FLAG_BACKGROUND_ANOMALY;
         }
-        if (infer.identifier.minimum_cosine_distance >= 0.0F) {
-            snapshot.cosine_distance_x1000 = acoustic_ai_lab_float_x1000(infer.identifier.minimum_cosine_distance);
+        if (p_current_infer->identifier.minimum_cosine_distance >= 0.0F) {
+            snapshot.cosine_distance_x1000 = acoustic_ai_lab_float_x1000(p_current_infer->identifier.minimum_cosine_distance);
             snapshot.similarity_permille = (snapshot.cosine_distance_x1000 > 1000U) ? 0U :
                                          (UH) (1000U - snapshot.cosine_distance_x1000);
         }
-        if (infer.identifier.threshold >= 0.0F) {
-            snapshot.identifier_threshold_x1000 = acoustic_ai_lab_float_x1000(infer.identifier.threshold);
+        if (p_current_infer->identifier.threshold >= 0.0F) {
+            snapshot.identifier_threshold_x1000 = acoustic_ai_lab_float_x1000(p_current_infer->identifier.threshold);
         }
-        if (infer.identifier.sample_index <= 255U) {
-            snapshot.nearest_sample = (UB) infer.identifier.sample_index;
+        if (p_current_infer->identifier.sample_index <= 255U) {
+            snapshot.nearest_sample = (UB) p_current_infer->identifier.sample_index;
         }
-        if (infer.summary_valid && (infer.active_frame_count >= CPU0_ACOUSTIC_MIN_ACTIVE_FRAME_COUNT)) {
-            snapshot.current_peak_bin = acoustic_identifier_find_peak_bin(infer.summary, 1U);
+        if (p_current_infer->summary_valid &&
+            (p_current_infer->active_frame_count >= CPU0_ACOUSTIC_MIN_ACTIVE_FRAME_COUNT)) {
+            snapshot.current_peak_bin = acoustic_identifier_find_peak_bin(p_current_infer->summary, 1U);
         }
     }
 
+    *p_snapshot = snapshot;
+}
+
+/** =================================================================*
+ * @brief 現在状態をsnapshotとして送信
+ * @param[in] now_ms 現在時刻[ms]
+ * ================================================================= */
+LOCAL void acoustic_ai_lab_snapshot_queue(UW now_ms) {
+    acoustic_ai_lab_snapshot_t snapshot = {0};
+    acoustic_ai_lab_snapshot_capture(NULL, &snapshot);
     UW length = (UW) acoustic_protocol_encode_ai_lab_snapshot(ai_lab_tx_sequence, now_ms, &snapshot,
                                                               ai_lab_tx_buffer, sizeof(ai_lab_tx_buffer));
     if ((0U != length) && acoustic_ai_lab_write(ai_lab_tx_buffer, (UW) length)) {
@@ -463,6 +497,11 @@ EXPORT void acoustic_ai_lab_link_poll(UW now_ms) {
     if (!g_acoustic_ai_lab_usb_open || !g_acoustic_ai_lab_usb_configured || ai_lab_write_pending) {
         return;
     }
+    if (ai_lab_profile_pending && !g_task_think_storage_valid) {
+        ai_lab_profile_pending = FALSE;
+        ai_lab_profile_valid = FALSE;
+        memset(&ai_lab_profile_data, 0, sizeof(ai_lab_profile_data));
+    }
     acoustic_ai_lab_read_start();
     if (ai_lab_command_result_pending) {
         UB payload[ACOUSTIC_AI_LAB_COMMAND_RESULT_PAYLOAD_SIZE] = {
@@ -493,7 +532,6 @@ EXPORT void acoustic_ai_lab_link_poll(UW now_ms) {
         payload[4] = ai_lab_summary_chunk_index;
         payload[5] = AI_LAB_SUMMARY_CHUNK_COUNT;
         payload[6] = 1U;
-        payload[7] = 0U;
         memcpy(&payload[8], &ai_lab_summary[ai_lab_summary_chunk_index * ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE],
                ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE);
         UW length = (UW) acoustic_protocol_encode(ACOUSTIC_MESSAGE_AI_LAB_SUMMARY_CHUNK, ai_lab_tx_sequence,

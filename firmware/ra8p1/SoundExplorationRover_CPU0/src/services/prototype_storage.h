@@ -43,6 +43,7 @@ typedef struct st_prototype_storage_data {
 
 EXPORT prototype_storage_result_t prototype_storage_init(void); /* MRAMドライバと保存領域検証 */
 EXPORT prototype_storage_result_t prototype_storage_load(prototype_storage_data_t * p_data); /* 最新有効値読込 */
+EXPORT prototype_storage_result_t prototype_storage_clear(void); /* 学習開始時にA/B両スロットを初期化 */
 EXPORT prototype_storage_result_t prototype_storage_save(prototype_storage_data_t * p_data); /* A/Bスロット保存 */
 
 #endif /* SEROV_CPU0_SERVICE_PROTOTYPE_STORAGE_H */

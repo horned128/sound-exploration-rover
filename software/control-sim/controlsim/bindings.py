@@ -307,6 +307,10 @@ def library() -> ctypes.CDLL:
         ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32,
     ]
     handle.acoustic_identifier_find_peak_bin.restype = ctypes.c_uint8
+    handle.acoustic_identifier_consensus_peak_bin.argtypes = [
+        ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32,
+    ]
+    handle.acoustic_identifier_consensus_peak_bin.restype = ctypes.c_uint8
     handle.acoustic_identifier_build_weights.argtypes = [
         ctypes.c_uint8, ctypes.POINTER(ctypes.c_float),
     ]
@@ -320,6 +324,10 @@ def library() -> ctypes.CDLL:
         ctypes.POINTER(ctypes.c_int8), ctypes.POINTER(ctypes.c_int8), ctypes.POINTER(ctypes.c_float),
     ]
     handle.acoustic_identifier_cosine_distance.restype = BOOL
+    handle.acoustic_identifier_isolated_sample_find.argtypes = [
+        ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32),
+    ]
+    handle.acoustic_identifier_isolated_sample_find.restype = BOOL
     handle.acoustic_identifier_leave_one_out_threshold.argtypes = [
         ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32,
         ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float),

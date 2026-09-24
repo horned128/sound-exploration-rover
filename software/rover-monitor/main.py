@@ -11,6 +11,8 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
+from diagnostics import is_private_diagnostic_record
+
 # ==========================================
 # 設定: データ転送先 (UDP)
 # ==========================================
@@ -65,6 +67,7 @@ logger.setLevel(logging.INFO)
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(logging.Formatter("[%(levelname)s] %(asctime)s - %(message)s"))
 logger.addHandler(console_handler)
+
 
 # ==========================================
 # WebSocket マネージャー
@@ -139,6 +142,10 @@ class UDPReceiverAndForwarder(asyncio.DatagramProtocol):
             record = {"recorded_at": now_iso(), "payload": parsed}
 
         log_file.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+
+        # 走行中の特徴量・保存見本はJSONL専用で、通常状態WebSocketへ流さない。
+        if is_private_diagnostic_record(parsed):
+            return
 
         # 2. 指定された外部システムへデータをそのまま転送 (UDP Forwarding)
         for dest_ip, dest_port in FORWARD_DESTINATIONS:

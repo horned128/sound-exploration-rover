@@ -71,6 +71,7 @@ IMPORT volatile UW g_task_acoustic_link_observation_age_ms; /**< 観測経過時
 IMPORT volatile UW g_task_acoustic_link_telemetry_send_count;
 /**< 診断送信BUSY数（Live Watch用） */
 IMPORT volatile UW g_task_acoustic_link_telemetry_busy_count;
+IMPORT volatile UW g_task_acoustic_link_diagnostic_drop_count; /**< 低優先度診断世代の破棄数 */
 /**< 最新音響観測（Live Watch用） */
 IMPORT volatile acoustic_observation_t g_task_acoustic_link_observation;
 IMPORT volatile fsp_err_t g_task_acoustic_link_last_error;  /**< 最終USBエラー（Live Watch用） */

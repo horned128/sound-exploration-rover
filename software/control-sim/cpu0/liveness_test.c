@@ -16,8 +16,10 @@ static jmp_buf done;
 static UD now;
 static UW count, loops, stage, publications, freeze_publications;
 static int mode, failures, recovery_loops;
+static int clear_calls, save_calls, infer_reset_calls, green_level;
 static rover_motion_target_t target;
-bsp_leds_t g_bsp_leds={0,NULL};
+static const bsp_io_port_pin_t led_pins[]={10,11};
+bsp_leds_t g_bsp_leds={2,led_pins};
 volatile UW g_task_acoustic_link_feature_generation;
 volatile UW g_task_infer_feature_generation;
 BOOL actuator_ipc_client_status_get(actuator_status_t * status) {
@@ -39,31 +41,62 @@ static const ioport_api_t io_api={.pinRead=pin_read};
 const ioport_instance_t g_ioport={NULL,&io_api};
 void R_BSP_PinAccessEnable(void) {}
 void R_BSP_PinAccessDisable(void) {}
-void R_BSP_PinWrite(bsp_io_port_pin_t pin,bsp_io_level_t level) { (void)pin;(void)level; }
-prototype_storage_result_t prototype_storage_init(void) { return CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED; }
+void R_BSP_PinWrite(bsp_io_port_pin_t pin,bsp_io_level_t level) {
+    if(pin==11)green_level=level;
+}
+prototype_storage_result_t prototype_storage_init(void) {
+    return mode>=3 ? CPU0_PROTOTYPE_STORAGE_OK : CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
+}
 prototype_storage_result_t prototype_storage_load(prototype_storage_data_t *data) {
-    (void)data;return CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
+    if(mode>=3) {
+        *data=(prototype_storage_data_t){.sample_count=5,.generation=18};
+        return CPU0_PROTOTYPE_STORAGE_OK;
+    }
+    return CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
+}
+prototype_storage_result_t prototype_storage_clear(void) {
+    clear_calls++;
+    return mode==4 ? CPU0_PROTOTYPE_STORAGE_BLANK_ERROR : CPU0_PROTOTYPE_STORAGE_OK;
 }
 prototype_storage_result_t prototype_storage_save(prototype_storage_data_t *data) {
-    (void)data;return CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
+    assert(data->sample_count==5);
+    save_calls++;
+    return CPU0_PROTOTYPE_STORAGE_OK;
 }
 ER task_acoustic_link_feature_get(acoustic_feature_patch_t *patch,UW *generation) {
     (void)patch;(void)generation;return E_NOEXS;
 }
 ER task_infer_result_get(task_infer_result_t *result) {
-    (void)result;return E_NOEXS;
+    if(mode==3 && loops>=12) {
+        *result=(task_infer_result_t){.feature_generation=loops+1,.summary_valid=TRUE};
+        return E_OK;
+    }
+    return E_NOEXS;
 }
 ER task_infer_prototype_set(const prototype_storage_data_t *data,BOOL storage_valid) {
-    (void)data;(void)storage_valid;return E_NOEXS;
+    (void)data;
+    if(!storage_valid)infer_reset_calls++;
+    return E_OK;
 }
 ER task_infer_background_export(prototype_storage_data_t *data) {
-    (void)data;return E_NOEXS;
+    (void)data;return mode==3 ? E_OK : E_NOEXS;
 }
 
 UB acoustic_identifier_find_peak_bin(const B *samples, UW sample_count) {
     (void)samples;
     (void)sample_count;
     return 0U;
+}
+
+UB acoustic_identifier_consensus_peak_bin(const B *samples, UW sample_count) {
+    return acoustic_identifier_find_peak_bin(samples, sample_count);
+}
+
+BOOL acoustic_identifier_isolated_sample_find(const B *samples, UW sample_count, UW *index) {
+    (void)samples;
+    (void)sample_count;
+    (void)index;
+    return FALSE;
 }
 
 void acoustic_identifier_build_weights(UB peak_bin, float *weights) {
@@ -85,7 +118,7 @@ BOOL acoustic_identifier_leave_one_out_threshold(const B *samples,
     if (threshold != NULL) {
         *threshold=0.0F;
     }
-    return FALSE;
+    return mode==3 ? TRUE : FALSE;
 }
 
 ID tk_cre_tsk(const T_CTSK *c) { entry=c->task;return 1; }
@@ -123,7 +156,46 @@ ER task_acoustic_link_snapshot_get(task_acoustic_link_snapshot_t *out) {
 }
 ER task_command_set_target(const rover_motion_target_t *in) { target=*in;publications++;return 0; }
 ER tk_dly_tsk(INT delay) {
+    if(delay==100 && mode>=3) {
+        assert(target.left_target_rpm==0 && target.right_target_rpm==0 && target.emergency_stop);
+        now+=delay;return E_OK;
+    }
     assert(delay==50);loops++;assert(loops<600);
+    if(mode>=3) {
+        if(loops==3) {
+            assert(g_task_think_storage_valid && green_level==BSP_IO_LEVEL_HIGH);
+            assert(task_think_learning_request(TASK_THINK_LEARNING_COMMAND_START)==E_OK);
+        }
+        if(loops==4) {
+            assert(clear_calls==1 && infer_reset_calls>=1);
+            assert(!g_task_think_storage_valid);
+            assert(g_task_think_learning_mode==(mode==3));
+            if(mode==4)assert(g_task_think_storage_result==CPU0_PROTOTYPE_STORAGE_BLANK_ERROR);
+        }
+        if(mode==3 && loops==11) {
+            assert(g_task_think_learning_samples==0 && green_level==BSP_IO_LEVEL_LOW);
+        }
+        if(mode==3 && loops==19) {
+            assert(g_task_think_learning_samples==5 && green_level==BSP_IO_LEVEL_LOW);
+        }
+        if(mode==3 && loops==21) {
+            assert(g_task_think_learning_samples==5 && green_level==BSP_IO_LEVEL_HIGH);
+        }
+        if(mode==3 && loops==25) {
+            assert(g_task_think_learning_samples==5);
+            assert(task_think_learning_request(TASK_THINK_LEARNING_COMMAND_COMMIT)==E_OK);
+        }
+        if(mode==3 && loops==26) {
+            assert(save_calls==1 && g_task_think_storage_valid && !g_task_think_learning_mode);
+            assert(green_level==BSP_IO_LEVEL_HIGH);
+            longjmp(done,1);
+        }
+        if(mode==4 && loops==20) {
+            assert(green_level==BSP_IO_LEVEL_LOW);
+            longjmp(done,1);
+        }
+        now+=delay;return 0;
+    }
     if(stage==0 && target.left_target_rpm!=0) {
         stage=1;freeze_publications=publications;
     } else if(stage==1 && !g_task_think_sensor_fresh) {
@@ -163,5 +235,12 @@ int main(void) {
         if(setjmp(done)==0)entry(0,NULL);
         assert(stage==2);task_think_delete();
     }
-    puts("sensor liveness: frozen age=0, deadline, clock/read failure, wrap, stop and recovery passed");
+    for(mode=3;mode<5;mode++) {
+        now=count=loops=stage=publications=clear_calls=save_calls=infer_reset_calls=0;
+        green_level=BSP_IO_LEVEL_LOW;
+        assert(task_think_create()==0 && task_think_start()==0);
+        if(setjmp(done)==0)entry(0,NULL);
+        task_think_delete();
+    }
+    puts("sensor liveness and learning UI: stop/recovery, MRAM reset, LED, save and failure passed");
 }

@@ -23,6 +23,10 @@
 #define CPU0_AUDIO_GET_LINE_CODING         /**< USBデバイスから返すLine Coding要求値 */ \
     (USB_CDC_GET_LINE_CODING | USB_DEV_TO_HOST | USB_CLASS | USB_INTERFACE)
 #define CPU0_AUDIO_LINE_CODING_LENGTH      (7U)             /**< USB Line Codingデータ長[byte] */
+#define CPU0_AUDIO_DIAGNOSTIC_QUEUE_CAPACITY (2U)           /**< J7内部USB診断世代queue */
+#define CPU0_AUDIO_DIAGNOSTIC_CHUNK_COUNT (3U)              /**< 192次元要約chunk数 */
+#define CPU0_AUDIO_DIAGNOSTIC_KIND_SUMMARY (0U)
+#define CPU0_AUDIO_DIAGNOSTIC_KIND_PROFILE (1U)
 
 LOCAL void task_acoustic_link_entry(INT stacd, void * exinf); /* 音響リンクタスク本体 */
 LOCAL UW task_acoustic_link_monotonic_ms(void);             /* カーネル単調時刻取得 */
@@ -37,6 +41,12 @@ LOCAL fsp_err_t task_acoustic_link_actuator_telemetry_start(void); /* CPU1診断
 LOCAL fsp_err_t task_acoustic_link_pose_telemetry_start(void); /* オドメトリ診断Bulk OUT開始 */
 LOCAL fsp_err_t task_acoustic_link_nav_diagnostics_start(void); /* 音源ナビ診断Bulk OUT開始 */
 LOCAL fsp_err_t task_acoustic_link_telemetry_start(void);   /* USB Bulk OUT開始 */
+LOCAL void task_acoustic_link_diagnostic_queue_update(void); /* 新しい特徴量世代をqueueへ登録 */
+LOCAL void task_acoustic_link_profile_auto_queue(UW now_ms); /* 新しいprofileをqueueへ登録 */
+LOCAL fsp_err_t task_acoustic_link_diagnostic_send(void);   /* J7へ診断snapshot/chunk送信 */
+LOCAL fsp_err_t task_acoustic_link_profile_send(void);     /* J7へ保存見本chunk送信 */
+LOCAL void task_acoustic_link_diagnostic_write_complete(void); /* 診断frame完了処理 */
+LOCAL void task_acoustic_link_diagnostic_drop_current(void); /* USB timeout時の診断破棄 */
 LOCAL void task_acoustic_link_receive(UW length);           /* USB受信データ処理 */
 LOCAL void task_acoustic_link_frame_handle(const acoustic_frame_t * p_frame); /* 正常フレーム反映 */
 LOCAL BOOL task_acoustic_link_sequence_accept(UW sequence); /* sequence新旧判定 */
@@ -67,6 +77,8 @@ LOCAL UW audio_write_started_at_ms;                         /**< Bulk OUT要求�
 LOCAL BOOL audio_actuator_telemetry_pending;                /**< CPU1診断送信待ち */
 LOCAL BOOL audio_pose_telemetry_pending;                    /**< オドメトリ診断送信待ち */
 LOCAL BOOL audio_nav_diagnostics_pending;                   /**< 音源ナビ診断送信待ち */
+LOCAL BOOL audio_diagnostic_write_pending;                  /**< 診断フレーム送信中 */
+LOCAL UB audio_diagnostic_write_kind;                       /**< 完了対象（要約/見本） */
 LOCAL BOOL audio_control_pending;                           /**< CDC class request実行中 */
 LOCAL BOOL audio_sequence_valid;                            /**< sequence初回受信済み */
 LOCAL BOOL audio_boot_id_valid;                             /**< boot ID初回受信済み */
@@ -83,6 +95,7 @@ LOCAL UW audio_telemetry_sequence;                          /**< 診断送信seq
 LOCAL UW audio_actuator_telemetry_sequence;                 /**< CPU1診断送信sequence */
 LOCAL UW audio_pose_telemetry_sequence;                     /**< オドメトリ診断送信sequence */
 LOCAL UW audio_nav_diagnostics_sequence;                    /**< 音源ナビ診断送信sequence */
+LOCAL UW audio_diagnostic_sequence;                         /**< AI Lab internal USB frame sequence */
 LOCAL UW audio_last_telemetry_ms;                           /**< 最終診断送信要求時刻 */
 LOCAL UW audio_actuator_status_at_ms;                       /**< CPU1状態最終更新時刻 */
 LOCAL UW audio_actuator_status_sequence;                    /**< CPU1状態最終sequence */
@@ -105,6 +118,29 @@ LOCAL UB audio_control_dummy;                               /**< data無しcontr
 LOCAL UB audio_rx_buffer[CPU0_AUDIO_USB_RX_SIZE];           /**< USB Bulk INバッファ */
 /**< USB Bulk OUTバッファ */
 LOCAL UB audio_tx_buffer[ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE]; /**< USB送信用フレームバッファ */
+
+typedef struct st_audio_diagnostic_event {
+    acoustic_ai_lab_snapshot_t snapshot;                    /**< 当該特徴量世代のsnapshot */
+    B summary[CPU0_ACOUSTIC_SUMMARY_DIMENSION];              /**< 192次元要約 */
+    UW generation;                                           /**< 特徴量世代 */
+    UB chunk_index;                                          /**< 次の要約chunk */
+    BOOL snapshot_pending;                                   /**< snapshot未送信 */
+} audio_diagnostic_event_t;
+LOCAL audio_diagnostic_event_t audio_diagnostic_queue[CPU0_AUDIO_DIAGNOSTIC_QUEUE_CAPACITY]; /**< bounded queue */
+LOCAL UB audio_diagnostic_queue_head;
+LOCAL UB audio_diagnostic_queue_count;
+LOCAL UW audio_diagnostic_last_generation;
+LOCAL BOOL audio_diagnostic_generation_valid;
+LOCAL UW audio_diagnostic_drop_count;
+LOCAL prototype_storage_data_t audio_profile_data;
+LOCAL BOOL audio_profile_valid;
+LOCAL BOOL audio_profile_pending;
+LOCAL UB audio_profile_sample_index;
+LOCAL UB audio_profile_chunk_index;
+LOCAL UW audio_profile_last_sent_generation;
+LOCAL BOOL audio_profile_sent_generation_valid;
+LOCAL UW audio_profile_last_check_ms;
+LOCAL BOOL audio_profile_check_valid;
 
 EXPORT volatile BOOL g_task_acoustic_link_usb_configured;   /**< USB列挙状態 */
 /**< CDC初期化段階 */
@@ -136,6 +172,7 @@ EXPORT volatile UW g_task_acoustic_link_observation_age_ms; /**< 観測経過時
 EXPORT volatile UW g_task_acoustic_link_telemetry_send_count;
 /**< 診断送信BUSY数 */
 EXPORT volatile UW g_task_acoustic_link_telemetry_busy_count;
+EXPORT volatile UW g_task_acoustic_link_diagnostic_drop_count; /**< 低優先度診断世代の破棄数 */
 /**< 最新音響観測 */
 EXPORT volatile acoustic_observation_t g_task_acoustic_link_observation;
 EXPORT volatile fsp_err_t g_task_acoustic_link_last_error;  /**< 最終USBエラー */
@@ -168,6 +205,24 @@ EXPORT app_fault_t task_acoustic_link_create(void) {
     audio_write_started_at_ms = 0U;
     audio_actuator_telemetry_pending = FALSE;
     audio_nav_diagnostics_pending = FALSE;
+    audio_diagnostic_write_pending = FALSE;
+    audio_diagnostic_write_kind = CPU0_AUDIO_DIAGNOSTIC_KIND_SUMMARY;
+    audio_diagnostic_queue_head = 0U;
+    audio_diagnostic_queue_count = 0U;
+    audio_diagnostic_last_generation = 0U;
+    audio_diagnostic_generation_valid = FALSE;
+    audio_diagnostic_drop_count = 0U;
+    memset(audio_diagnostic_queue, 0, sizeof(audio_diagnostic_queue));
+    memset(&audio_profile_data, 0, sizeof(audio_profile_data));
+    audio_profile_valid = FALSE;
+    audio_profile_pending = FALSE;
+    audio_profile_sample_index = 0U;
+    audio_profile_chunk_index = 0U;
+    audio_profile_last_sent_generation = 0U;
+    audio_profile_sent_generation_valid = FALSE;
+    audio_profile_last_check_ms = 0U;
+    audio_profile_check_valid = FALSE;
+    audio_diagnostic_sequence = 0U;
     audio_control_pending = FALSE;
     audio_now_ms = 0U;
     audio_last_recovery_ms = 0U;
@@ -194,6 +249,7 @@ EXPORT app_fault_t task_acoustic_link_create(void) {
     g_task_acoustic_link_feature_generation = 0U;
     g_task_acoustic_link_telemetry_send_count = 0U;
     g_task_acoustic_link_telemetry_busy_count = 0U;
+    g_task_acoustic_link_diagnostic_drop_count = 0U;
     g_task_acoustic_link_last_error = FSP_SUCCESS;
     task_acoustic_link_link_reset();
 
@@ -260,6 +316,21 @@ EXPORT void task_acoustic_link_delete(void) {
  * @details USB切断後の古い観測が走行判断へ残らないよう無効化する。
  * ================================================================= */
 LOCAL void task_acoustic_link_link_reset(void) {
+    if ((audio_diagnostic_queue_count > 0U) || audio_profile_pending || audio_diagnostic_write_pending) {
+        audio_diagnostic_drop_count += audio_diagnostic_queue_count;
+        if (audio_profile_pending) {
+            audio_diagnostic_drop_count++;
+        }
+        if (audio_diagnostic_write_pending && (0U == audio_diagnostic_queue_count) && !audio_profile_pending) {
+            audio_diagnostic_drop_count++;
+        }
+        g_task_acoustic_link_diagnostic_drop_count = audio_diagnostic_drop_count;
+    }
+    audio_diagnostic_queue_head = 0U;
+    audio_diagnostic_queue_count = 0U;
+    audio_diagnostic_write_pending = FALSE;
+    audio_profile_pending = FALSE;
+    audio_profile_check_valid = FALSE;
     g_task_acoustic_link_usb_configured = FALSE;
     g_task_acoustic_link_usb_state = audio_usb_open ? CPU0_AUDIO_USB_STATE_WAIT_DEVICE : CPU0_AUDIO_USB_STATE_CLOSED;
     g_task_acoustic_link_device_address = 0U;
@@ -283,6 +354,7 @@ LOCAL void task_acoustic_link_link_reset(void) {
     audio_actuator_telemetry_sequence = 0U;
     audio_pose_telemetry_sequence = 0U;
     audio_nav_diagnostics_sequence = 0U;
+    audio_diagnostic_sequence = 0U;
     audio_last_telemetry_ms = audio_now_ms;
     audio_actuator_status_at_ms = audio_now_ms;
     audio_actuator_status_sequence = 0U;
@@ -508,6 +580,7 @@ LOCAL fsp_err_t task_acoustic_link_read_start(void) {
 LOCAL BOOL task_acoustic_link_write_in_progress(void) {
     if (audio_write_pending) {
         if ((audio_now_ms - audio_write_started_at_ms) > 1000U) {
+            task_acoustic_link_diagnostic_drop_current();
             audio_write_pending = FALSE;
             audio_actuator_telemetry_pending = FALSE;
             audio_pose_telemetry_pending = FALSE;
@@ -709,6 +782,239 @@ LOCAL fsp_err_t task_acoustic_link_nav_diagnostics_start(void) {
 }
 
 /** =================================================================*
+ * @brief 新しい推論generationのsnapshotと192次元要約を低優先度queueへ登録
+ * @details queue満杯ならイベントを破棄してcountを増やす。USB観測・走行制御を待たせない。
+ * ================================================================= */
+LOCAL void task_acoustic_link_diagnostic_queue_update(void) {
+    if (audio_diagnostic_generation_valid &&
+        (audio_diagnostic_last_generation == g_task_infer_feature_generation)) {
+        return;
+    }
+
+    task_infer_result_t infer = {0};
+    if (E_OK != task_infer_result_get(&infer)) {
+        return;
+    }
+    if (infer.feature_generation != g_task_infer_feature_generation) {
+        /* 推論結果と公開generationが揃ったsnapshotと要約を一体でqueueする。 */
+        return;
+    }
+    if (audio_diagnostic_generation_valid) {
+        W const generation_delta = (W) (infer.feature_generation - audio_diagnostic_last_generation);
+        if (generation_delta <= 0) {
+            return;
+        }
+        if (generation_delta > 1) {
+            audio_diagnostic_drop_count += (UW) (generation_delta - 1);
+            g_task_acoustic_link_diagnostic_drop_count = audio_diagnostic_drop_count;
+        }
+    }
+    audio_diagnostic_generation_valid = TRUE;
+    audio_diagnostic_last_generation = infer.feature_generation;
+    if (audio_diagnostic_queue_count >= CPU0_AUDIO_DIAGNOSTIC_QUEUE_CAPACITY) {
+        audio_diagnostic_drop_count++;
+        g_task_acoustic_link_diagnostic_drop_count = audio_diagnostic_drop_count;
+        return;
+    }
+
+    UB const tail = (UB) ((audio_diagnostic_queue_head + audio_diagnostic_queue_count) %
+                          CPU0_AUDIO_DIAGNOSTIC_QUEUE_CAPACITY);
+    audio_diagnostic_event_t * const p_event = &audio_diagnostic_queue[tail];
+    memset(p_event, 0, sizeof(*p_event));
+    if (E_OK != acoustic_ai_lab_snapshot_build(&infer, &p_event->snapshot)) {
+        audio_diagnostic_drop_count++;
+        g_task_acoustic_link_diagnostic_drop_count = audio_diagnostic_drop_count;
+        return;
+    }
+    p_event->generation = infer.feature_generation;
+    p_event->snapshot.feature_generation = infer.feature_generation;
+    p_event->snapshot_pending = TRUE;
+    memcpy(p_event->summary, infer.summary, sizeof(p_event->summary));
+    audio_diagnostic_queue_count++;
+}
+
+/** =================================================================*
+ * @brief 起動・再学習後の保存見本generationを送信queueへ登録
+ * @param[in] now_ms 単調時刻[ms]
+ * ================================================================= */
+LOCAL void task_acoustic_link_profile_auto_queue(UW now_ms) {
+    if (!g_task_think_storage_valid) {
+        /* 学習開始でMRAMを消した後、古い送信待ちprofileと世代記録を残さない。 */
+        audio_profile_pending = FALSE;
+        audio_profile_valid = FALSE;
+        audio_profile_sent_generation_valid = FALSE;
+        memset(&audio_profile_data, 0, sizeof(audio_profile_data));
+        return;
+    }
+    if (audio_profile_pending ||
+        (audio_profile_check_valid && ((now_ms - audio_profile_last_check_ms) < CPU0_AUDIO_TELEMETRY_PERIOD_MS))) {
+        return;
+    }
+    audio_profile_check_valid = TRUE;
+    audio_profile_last_check_ms = now_ms;
+    if ((E_OK != task_infer_prototype_get(&audio_profile_data, &audio_profile_valid)) ||
+        !audio_profile_valid || (0U == audio_profile_data.sample_count)) {
+        return;
+    }
+    if (audio_profile_sent_generation_valid &&
+        (audio_profile_last_sent_generation == audio_profile_data.generation)) {
+        return;
+    }
+    audio_profile_sample_index = 0U;
+    audio_profile_chunk_index = 0U;
+    audio_profile_pending = TRUE;
+}
+
+/** =================================================================*
+ * @brief J7へAI Lab snapshotまたは64-byte要約chunkを非同期送信
+ * @return USB FSP結果
+ * ================================================================= */
+LOCAL fsp_err_t task_acoustic_link_diagnostic_send(void) {
+    if (0U == audio_diagnostic_queue_count) {
+        return FSP_SUCCESS;
+    }
+    audio_diagnostic_event_t * const p_event = &audio_diagnostic_queue[audio_diagnostic_queue_head];
+    size_t length = 0U;
+    if (p_event->snapshot_pending) {
+        length = acoustic_protocol_encode_ai_lab_snapshot(audio_diagnostic_sequence, audio_now_ms,
+                                                          &p_event->snapshot, audio_tx_buffer,
+                                                          sizeof(audio_tx_buffer));
+    } else {
+        UB payload[ACOUSTIC_AI_LAB_SUMMARY_CHUNK_PAYLOAD_SIZE] = {0};
+        payload[0] = (UB) p_event->generation;
+        payload[1] = (UB) (p_event->generation >> 8U);
+        payload[2] = (UB) (p_event->generation >> 16U);
+        payload[3] = (UB) (p_event->generation >> 24U);
+        payload[4] = p_event->chunk_index;
+        payload[5] = CPU0_AUDIO_DIAGNOSTIC_CHUNK_COUNT;
+        payload[6] = 1U;
+        payload[7] = (audio_diagnostic_drop_count > UINT8_MAX) ? UINT8_MAX : (UB) audio_diagnostic_drop_count;
+        memcpy(&payload[8], &p_event->summary[p_event->chunk_index * ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE],
+               ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE);
+        length = acoustic_protocol_encode(ACOUSTIC_MESSAGE_AI_LAB_SUMMARY_CHUNK, audio_diagnostic_sequence,
+                                          audio_now_ms, payload, sizeof(payload), audio_tx_buffer,
+                                          sizeof(audio_tx_buffer));
+    }
+    if (0U == length) {
+        return FSP_ERR_INVALID_SIZE;
+    }
+
+    fsp_err_t const err = g_usb_on_usb.write(&g_basic0_ctrl, audio_tx_buffer, (UW) length, audio_device_address);
+    if (FSP_SUCCESS == err) {
+        audio_write_pending = TRUE;
+        audio_write_started_at_ms = audio_now_ms;
+        audio_diagnostic_write_pending = TRUE;
+        audio_diagnostic_write_kind = CPU0_AUDIO_DIAGNOSTIC_KIND_SUMMARY;
+        audio_diagnostic_sequence++;
+    } else if (FSP_ERR_USB_BUSY == err) {
+        g_task_acoustic_link_telemetry_busy_count++;
+    }
+    return err;
+}
+
+/** =================================================================*
+ * @brief J7へprofileの64-byte chunkを非同期送信
+ * @return USB FSP結果
+ * ================================================================= */
+LOCAL fsp_err_t task_acoustic_link_profile_send(void) {
+    if (!audio_profile_pending) {
+        return FSP_SUCCESS;
+    }
+    UB payload[ACOUSTIC_AI_LAB_PROFILE_CHUNK_PAYLOAD_SIZE] = {0};
+    payload[0] = (UB) audio_profile_data.generation;
+    payload[1] = (UB) (audio_profile_data.generation >> 8U);
+    payload[2] = (UB) (audio_profile_data.generation >> 16U);
+    payload[3] = (UB) (audio_profile_data.generation >> 24U);
+    payload[4] = audio_profile_sample_index;
+    payload[5] = audio_profile_chunk_index;
+    payload[6] = CPU0_AUDIO_DIAGNOSTIC_CHUNK_COUNT;
+    payload[7] = audio_profile_data.sample_count;
+    memcpy(&payload[8],
+           &audio_profile_data.samples[audio_profile_sample_index]
+                                     [audio_profile_chunk_index * ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE],
+           ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE);
+    size_t const length = acoustic_protocol_encode(ACOUSTIC_MESSAGE_AI_LAB_PROFILE_CHUNK,
+                                                   audio_diagnostic_sequence, audio_now_ms, payload,
+                                                   sizeof(payload), audio_tx_buffer, sizeof(audio_tx_buffer));
+    if (0U == length) {
+        return FSP_ERR_INVALID_SIZE;
+    }
+
+    fsp_err_t const err = g_usb_on_usb.write(&g_basic0_ctrl, audio_tx_buffer, (UW) length, audio_device_address);
+    if (FSP_SUCCESS == err) {
+        audio_write_pending = TRUE;
+        audio_write_started_at_ms = audio_now_ms;
+        audio_diagnostic_write_pending = TRUE;
+        audio_diagnostic_write_kind = CPU0_AUDIO_DIAGNOSTIC_KIND_PROFILE;
+        audio_diagnostic_sequence++;
+    } else if (FSP_ERR_USB_BUSY == err) {
+        g_task_acoustic_link_telemetry_busy_count++;
+    }
+    return err;
+}
+
+/** =================================================================*
+ * @brief 正常完了した診断frameをqueueから進める
+ * ================================================================= */
+LOCAL void task_acoustic_link_diagnostic_write_complete(void) {
+    if (!audio_diagnostic_write_pending) {
+        return;
+    }
+    audio_diagnostic_write_pending = FALSE;
+    if (CPU0_AUDIO_DIAGNOSTIC_KIND_SUMMARY == audio_diagnostic_write_kind) {
+        if (0U == audio_diagnostic_queue_count) {
+            return;
+        }
+        audio_diagnostic_event_t * const p_event = &audio_diagnostic_queue[audio_diagnostic_queue_head];
+        if (p_event->snapshot_pending) {
+            p_event->snapshot_pending = FALSE;
+            return;
+        }
+        p_event->chunk_index++;
+        if (CPU0_AUDIO_DIAGNOSTIC_CHUNK_COUNT == p_event->chunk_index) {
+            audio_diagnostic_queue_head = (UB) ((audio_diagnostic_queue_head + 1U) %
+                                                CPU0_AUDIO_DIAGNOSTIC_QUEUE_CAPACITY);
+            audio_diagnostic_queue_count--;
+        }
+        return;
+    }
+
+    audio_profile_chunk_index++;
+    if (CPU0_AUDIO_DIAGNOSTIC_CHUNK_COUNT == audio_profile_chunk_index) {
+        audio_profile_chunk_index = 0U;
+        audio_profile_sample_index++;
+        if (audio_profile_sample_index >= audio_profile_data.sample_count) {
+            audio_profile_pending = FALSE;
+            audio_profile_last_sent_generation = audio_profile_data.generation;
+            audio_profile_sent_generation_valid = TRUE;
+        }
+    }
+}
+
+/** =================================================================*
+ * @brief USB write timeout/失敗時に不完全な診断イベントを捨てる
+ * ================================================================= */
+LOCAL void task_acoustic_link_diagnostic_drop_current(void) {
+    if (!audio_diagnostic_write_pending) {
+        return;
+    }
+    audio_diagnostic_write_pending = FALSE;
+    audio_diagnostic_drop_count++;
+    g_task_acoustic_link_diagnostic_drop_count = audio_diagnostic_drop_count;
+    if (CPU0_AUDIO_DIAGNOSTIC_KIND_SUMMARY == audio_diagnostic_write_kind) {
+        if (audio_diagnostic_queue_count > 0U) {
+            audio_diagnostic_queue_head = (UB) ((audio_diagnostic_queue_head + 1U) %
+                                                CPU0_AUDIO_DIAGNOSTIC_QUEUE_CAPACITY);
+            audio_diagnostic_queue_count--;
+        }
+    } else {
+        audio_profile_pending = FALSE;
+        audio_profile_sample_index = 0U;
+        audio_profile_chunk_index = 0U;
+    }
+}
+
+/** =================================================================*
  * @brief  CPU0診断情報のUSB Bulk OUT開始
  * @details 音響受信を止めず、最新判断とIPC指令をESP32へ返送する。
  * @return FSPエラーコード
@@ -730,7 +1036,15 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
     if (audio_nav_diagnostics_pending) {
         return task_acoustic_link_nav_diagnostics_start();
     }
+    task_acoustic_link_diagnostic_queue_update();
+    task_acoustic_link_profile_auto_queue(audio_now_ms);
     if ((audio_now_ms - audio_last_telemetry_ms) < CPU0_AUDIO_TELEMETRY_PERIOD_MS) {
+        if (audio_diagnostic_queue_count > 0U) {
+            return task_acoustic_link_diagnostic_send();
+        }
+        if (audio_profile_pending) {
+            return task_acoustic_link_profile_send();
+        }
         return FSP_SUCCESS;
     }
 
@@ -1103,9 +1417,11 @@ LOCAL void task_acoustic_link_entry(INT stacd, void * exinf) {
             } else if (audio_usb_open && (USB_STATUS_WRITE_COMPLETE == event)) {
                 audio_write_pending = FALSE;
                 if ((USB_CLASS_HCDC == event_info.type) && (FSP_SUCCESS == event_info.status)) {
+                    task_acoustic_link_diagnostic_write_complete();
                     g_task_acoustic_link_telemetry_send_count++;
                     audio_continuous_error_count = 0U;
                 } else if (USB_CLASS_HCDC == event_info.type) {
+                    task_acoustic_link_diagnostic_drop_current();
                     g_task_acoustic_link_last_error = event_info.status;
                     audio_continuous_error_count++;
                 }

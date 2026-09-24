@@ -53,6 +53,8 @@ ESP32S3を書き込んでRover Monitorを30秒以上動かすと、テレメト�
 画面ヘッダーにも記録中のファイル名が表示されます。
 CPU0が未接続で`cpu_valid:false`の場合も、`esp_audio`診断は記録されます。
 
+走行中のAI診断は通常状態JSONと別datagramで受信し、`record_type`が`acoustic_diagnostic`の行に特徴量generationごとの192次元要約と推論結果・距離を、`acoustic_sample`の行に起動時／再学習後の保存見本を記録します。baseline制御では`match_state=UNKNOWN`、`reason=baseline_policy`です。これらの行はJSONL専用で、通常状態WebSocketには転送しません。
+
 | 項目 | 合格条件 |
 |---|---|
 | `esp_audio.self_test_pass` | 常に`true` |

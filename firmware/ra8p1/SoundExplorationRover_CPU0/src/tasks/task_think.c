@@ -325,7 +325,7 @@ EXPORT ER task_think_restart_request(void) {
 }
 
 /** =================================================================*
- * @brief 新しい現場見本の収集を開始
+ * @brief 旧見本をRAM/MRAMから消して新しい現場見本の収集を開始
  * ================================================================= */
 LOCAL void task_think_learning_start(void) {
     if (g_task_think_learning_mode) {
@@ -334,14 +334,39 @@ LOCAL void task_think_learning_start(void) {
     g_task_think_learning_mode = TRUE;
     g_task_think_learning_samples = 0U;
     learning_last_feature_generation = g_task_infer_feature_generation;
-    storage_data.sample_count = 0U;
-    memset(storage_data.samples, 0, sizeof(storage_data.samples));
+    g_task_think_storage_valid = FALSE;
+    memset(&storage_data, 0, sizeof(storage_data));
+    /* MRAM消去中も旧見本を推論に使わせない。 */
+    if (E_OK != task_infer_prototype_set(&storage_data, FALSE)) {
+        g_task_think_storage_result = CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
+        g_task_think_learning_mode = FALSE;
+        return;
+    }
+    /* MRAM書込み中はCPU1も停止する。走行中のSW1操作に備え、先に
+     * emergency stopを指令し、優先度の高い指令タスクが送る時間を確保する。 */
+    if (E_OK != task_think_publish_motion(0, FALSE, 0, 0, FALSE, TRUE)) {
+        g_task_think_fault_flags |= APP_FAULT_TARGET_UPDATE;
+        g_task_think_storage_result = CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
+        g_task_think_learning_mode = FALSE;
+        return;
+    }
+    if (E_OK != tk_dly_tsk(CPU0_COMMAND_PERIOD_MS * 2U)) {
+        g_task_think_storage_result = CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
+        g_task_think_learning_mode = FALSE;
+        return;
+    }
+    g_task_think_storage_result = prototype_storage_clear();
+    if (CPU0_PROTOTYPE_STORAGE_OK != g_task_think_storage_result) {
+        g_task_think_learning_mode = FALSE;
+    } else {
+        /* 初期化待ちの間に完成した特徴量は新しい学習見本へ混ぜない。 */
+        learning_last_feature_generation = g_task_infer_feature_generation;
+    }
 }
 
 /** =================================================================*
  * @brief 完成した5見本を検証してMRAMへ保存
- * @details 見本が不足した保存要求は収集状態を維持する。以前の有効なMRAM
- *          見本は、保存成功まで推論タスクから取り除かれない。
+ * @details 見本が不足した保存要求は収集状態を維持する。
  * ================================================================= */
 LOCAL void task_think_learning_commit(void) {
     if (!g_task_think_learning_mode) {
@@ -432,6 +457,21 @@ LOCAL void task_think_learning_capture(const task_acoustic_link_snapshot_t * p_s
     memcpy(storage_data.samples[g_task_think_learning_samples], result.summary,
            sizeof(storage_data.samples[g_task_think_learning_samples]));
     g_task_think_learning_samples++;
+    if (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT == g_task_think_learning_samples) {
+        UW isolated_index = 0U;
+        if (acoustic_identifier_isolated_sample_find((const B *) storage_data.samples,
+                                                    g_task_think_learning_samples, &isolated_index)) {
+            /* 明確な異音が混ざった場合は保存せず、次の特徴量で1見本を取り直す。 */
+            if (isolated_index != (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT - 1U)) {
+                memcpy(storage_data.samples[isolated_index],
+                       storage_data.samples[CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT - 1U],
+                       sizeof(storage_data.samples[isolated_index]));
+            }
+            memset(storage_data.samples[CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT - 1U], 0,
+                   sizeof(storage_data.samples[0]));
+            g_task_think_learning_samples--;
+        }
+    }
     storage_data.sample_count = g_task_think_learning_samples;
 }
 
@@ -615,14 +655,10 @@ LOCAL void task_think_led_update(UW state_elapsed_ms, UW heartbeat_elapsed_ms, U
         UW const pattern_ms = pulse_window_ms + CPU0_LED_FAULT_GAP_MS;
         UW const position_ms = fault_elapsed_ms % pattern_ms;
 
-        green_on = TRUE;
         blue_on = (position_ms < pulse_window_ms) && (0U == ((position_ms / CPU0_LED_FAULT_PULSE_MS) & 1U));
     } else {
-        green_on = heartbeat_elapsed_ms < CPU0_LED_HEARTBEAT_PULSE_MS;
-
         switch (g_task_think_state) {
         case CPU0_THINK_STATE_WAIT_LINK:
-            green_on = FALSE;
             blue_on = 0U == ((state_elapsed_ms / CPU0_LED_WAIT_LINK_BLINK_MS) & 1U);
             break;
 
@@ -646,8 +682,7 @@ LOCAL void task_think_led_update(UW state_elapsed_ms, UW heartbeat_elapsed_ms, U
             break;
 
         case CPU0_THINK_STATE_WAIT_RESTART:
-            /* 終了停止は、待機やセンサー異常とは異なる両LED消灯で示す。 */
-            green_on = FALSE;
+            /* 終了停止中の青LEDは消し、緑LEDは学習状態を示し続ける。 */
             blue_on = FALSE;
             break;
 
@@ -675,15 +710,19 @@ LOCAL void task_think_led_update(UW state_elapsed_ms, UW heartbeat_elapsed_ms, U
         }
     }
 
+    /* 緑LEDは審査員の学習スイッチ専用: 収集中はゆっくり点滅、5件で速く点滅、
+     * 保存済みは点灯、MRAM異常は2回短点滅、未学習は消灯。 */
     if (g_task_think_learning_mode) {
-        blue_on = 0U == ((state_elapsed_ms / 100U) & 1U);
-        green_on = !blue_on;
-        if (g_task_think_learning_samples > 0U) {
-            if (state_elapsed_ms % 500U < 100U) {
-                blue_on = TRUE;
-                green_on = TRUE;
-            }
-        }
+        green_on = (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT == g_task_think_learning_samples) ?
+            (0U == ((heartbeat_elapsed_ms / 100U) & 1U)) : (heartbeat_elapsed_ms < 500U);
+    } else if (g_task_think_storage_valid &&
+               (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT == storage_data.sample_count)) {
+        green_on = TRUE;
+    } else if ((CPU0_PROTOTYPE_STORAGE_OK != g_task_think_storage_result) &&
+               (CPU0_PROTOTYPE_STORAGE_EMPTY != g_task_think_storage_result) &&
+               (CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED != g_task_think_storage_result)) {
+        green_on = (heartbeat_elapsed_ms < 100U) ||
+                   ((heartbeat_elapsed_ms >= 200U) && (heartbeat_elapsed_ms < 300U));
     }
     task_think_led_write(blue_on, green_on);
 }
@@ -698,6 +737,10 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
     if (CPU0_PROTOTYPE_STORAGE_OK == g_task_think_storage_result) {
         g_task_think_storage_result = prototype_storage_load(&storage_data);
         g_task_think_storage_valid = CPU0_PROTOTYPE_STORAGE_OK == g_task_think_storage_result;
+    }
+    if (g_task_think_storage_valid && (storage_data.sample_count > 0U)) {
+        storage_data.target_peak_bin = acoustic_identifier_consensus_peak_bin(
+            (const B *) storage_data.samples, storage_data.sample_count);
     }
     (void) task_infer_prototype_set(&storage_data, g_task_think_storage_valid);
 
@@ -1220,12 +1263,11 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         g_task_think_cycle_count++;
         state_elapsed_ms += CPU0_THINK_PERIOD_MS;
 
-        if (APP_FAULT_NONE == g_task_think_fault_flags) {
-            heartbeat_elapsed_ms += CPU0_THINK_PERIOD_MS;
-            if (heartbeat_elapsed_ms >= CPU0_LED_HEARTBEAT_PERIOD_MS) {
-                heartbeat_elapsed_ms = 0U;
-            }
-        } else {
+        heartbeat_elapsed_ms += CPU0_THINK_PERIOD_MS;
+        if (heartbeat_elapsed_ms >= CPU0_LED_HEARTBEAT_PERIOD_MS) {
+            heartbeat_elapsed_ms = 0U;
+        }
+        if (APP_FAULT_NONE != g_task_think_fault_flags) {
             fault_elapsed_ms += CPU0_THINK_PERIOD_MS;
         }
 
@@ -1251,7 +1293,7 @@ EXPORT void task_think_halt(app_fault_t fault) {
     g_task_think_emergency_stop = TRUE;
 
     while (1) {
-        task_think_led_update(0U, 0U, fault_elapsed_ms);
+        task_think_led_update(0U, fault_elapsed_ms % CPU0_LED_HEARTBEAT_PERIOD_MS, fault_elapsed_ms);
         fault_elapsed_ms += CPU0_THINK_PERIOD_MS;
         (void) tk_dly_tsk(CPU0_THINK_PERIOD_MS);
     }

@@ -11,7 +11,7 @@
 - I2S形式: XIAO master、16 kHz、stereo、32 bit、Philips I2S
 - USB: XIAO側USB-CをTinyUSBのCDC-ACM deviceとして使用
 - 送信: `HELLO`（接続時と1 s周期）、`ACOUSTIC_OBSERVATION`（20 ms周期）、`HEALTH`（1 s周期）、`ACOUSTIC_FEATURE`（音量イベント時）
-- 受信: CPU0の`ROVER_TELEMETRY`、`ACTUATOR_TELEMETRY`、`POSE_TELEMETRY`、`NAV_DIAGNOSTICS`（音源位置・到着・回避診断を含む）
+- 受信: CPU0の`ROVER_TELEMETRY`、`ACTUATOR_TELEMETRY`、`POSE_TELEMETRY`、`NAV_DIAGNOSTICS`に加え、AI Lab形式の推論snapshot・192次元要約chunk・保存見本chunk
 - Wi-Fi: station mode、自動再接続、指定PCへのUDP JSON Lines（250 ms周期）
 - フレーム: `firmware/common/acoustic_protocol.h` の共有バイナリプロトコル
 - log-mel診断: 起動時固定ベクトル自己テスト、生成fps、80-frameリング充填、256-sampleブロック処理時間、I2S overrun
@@ -24,6 +24,8 @@ UDP JSONの`esp_audio`はCPU0接続状態に依存しないESP32S3ローカル�
 `self_test_pass`、`feature_frames`、`feature_fps_x100`、`ring_frames`、
 `log_mel_block_last_us`、`log_mel_block_max_us`、`i2s_overruns`を記録します。
 自己テストはindex 137の固定インパルスをFFTからint8量子化まで通し、ホスト固定期待値と比較します。
+
+CPU0のAI Lab形式フレームはgeneration/sample単位で再組立し、`acoustic_diagnostic`と`acoustic_sample`の小さなUDP JSONとして通常250 ms状態JSONとは別に送ります。UDP診断queueは8イベント固定で、混雑時は欠落数を数えて破棄します。Rover MonitorはこれらをJSONLへ保存し、通常状態のWebSocket表示には配信しません。
 
 `ACOUSTIC_FEATURE` は、I2Sレベルが`APP_FEATURE_TRIGGER_LEVEL_DBFS_X100`以上になった
 立ち上がりで収集します。音が継続している間も`APP_FEATURE_RETRIGGER_PERIOD_MS`（現状1.5 s）ごとに

@@ -38,6 +38,14 @@
 #define ACOUSTIC_AI_LAB_PROFILE_CHUNK_PAYLOAD_SIZE   (8U + ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE) /**< 保存見本chunk長 */
 #define ACOUSTIC_AI_LAB_COMMAND_PAYLOAD_SIZE         (1U)  /**< 操作要求長[byte] */
 #define ACOUSTIC_AI_LAB_COMMAND_RESULT_PAYLOAD_SIZE  (4U)  /**< 操作結果長[byte] */
+#define ACOUSTIC_AI_LAB_MATCH_STATE_MASK             (0x03U) /**< snapshot v2 一致状態bit */
+#define ACOUSTIC_AI_LAB_MATCH_CONFIRMED              (0U)    /**< TARGET確定 */
+#define ACOUSTIC_AI_LAB_MATCH_UNCERTAIN              (1U)    /**< 期限付き猶予 */
+#define ACOUSTIC_AI_LAB_MATCH_EXPIRED                (2U)    /**< 一致期限切れ */
+#define ACOUSTIC_AI_LAB_MATCH_UNKNOWN                (3U)    /**< baseline制御では保持状態を提供しない */
+#define ACOUSTIC_AI_LAB_MATCH_STRONG_COUNT_SHIFT     (2U)    /**< snapshot v2 強不一致数shift */
+#define ACOUSTIC_AI_LAB_MATCH_STRONG_COUNT_MASK      (0xFCU) /**< snapshot v2 強不一致数mask */
+#define ACOUSTIC_AI_LAB_MATCH_AGE_INVALID            (0xFFFFU) /**< TARGET未確認の経過時間 */
 
 #define ACOUSTIC_POSE_FLAG_STATIONARY      (1U << 0)
 #define ACOUSTIC_POSE_FLAG_CALIBRATED      (1U << 1)
@@ -288,8 +296,28 @@ typedef struct st_acoustic_ai_lab_snapshot {
     uint32_t inference_count;                               /**< 推論回数 */
     uint32_t match_count;                                   /**< TARGET累積回数 */
     uint8_t storage_result;                                 /**< MRAM直近結果 */
-    uint8_t reserved[3];                                    /**< 将来拡張 */
+    uint8_t reserved[3];                                    /**< v2: 状態/連続強不一致数/最終TARGET経過時間10ms単位 */
 } acoustic_ai_lab_snapshot_t;
+
+/**< AI Lab 192次元要約の64-byte transport chunk */
+typedef struct st_acoustic_ai_lab_summary_chunk {
+    uint32_t feature_generation;
+    uint8_t chunk_index;
+    uint8_t chunk_count;
+    uint8_t schema_version;
+    uint8_t cpu_drop_count;
+    int8_t data[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE];
+} acoustic_ai_lab_summary_chunk_t;
+
+/**< AI Lab 保存見本の64-byte transport chunk */
+typedef struct st_acoustic_ai_lab_profile_chunk {
+    uint32_t profile_generation;
+    uint8_t sample_index;
+    uint8_t chunk_index;
+    uint8_t chunk_count;
+    uint8_t sample_count;
+    int8_t data[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE];
+} acoustic_ai_lab_profile_chunk_t;
 
 #define ACOUSTIC_AI_LAB_FLAG_LINK_READY          (1U << 0) /**< PC直結リンク確立済み */
 #define ACOUSTIC_AI_LAB_FLAG_SUMMARY_VALID       (1U << 1) /**< 要約が有効 */
@@ -374,6 +402,12 @@ bool acoustic_protocol_decode_actuator_telemetry(const acoustic_frame_t * p_fram
 bool acoustic_protocol_decode_pose_telemetry(const acoustic_frame_t * p_frame,
                                              acoustic_pose_telemetry_t * p_telemetry);
 bool acoustic_protocol_decode_nav_diagnostics(const acoustic_frame_t * p_frame,
-                                             acoustic_nav_diagnostics_t * p_diagnostics);
+                                              acoustic_nav_diagnostics_t * p_diagnostics);
+bool acoustic_protocol_decode_ai_lab_snapshot(const acoustic_frame_t * p_frame,
+                                              acoustic_ai_lab_snapshot_t * p_snapshot); /* AIラボsnapshot復号 */
+bool acoustic_protocol_decode_ai_lab_summary_chunk(const acoustic_frame_t * p_frame,
+                                                   acoustic_ai_lab_summary_chunk_t * p_chunk); /* 要約chunk復号 */
+bool acoustic_protocol_decode_ai_lab_profile_chunk(const acoustic_frame_t * p_frame,
+                                                   acoustic_ai_lab_profile_chunk_t * p_chunk); /* 見本chunk復号 */
 
 #endif /* SEROV_ACOUSTIC_PROTOCOL_H */

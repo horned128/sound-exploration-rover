@@ -214,6 +214,50 @@ EXPORT prototype_storage_result_t prototype_storage_load(prototype_storage_data_
 }
 
 /** =================================================================*
+ * @brief 学習開始時にA/B両スロットを0xFFで初期化し読戻し検証する
+ * @details 片方だけ初期化すると再起動時に旧世代が復活するため、両方消す。
+ * ================================================================= */
+EXPORT prototype_storage_result_t prototype_storage_clear(void) {
+    if (!storage_initialized) {
+        return CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
+    }
+    memset(storage_blank_record, 0xFF, sizeof(storage_blank_record));
+
+    UW const interrupt_state = (UW) __get_PRIMASK();
+    __disable_irq();
+    if (!prototype_storage_secondary_stall()) {
+        if (0U == interrupt_state) {
+            __enable_irq();
+        }
+        return CPU0_PROTOTYPE_STORAGE_CORE_STALL_ERROR;
+    }
+    BOOL write_failed = FALSE;
+    for (UW slot = 0U; slot < CPU0_PROTOTYPE_STORAGE_SLOT_COUNT; slot++) {
+        UW const target = prototype_storage_address() + (slot * CPU0_PROTOTYPE_STORAGE_SLOT_BYTES);
+        if (FSP_SUCCESS != prototype_storage_write_units(storage_blank_record, target,
+                                                           CPU0_PROTOTYPE_STORAGE_SLOT_BYTES)) {
+            write_failed = TRUE;
+        }
+    }
+    prototype_storage_secondary_resume();
+    if (0U == interrupt_state) {
+        __enable_irq();
+    }
+    if (write_failed) {
+        return CPU0_PROTOTYPE_STORAGE_BLANK_ERROR;
+    }
+
+    prototype_storage_records_read();
+    for (UW slot = 0U; slot < CPU0_PROTOTYPE_STORAGE_SLOT_COUNT; slot++) {
+        if (0 != memcmp(&storage_records[slot], storage_blank_record,
+                        CPU0_PROTOTYPE_STORAGE_SLOT_BYTES)) {
+            return CPU0_PROTOTYPE_STORAGE_VERIFY_ERROR;
+        }
+    }
+    return CPU0_PROTOTYPE_STORAGE_OK;
+}
+
+/** =================================================================*
  * @brief  背景モデル・見本をA/Bスロットへ保存し読戻し検証する
  * @details 旧4KiB領域ではなく新32KiB領域だけを読むため、旧保存値を誤用しない。
  * ================================================================= */

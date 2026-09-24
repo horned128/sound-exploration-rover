@@ -165,11 +165,11 @@ CRCの多項式は`0x1021`、初期値は`0xFFFF`、refin/refoutはfalse、xorou
 | `0x10` | `SET_CONFIG` | CPU0 → ESP32S3 | type予約。初期実装では未使用 |
 | `0x11` | `ACK` | 双方向 | type予約。初期実装では未使用 |
 | `0x20` | `ROVER_TELEMETRY` | CPU0 → ESP32S3 | 実装済み。250 ms周期の音響・思考・指令診断snapshot |
-| `0x30` | `AI_LAB_SNAPSHOT` | CPU0 → PC / J11 | 実装済み。4 Hzの学習・推論・背景モデル固定小数点snapshot |
-| `0x31` | `AI_LAB_SUMMARY_CHUNK` | CPU0 → PC / J11 | 実装済み。現在特徴量の192次元要約を3 chunkで送信 |
+| `0x30` | `AI_LAB_SNAPSHOT` | CPU0 → PC / J11、CPU0 → ESP32S3 / J7 | 学習・推論固定小数点snapshot。schema v2の一致保持欄はbaseline制御では`UNKNOWN`、経過時間は無効値 |
+| `0x31` | `AI_LAB_SUMMARY_CHUNK` | CPU0 → PC / J11、CPU0 → ESP32S3 / J7 | 特徴量generationごとの192次元要約を3 chunkで送信。J7はsnapshotと要約を有限queueで扱う |
 | `0x32` | `AI_LAB_COMMAND` | PC → CPU0 / J11 | 実装済み。学習開始・保存・取消・profile読出しのみ |
 | `0x33` | `AI_LAB_COMMAND_RESULT` | CPU0 → PC / J11 | 実装済み。操作の受付結果と学習見本数 |
-| `0x34` | `AI_LAB_PROFILE_CHUNK` | CPU0 → PC / J11 | 実装済み。MRAM保存済み見本を3 chunkずつ送信 |
+| `0x34` | `AI_LAB_PROFILE_CHUNK` | CPU0 → PC / J11、CPU0 → ESP32S3 / J7 | MRAM保存済み見本を3 chunkずつ送信。J7 relayは起動時と再学習後に自動記録 |
 | `0x7F` | `LOG` | ESP32S3 → CPU0 | type予約。制御用CDCへ通常ログは送らない |
 
 `MANUAL_DRIVE`はまだ割り当てない。手動操作を追加する場合も、ESP32S3からCPU1へ直接送らずCPU0の権限、sequence、timeout、安全状態を通す。
@@ -255,6 +255,12 @@ nc -u -l 5005
 WSL2の既定NATモードで`nc`を実行しても、PCの無線LAN側IPv4へ届いたUDPはWSLへ自動転送されない。まずWindows側で直接待ち受ける。WSL上で受信する場合は、WSLをmirrored networkingに変更し、Windows Defender FirewallとHyper-V firewallで使用中のprivate networkからUDP 5005を許可する。
 
 250 msごとに1行1 JSONを送る。`cpu_valid:false`ならESP32S3のWi-Fi/UDPは動作しているがCPU0から診断frameが戻っていない。`cpu_valid:true`なら`audio`、`think`、`command`を順に見る。特に音源方向固定は`audio.doa_deg`・`audio.xvf_raw_status`・`audio.doa_fallback`、反応抜けは`audio.level_dbfs_x100`・`vad`・`think.link_ready`・`think.new_observation`・`think.state`で切り分ける。`cpu_age_ms`が増え続ける場合は古いCPU0 snapshotを再送しているため、USB Bulk OUTまたはCPU0停止を疑う。
+
+鳴子追従の走行診断は通常の250 ms状態JSONと別datagramで送り、Rover MonitorのJSONLにだけ保存する。`record_type=acoustic_diagnostic`はgeneration別の192次元要約と推論結果・距離を、`record_type=acoustic_sample`は保存見本を表す。baseline制御では`match_state=UNKNOWN`、`reason=baseline_policy`と記録する。J7送信は通常状態・CPU1状態・ナビ診断を優先し、診断混雑時は有限queueから破棄して欠落数を後続イベントへ載せる。PCM連続送信は行わない。
+
+現場学習で5件目を収集した際、互いに近い4件から明確に孤立する見本が1件あればその見本を捨て、`learning_samples`を4へ戻して次の特徴量を待つ。旧MRAMの同様の孤立見本は照合から除外するが、保存データ自体は書き換えない。見本を置き換えるには新しいファームウェアで学習し直す。見本の数値形式とMRAMレイアウトは変更しない。
+
+審査員向けのSW1は2秒長押しで学習開始、収集完了後の2秒長押しで保存する。5件未満で再度長押しすると取消になる。学習開始時にMRAMのA/B両スロットとRAM上の旧見本を初期化するため、取消後は旧見本へ戻らない。緑LEDは未学習時消灯、収集中はゆっくり点滅、5件収集済みは速く点滅、保存済みは点灯、MRAMエラーは短い2回点滅とする。青LEDは走行状態とCPU0異常を表示する。MRAM初期化が失敗した場合は収集へ進まない。
 
 ## 6. 音源追従状態機械
 

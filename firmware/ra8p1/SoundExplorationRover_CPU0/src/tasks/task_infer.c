@@ -173,7 +173,7 @@ EXPORT ER task_infer_prototype_set(const prototype_storage_data_t * p_data, BOOL
     if (infer_mutex_id <= 0) {
         return E_NOEXS;
     }
-    ER const err = tk_loc_mtx(infer_mutex_id, TMO_POL);
+    ER const err = tk_loc_mtx(infer_mutex_id, TMO_FEVR);
     if (E_OK != err) {
         return err;
     }
@@ -185,12 +185,9 @@ EXPORT ER task_infer_prototype_set(const prototype_storage_data_t * p_data, BOOL
         infer_bin_weights[b] = 1.0F;
     }
     if (storage_valid && (p_data->sample_count > 0U)) {
-        if (p_data->target_peak_bin < CPU0_ACOUSTIC_FEATURE_BIN_COUNT) {
-            infer_target_peak_bin = p_data->target_peak_bin;
-        } else {
-            infer_target_peak_bin = acoustic_identifier_find_peak_bin((const B *) p_data->samples,
-                                                                      p_data->sample_count);
-        }
+        /* 旧MRAMに孤立見本が残っていても、実際に照合する4見本から重みを決める。 */
+        infer_target_peak_bin = acoustic_identifier_consensus_peak_bin((const B *) p_data->samples,
+                                                                        p_data->sample_count);
         acoustic_identifier_build_weights(infer_target_peak_bin, infer_bin_weights);
     }
 

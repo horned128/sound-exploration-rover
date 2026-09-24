@@ -152,6 +152,103 @@ static void navigation_diagnostics_round_trip_test(void)
     assert(memcmp(&input, &output, sizeof(input)) == 0);
 }
 
+static acoustic_frame_t parse_single_frame(uint8_t const * bytes, size_t length)
+{
+    acoustic_protocol_parser_t parser;
+    acoustic_protocol_parser_init(&parser);
+    acoustic_frame_t frame = {0};
+    acoustic_parse_result_t result = ACOUSTIC_PARSE_MORE;
+    for (size_t index = 0U; index < length; index++) {
+        result = acoustic_protocol_parser_push(&parser, bytes[index], &frame);
+    }
+    assert(result == ACOUSTIC_PARSE_FRAME_READY);
+    return frame;
+}
+
+static void ai_lab_diagnostic_protocol_test(void)
+{
+    assert(ACOUSTIC_ROVER_TELEMETRY_PAYLOAD_SIZE == 96U);
+    assert(ACOUSTIC_AI_LAB_SNAPSHOT_PAYLOAD_SIZE == 48U);
+
+    acoustic_ai_lab_snapshot_t const snapshot = {
+        .schema_version = 2U,
+        .flags = ACOUSTIC_AI_LAB_FLAG_SUMMARY_VALID,
+        .think_state = 3U,
+        .infer_status = 3U,
+        .doa_deg = 128U,
+        .level_dbfs_x100 = -3200,
+        .peak_dbfs_x100 = -2400,
+        .vad = 1U,
+        .xvf_status = ACOUSTIC_XVF_STATUS_READY,
+        .learning_samples = 5U,
+        .target_peak_bin = 29U,
+        .current_peak_bin = 4U,
+        .nearest_sample = 2U,
+        .active_frame_count = 80U,
+        .cosine_distance_x1000 = 242U,
+        .identifier_threshold_x1000 = 55U,
+        .feature_generation = 0x12345678U,
+        .reserved = {0x05U, 0xFAU, 0x00U},
+    };
+    uint8_t encoded[ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE] = {0};
+    size_t const length = acoustic_protocol_encode_ai_lab_snapshot(1U, 2U, &snapshot, encoded, sizeof(encoded));
+    assert(length == ACOUSTIC_PROTOCOL_HEADER_SIZE + ACOUSTIC_AI_LAB_SNAPSHOT_PAYLOAD_SIZE +
+                    ACOUSTIC_PROTOCOL_CRC_SIZE);
+    assert(encoded[ACOUSTIC_PROTOCOL_HEADER_SIZE + 45U] == 0x05U);
+    assert(encoded[ACOUSTIC_PROTOCOL_HEADER_SIZE + 46U] == 0xFAU);
+    assert(encoded[ACOUSTIC_PROTOCOL_HEADER_SIZE + 47U] == 0x00U);
+    acoustic_frame_t frame = parse_single_frame(encoded, length);
+    acoustic_ai_lab_snapshot_t decoded_snapshot = {0};
+    assert(acoustic_protocol_decode_ai_lab_snapshot(&frame, &decoded_snapshot));
+    assert(decoded_snapshot.schema_version == 2U);
+    assert(decoded_snapshot.feature_generation == snapshot.feature_generation);
+    assert(memcmp(decoded_snapshot.reserved, snapshot.reserved, sizeof(snapshot.reserved)) == 0);
+
+    uint8_t payload[ACOUSTIC_AI_LAB_SUMMARY_CHUNK_PAYLOAD_SIZE] = {0};
+    payload[0] = 0x78U;
+    payload[1] = 0x56U;
+    payload[2] = 0x34U;
+    payload[3] = 0x12U;
+    payload[4] = 2U;
+    payload[5] = 3U;
+    payload[6] = 1U;
+    payload[7] = 9U;
+    for (size_t index = 0U; index < ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE; index++) {
+        payload[8U + index] = (uint8_t) index;
+    }
+    size_t chunk_length = acoustic_protocol_encode(ACOUSTIC_MESSAGE_AI_LAB_SUMMARY_CHUNK, 3U, 4U,
+        payload, sizeof(payload), encoded, sizeof(encoded));
+    frame = parse_single_frame(encoded, chunk_length);
+    acoustic_ai_lab_summary_chunk_t summary_chunk = {0};
+    assert(acoustic_protocol_decode_ai_lab_summary_chunk(&frame, &summary_chunk));
+    assert(summary_chunk.feature_generation == snapshot.feature_generation);
+    assert(summary_chunk.chunk_index == 2U && summary_chunk.chunk_count == 3U);
+    assert(summary_chunk.schema_version == 1U && summary_chunk.cpu_drop_count == 9U);
+    assert((uint8_t) summary_chunk.data[63] == 63U);
+
+    memset(payload, 0, sizeof(payload));
+    payload[0] = 0xEFU;
+    payload[1] = 0xCDU;
+    payload[2] = 0xABU;
+    payload[3] = 0x89U;
+    payload[4] = 4U;
+    payload[5] = 1U;
+    payload[6] = 3U;
+    payload[7] = 5U;
+    for (size_t index = 0U; index < ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE; index++) {
+        payload[8U + index] = (uint8_t) (255U - index);
+    }
+    chunk_length = acoustic_protocol_encode(ACOUSTIC_MESSAGE_AI_LAB_PROFILE_CHUNK, 5U, 6U,
+        payload, sizeof(payload), encoded, sizeof(encoded));
+    frame = parse_single_frame(encoded, chunk_length);
+    acoustic_ai_lab_profile_chunk_t profile_chunk = {0};
+    assert(acoustic_protocol_decode_ai_lab_profile_chunk(&frame, &profile_chunk));
+    assert(profile_chunk.profile_generation == 0x89ABCDEFU);
+    assert(profile_chunk.sample_index == 4U && profile_chunk.chunk_index == 1U);
+    assert(profile_chunk.chunk_count == 3U && profile_chunk.sample_count == 5U);
+    assert((uint8_t) profile_chunk.data[63] == (uint8_t) (255U - 63U));
+}
+
 static void assembler_complete_test(void)
 {
     acoustic_feature_assembler_t assembler;
@@ -224,6 +321,7 @@ int main(void)
     protocol_round_trip_test();
     observation_round_trip_test();
     navigation_diagnostics_round_trip_test();
+    ai_lab_diagnostic_protocol_test();
     assembler_complete_test();
     assembler_rejection_test();
     return 0;

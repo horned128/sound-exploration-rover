@@ -25,12 +25,58 @@
 
 #define WIFI_TELEMETRY_CONNECTED_BIT       (1U << 0)
 #define WIFI_TELEMETRY_JSON_CAPACITY       (3072U)
+#define WIFI_DIAGNOSTIC_QUEUE_CAPACITY      (8U)
+#define WIFI_DIAGNOSTIC_JSON_CAPACITY       (2048U)
+
+typedef enum {
+    WIFI_DIAGNOSTIC_SUMMARY = 0,
+    WIFI_DIAGNOSTIC_SAMPLE,
+} wifi_diagnostic_kind_t;
+
+typedef struct {
+    wifi_diagnostic_kind_t kind;
+    uint32_t generation;
+    uint8_t sample_index;
+    uint8_t sample_count;
+    uint8_t cpu_drop_count;
+    bool snapshot_valid;
+    acoustic_ai_lab_snapshot_t snapshot;
+    int8_t vector[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE * 3U];
+} wifi_diagnostic_event_t;
+
+typedef struct {
+    bool active;
+    uint32_t generation;
+    uint8_t received_mask;
+    uint8_t cpu_drop_count;
+    int8_t vector[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE * 3U];
+} wifi_summary_assembly_t;
+
+typedef struct {
+    bool active;
+    uint32_t generation;
+    uint8_t sample_index;
+    uint8_t sample_count;
+    uint8_t received_mask;
+    int8_t vector[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE * 3U];
+} wifi_profile_assembly_t;
 
 static EventGroupHandle_t s_wifi_event_group;               /**< Wi-Fi接続状態イベント */
 static struct sockaddr_in s_destination;                    /**< UDP送信先IPv4アドレス */
 static uint32_t s_wifi_reconnect_count;                     /**< Wi-Fi再接続回数 */
 static uint32_t s_udp_send_count;                           /**< UDP送信成功回数 */
 static uint32_t s_udp_error_count;                          /**< UDP送信失敗回数 */
+static wifi_diagnostic_event_t s_diagnostic_queue[WIFI_DIAGNOSTIC_QUEUE_CAPACITY]; /**< bounded event queue */
+static uint8_t s_diagnostic_queue_head;
+static uint8_t s_diagnostic_queue_count;
+static uint32_t s_diagnostic_drop_count;
+static wifi_summary_assembly_t s_summary_assembly;
+static uint32_t s_summary_seen_generation;
+static bool s_summary_seen_generation_valid;
+static wifi_profile_assembly_t s_profile_assembly;
+static uint32_t s_profile_seen_generation;
+static uint8_t s_profile_seen_mask;
+static bool s_profile_seen_generation_valid;
 
 static uint32_t wifi_telemetry_uptime_ms(void);             /* 起動からの経過時刻取得 */
 static int wifi_telemetry_flag(uint8_t flags, uint8_t mask);/* フラグをJSON真偽値へ変換 */
@@ -58,6 +104,12 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
 static int wifi_telemetry_format_heartbeat(char * json, size_t capacity, int rssi_dbm,
                                            audio_capture_snapshot_t const * esp_audio,
                                            uint32_t feature_fps_x100);
+static bool wifi_telemetry_summary_chunk_accept(acoustic_ai_lab_summary_chunk_t const * chunk,
+                                                acoustic_ai_lab_snapshot_t const * snapshot,
+                                                bool snapshot_valid);
+static bool wifi_telemetry_profile_chunk_accept(acoustic_ai_lab_profile_chunk_t const * chunk);
+static bool wifi_telemetry_diagnostic_enqueue(wifi_diagnostic_event_t const * event);
+static bool wifi_telemetry_diagnostic_send(int socket_fd);
 static void wifi_telemetry_task(void * argument);           /* USB受信・UDP送信タスク */
 
 /** =================================================================*
@@ -126,6 +178,276 @@ static char const * wifi_telemetry_infer_status(uint8_t status) {
         "INVALID", "INDETERMINATE", "NOT_READY", "NOT_TARGET", "TARGET",
     };
     return (status < (sizeof(names) / sizeof(names[0]))) ? names[status] : "UNKNOWN";
+}
+
+/** =================================================================*
+ * @brief 低優先度診断イベントを有限UDP queueへ追加
+ * @param[in] event 完成した特徴量または保存見本イベント
+ * @return queueへ追加した場合true
+ * ================================================================= */
+static bool wifi_telemetry_diagnostic_enqueue(wifi_diagnostic_event_t const * event) {
+    if (event == NULL) {
+        return false;
+    }
+    if (s_diagnostic_queue_count >= WIFI_DIAGNOSTIC_QUEUE_CAPACITY) {
+        s_diagnostic_drop_count++;
+        return false;
+    }
+    uint8_t const tail = (uint8_t) ((s_diagnostic_queue_head + s_diagnostic_queue_count) %
+                                    WIFI_DIAGNOSTIC_QUEUE_CAPACITY);
+    s_diagnostic_queue[tail] = *event;
+    s_diagnostic_queue_count++;
+    return true;
+}
+
+/** =================================================================*
+ * @brief 3つの64-byte要約chunkを世代単位で組み立て
+ * @param[in] chunk 受信chunk
+ * @param[in] snapshot 最新snapshot
+ * @param[in] snapshot_valid snapshot受信済み
+ * @return 完成した要約イベントを処理した場合true
+ * ================================================================= */
+static bool wifi_telemetry_summary_chunk_accept(acoustic_ai_lab_summary_chunk_t const * chunk,
+                                                acoustic_ai_lab_snapshot_t const * snapshot,
+                                                bool snapshot_valid) {
+    if ((chunk == NULL) || (chunk->chunk_count != 3U) || (chunk->chunk_index >= 3U) ||
+        (chunk->schema_version != 1U)) {
+        s_diagnostic_drop_count++;
+        return false;
+    }
+    if (!s_summary_assembly.active && s_summary_seen_generation_valid &&
+        ((int32_t) (chunk->feature_generation - s_summary_seen_generation) <= 0)) {
+        return false;
+    }
+    if (s_summary_assembly.active && (s_summary_assembly.generation != chunk->feature_generation)) {
+        if ((int32_t) (chunk->feature_generation - s_summary_assembly.generation) <= 0) {
+            s_diagnostic_drop_count++;
+            return false;
+        }
+        if (s_summary_assembly.active && (s_summary_assembly.received_mask != 0x07U)) {
+            s_diagnostic_drop_count++;
+        }
+        memset(&s_summary_assembly, 0, sizeof(s_summary_assembly));
+        s_summary_assembly.active = true;
+        s_summary_assembly.generation = chunk->feature_generation;
+    } else if (!s_summary_assembly.active) {
+        memset(&s_summary_assembly, 0, sizeof(s_summary_assembly));
+        s_summary_assembly.active = true;
+        s_summary_assembly.generation = chunk->feature_generation;
+    }
+
+    uint8_t const bit = (uint8_t) (1U << chunk->chunk_index);
+    if ((s_summary_assembly.received_mask & bit) != 0U) {
+        return false;
+    }
+    memcpy(&s_summary_assembly.vector[(size_t) chunk->chunk_index * ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE],
+           chunk->data, ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE);
+    s_summary_assembly.received_mask |= bit;
+    s_summary_assembly.cpu_drop_count = chunk->cpu_drop_count;
+    if (s_summary_assembly.received_mask != 0x07U) {
+        return false;
+    }
+
+    wifi_diagnostic_event_t event = {0};
+    event.kind = WIFI_DIAGNOSTIC_SUMMARY;
+    event.generation = s_summary_assembly.generation;
+    event.cpu_drop_count = s_summary_assembly.cpu_drop_count;
+    event.snapshot_valid = snapshot_valid && (snapshot != NULL) && (snapshot->schema_version >= 2U) &&
+                           (snapshot->feature_generation == event.generation);
+    if (event.snapshot_valid) {
+        event.snapshot = *snapshot;
+    }
+    memcpy(event.vector, s_summary_assembly.vector, sizeof(event.vector));
+    (void) wifi_telemetry_diagnostic_enqueue(&event);
+    s_summary_seen_generation = event.generation;
+    s_summary_seen_generation_valid = true;
+    s_summary_assembly.active = false;
+    return true;
+}
+
+/** =================================================================*
+ * @brief 保存見本の3 chunkを組み立て、sampleごとの診断イベントをqueue
+ * @param[in] chunk 受信保存見本chunk
+ * @return 完成した見本を処理した場合true
+ * ================================================================= */
+static bool wifi_telemetry_profile_chunk_accept(acoustic_ai_lab_profile_chunk_t const * chunk) {
+    if ((chunk == NULL) || (chunk->chunk_count != 3U) || (chunk->chunk_index >= 3U) ||
+        (chunk->sample_count == 0U) || (chunk->sample_count > 5U) ||
+        (chunk->sample_index >= chunk->sample_count)) {
+        s_diagnostic_drop_count++;
+        return false;
+    }
+    if (s_profile_seen_generation_valid && (s_profile_seen_generation != chunk->profile_generation) &&
+        ((int32_t) (chunk->profile_generation - s_profile_seen_generation) <= 0)) {
+        return false;
+    }
+    if (!s_profile_seen_generation_valid || (s_profile_seen_generation != chunk->profile_generation)) {
+        s_profile_seen_generation = chunk->profile_generation;
+        s_profile_seen_mask = 0U;
+        s_profile_seen_generation_valid = true;
+        s_profile_assembly.active = false;
+    }
+    uint8_t const sample_bit = (uint8_t) (1U << chunk->sample_index);
+    if ((s_profile_seen_mask & sample_bit) != 0U) {
+        return false;
+    }
+    if (!s_profile_assembly.active || (s_profile_assembly.generation != chunk->profile_generation) ||
+        (s_profile_assembly.sample_index != chunk->sample_index)) {
+        if (s_profile_assembly.active && (s_profile_assembly.received_mask != 0x07U)) {
+            s_diagnostic_drop_count++;
+        }
+        memset(&s_profile_assembly, 0, sizeof(s_profile_assembly));
+        s_profile_assembly.active = true;
+        s_profile_assembly.generation = chunk->profile_generation;
+        s_profile_assembly.sample_index = chunk->sample_index;
+        s_profile_assembly.sample_count = chunk->sample_count;
+    }
+
+    uint8_t const bit = (uint8_t) (1U << chunk->chunk_index);
+    if ((s_profile_assembly.received_mask & bit) != 0U) {
+        return false;
+    }
+    memcpy(&s_profile_assembly.vector[(size_t) chunk->chunk_index * ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE],
+           chunk->data, ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE);
+    s_profile_assembly.received_mask |= bit;
+    if (s_profile_assembly.received_mask != 0x07U) {
+        return false;
+    }
+
+    wifi_diagnostic_event_t event = {0};
+    event.kind = WIFI_DIAGNOSTIC_SAMPLE;
+    event.generation = s_profile_assembly.generation;
+    event.sample_index = s_profile_assembly.sample_index;
+    event.sample_count = s_profile_assembly.sample_count;
+    memcpy(event.vector, s_profile_assembly.vector, sizeof(event.vector));
+    (void) wifi_telemetry_diagnostic_enqueue(&event);
+    s_profile_seen_mask |= sample_bit;
+    s_profile_assembly.active = false;
+    return true;
+}
+
+/** =================================================================*
+ * @brief 診断イベントを通常状態JSONとは別のUDP datagramで送信
+ * @param[in] socket_fd 送信socket
+ * @return イベント送信が成功した場合true
+ * ================================================================= */
+static bool wifi_telemetry_diagnostic_send(int socket_fd) {
+    if ((socket_fd < 0) || (s_diagnostic_queue_count == 0U)) {
+        return false;
+    }
+
+    wifi_diagnostic_event_t const * const event = &s_diagnostic_queue[s_diagnostic_queue_head];
+    static char json[WIFI_DIAGNOSTIC_JSON_CAPACITY];
+    int length = 0;
+    if (event->kind == WIFI_DIAGNOSTIC_SUMMARY) {
+        acoustic_ai_lab_snapshot_t const * snapshot = &event->snapshot;
+        bool const valid = event->snapshot_valid;
+        uint8_t const state = valid ? (uint8_t) (snapshot->reserved[0] & ACOUSTIC_AI_LAB_MATCH_STATE_MASK) :
+                               ACOUSTIC_AI_LAB_MATCH_UNKNOWN;
+        uint8_t const strong_count = valid ? (uint8_t) ((snapshot->reserved[0] &
+            ACOUSTIC_AI_LAB_MATCH_STRONG_COUNT_MASK) >> ACOUSTIC_AI_LAB_MATCH_STRONG_COUNT_SHIFT) : 0U;
+        uint16_t const age_ticks = valid ? (uint16_t) ((uint16_t) snapshot->reserved[1] |
+                                                       ((uint16_t) snapshot->reserved[2] << 8U)) :
+                                                ACOUSTIC_AI_LAB_MATCH_AGE_INVALID;
+        uint32_t const age_ms = (age_ticks == ACOUSTIC_AI_LAB_MATCH_AGE_INVALID) ? UINT32_MAX :
+                                (uint32_t) age_ticks * 10U;
+        char const * match_name = (state == ACOUSTIC_AI_LAB_MATCH_CONFIRMED) ? "CONFIRMED" :
+                                  (state == ACOUSTIC_AI_LAB_MATCH_UNCERTAIN) ? "UNCERTAIN" :
+                                  (state == ACOUSTIC_AI_LAB_MATCH_EXPIRED) ? "EXPIRED" : "UNKNOWN";
+        char const * reason = !valid ? "snapshot_unavailable" :
+                              (state == ACOUSTIC_AI_LAB_MATCH_UNKNOWN) ? "baseline_policy" :
+                              (state == ACOUSTIC_AI_LAB_MATCH_UNCERTAIN) ?
+                                  ((strong_count > 0U) ? "strong_mismatch_grace" : "not_target_grace") :
+                              (strong_count >= 2U) ? "two_strong_mismatches" :
+                              ((age_ticks != ACOUSTIC_AI_LAB_MATCH_AGE_INVALID) && (age_ms >= 2500U)) ?
+                                  "target_timeout" :
+                              (snapshot->infer_status == 4U) ? "target" :
+                              (age_ticks == ACOUSTIC_AI_LAB_MATCH_AGE_INVALID) ? "target_not_seen" : "target_expired";
+        float const distance = (valid && (snapshot->cosine_distance_x1000 != UINT16_MAX)) ?
+                               ((float) snapshot->cosine_distance_x1000 / 1000.0f) : -1.0f;
+        float const threshold = valid ? ((float) snapshot->identifier_threshold_x1000 / 1000.0f) : 0.0f;
+        length = snprintf(json, sizeof(json),
+            "{\"record_type\":\"acoustic_diagnostic\",\"schema\":1,\"esp_ms\":%lu,"
+            "\"feature_generation\":%lu,\"summary_valid\":%s,\"identifier_status\":%u,"
+            "\"identifier_status_name\":\"%s\",\"reason\":\"%s\",\"distance\":%.3f,"
+            "\"threshold\":%.3f,\"target_peak_bin\":%d,\"current_peak_bin\":%d,"
+            "\"match_state\":\"%s\",\"strong_mismatch_count\":%u,\"last_target_age_ms\":%ld,"
+            "\"cpu_diagnostic_drops\":%u,\"udp_diagnostic_drops\":%lu,\"summary\":[",
+            (unsigned long) wifi_telemetry_uptime_ms(), (unsigned long) event->generation,
+            (valid && ((snapshot->flags & ACOUSTIC_AI_LAB_FLAG_SUMMARY_VALID) != 0U)) ? "true" : "false",
+            valid ? (unsigned int) snapshot->infer_status : 0U,
+            valid ? wifi_telemetry_infer_status(snapshot->infer_status) : "UNKNOWN", reason,
+            (double) distance, (double) threshold,
+            (valid && snapshot->target_peak_bin != 255U) ? (int) snapshot->target_peak_bin : -1,
+            (valid && snapshot->current_peak_bin != 255U) ? (int) snapshot->current_peak_bin : -1,
+            match_name, (unsigned int) strong_count,
+            (long) ((age_ms == UINT32_MAX) ? -1 : (int32_t) age_ms), (unsigned int) event->cpu_drop_count,
+            (unsigned long) s_diagnostic_drop_count);
+        if ((length > 0) && ((size_t) length < sizeof(json))) {
+            for (size_t index = 0U; ((size_t) length < sizeof(json)) && (index < sizeof(event->vector)); index++) {
+                int const appended = snprintf(&json[length], sizeof(json) - (size_t) length,
+                                              "%s%d", (index == 0U) ? "" : ",", (int) event->vector[index]);
+                if (appended <= 0 || ((size_t) appended >= sizeof(json) - (size_t) length)) {
+                    length = (int) sizeof(json);
+                } else {
+                    length += appended;
+                }
+            }
+            if ((size_t) length < sizeof(json)) {
+                int const appended = snprintf(&json[length], sizeof(json) - (size_t) length,
+                                              "]}\n");
+                if (appended <= 0 || ((size_t) appended >= sizeof(json) - (size_t) length)) {
+                    length = (int) sizeof(json);
+                } else {
+                    length += appended;
+                }
+            }
+        }
+    } else {
+        length = snprintf(json, sizeof(json),
+            "{\"record_type\":\"acoustic_sample\",\"schema\":1,\"esp_ms\":%lu,"
+            "\"profile_generation\":%lu,\"sample_index\":%u,\"sample_count\":%u,"
+            "\"udp_diagnostic_drops\":%lu,\"summary\":[",
+            (unsigned long) wifi_telemetry_uptime_ms(), (unsigned long) event->generation,
+            (unsigned int) event->sample_index, (unsigned int) event->sample_count,
+            (unsigned long) s_diagnostic_drop_count);
+        if ((length > 0) && ((size_t) length < sizeof(json))) {
+            for (size_t index = 0U; ((size_t) length < sizeof(json)) && (index < sizeof(event->vector)); index++) {
+                int const appended = snprintf(&json[length], sizeof(json) - (size_t) length,
+                                              "%s%d", (index == 0U) ? "" : ",", (int) event->vector[index]);
+                if (appended <= 0 || ((size_t) appended >= sizeof(json) - (size_t) length)) {
+                    length = (int) sizeof(json);
+                } else {
+                    length += appended;
+                }
+            }
+            if ((size_t) length < sizeof(json)) {
+                int const appended = snprintf(&json[length], sizeof(json) - (size_t) length, "]}\n");
+                if (appended <= 0 || ((size_t) appended >= sizeof(json) - (size_t) length)) {
+                    length = (int) sizeof(json);
+                } else {
+                    length += appended;
+                }
+            }
+        }
+    }
+
+    if ((length <= 0) || ((size_t) length >= sizeof(json))) {
+        s_diagnostic_drop_count++;
+        s_diagnostic_queue_head = (uint8_t) ((s_diagnostic_queue_head + 1U) % WIFI_DIAGNOSTIC_QUEUE_CAPACITY);
+        s_diagnostic_queue_count--;
+        return false;
+    }
+    int const sent = sendto(socket_fd, json, (size_t) length, 0,
+                            (struct sockaddr *) &s_destination, sizeof(s_destination));
+    if (sent != length) {
+        s_udp_error_count++;
+        return false;
+    }
+    s_udp_send_count++;
+    s_diagnostic_queue_head = (uint8_t) ((s_diagnostic_queue_head + 1U) % WIFI_DIAGNOSTIC_QUEUE_CAPACITY);
+    s_diagnostic_queue_count--;
+    return true;
 }
 
 /** =================================================================*
@@ -445,6 +767,7 @@ static void wifi_telemetry_task(void * argument) {
     acoustic_actuator_telemetry_t latest_actuator_telemetry = {0};
     acoustic_pose_telemetry_t latest_pose_telemetry = {0};
     acoustic_nav_diagnostics_t latest_nav_diagnostics = {0};
+    acoustic_ai_lab_snapshot_t latest_ai_lab_snapshot = {0};
     acoustic_frame_t latest_frame = {0};
     uint32_t received_at_ms = 0U;
     uint32_t actuator_received_at_ms = 0U;
@@ -457,6 +780,7 @@ static void wifi_telemetry_task(void * argument) {
     bool actuator_frame_valid = false;
     bool pose_frame_valid = false;
     bool nav_frame_valid = false;
+    bool ai_lab_snapshot_valid = false;
     int socket_fd = -1;
     uint8_t rx_data[CONFIG_TINYUSB_CDC_RX_BUFSIZE];
     acoustic_protocol_parser_init(&parser);
@@ -484,6 +808,17 @@ static void wifi_telemetry_task(void * argument) {
                     } else if (acoustic_protocol_decode_nav_diagnostics(&frame, &latest_nav_diagnostics)) {
                         nav_received_at_ms = wifi_telemetry_uptime_ms();
                         nav_frame_valid = true;
+                    } else if (acoustic_protocol_decode_ai_lab_snapshot(&frame, &latest_ai_lab_snapshot)) {
+                        ai_lab_snapshot_valid = true;
+                    } else {
+                        acoustic_ai_lab_summary_chunk_t summary_chunk = {0};
+                        acoustic_ai_lab_profile_chunk_t profile_chunk = {0};
+                        if (acoustic_protocol_decode_ai_lab_summary_chunk(&frame, &summary_chunk)) {
+                            (void) wifi_telemetry_summary_chunk_accept(&summary_chunk, &latest_ai_lab_snapshot,
+                                                                       ai_lab_snapshot_valid);
+                        } else if (acoustic_protocol_decode_ai_lab_profile_chunk(&frame, &profile_chunk)) {
+                            (void) wifi_telemetry_profile_chunk_accept(&profile_chunk);
+                        }
                     }
                 }
             }
@@ -551,6 +886,7 @@ static void wifi_telemetry_task(void * argument) {
         } else {
             s_udp_error_count++;
         }
+        (void) wifi_telemetry_diagnostic_send(socket_fd);
     }
 }
 

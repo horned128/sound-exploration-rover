@@ -460,6 +460,9 @@ size_t acoustic_protocol_encode_ai_lab_snapshot(uint32_t sequence, uint32_t upti
     acoustic_write_u32_le(&payload[36], p_snapshot->inference_count);
     acoustic_write_u32_le(&payload[40], p_snapshot->match_count);
     payload[44] = p_snapshot->storage_result;
+    payload[45] = p_snapshot->reserved[0];
+    payload[46] = p_snapshot->reserved[1];
+    payload[47] = p_snapshot->reserved[2];
 
     return acoustic_protocol_encode(ACOUSTIC_MESSAGE_AI_LAB_SNAPSHOT, sequence, uptime_ms, payload,
                                     (uint16_t) sizeof(payload), p_output, output_capacity);
@@ -807,5 +810,96 @@ bool acoustic_protocol_decode_nav_diagnostics(const acoustic_frame_t * p_frame,
     p_diagnostics->think_state = p_frame->payload[50];
     p_diagnostics->reserved = p_frame->payload[51];
     p_diagnostics->autonomous_backup_count = acoustic_read_u32_le(&p_frame->payload[52]);
+    return true;
+}
+
+/** =================================================================*
+ * @brief AI Lab推論snapshotを復号
+ * @param[in] p_frame 受信フレーム
+ * @param[out] p_snapshot snapshot情報
+ * @return snapshot形式が正しければtrue
+ * ================================================================= */
+bool acoustic_protocol_decode_ai_lab_snapshot(const acoustic_frame_t * p_frame,
+                                              acoustic_ai_lab_snapshot_t * p_snapshot) {
+    if ((NULL == p_frame) || (NULL == p_snapshot) ||
+        (ACOUSTIC_MESSAGE_AI_LAB_SNAPSHOT != p_frame->type) ||
+        (ACOUSTIC_AI_LAB_SNAPSHOT_PAYLOAD_SIZE != p_frame->payload_length)) {
+        return false;
+    }
+
+    const uint8_t * payload = p_frame->payload;
+    memset(p_snapshot, 0, sizeof(*p_snapshot));
+    p_snapshot->schema_version = payload[0];
+    p_snapshot->flags = payload[1];
+    p_snapshot->think_state = payload[2];
+    p_snapshot->infer_status = payload[3];
+    p_snapshot->doa_deg = acoustic_read_u16_le(&payload[4]);
+    p_snapshot->level_dbfs_x100 = (int16_t) acoustic_read_u16_le(&payload[6]);
+    p_snapshot->peak_dbfs_x100 = (int16_t) acoustic_read_u16_le(&payload[8]);
+    p_snapshot->vad = payload[10];
+    p_snapshot->xvf_status = payload[11];
+    p_snapshot->audio_flags = payload[12];
+    p_snapshot->learning_samples = payload[13];
+    p_snapshot->target_peak_bin = payload[14];
+    p_snapshot->current_peak_bin = payload[15];
+    p_snapshot->nearest_sample = payload[16];
+    p_snapshot->active_frame_count = payload[17];
+    p_snapshot->cosine_distance_x1000 = acoustic_read_u16_le(&payload[18]);
+    p_snapshot->identifier_threshold_x1000 = acoustic_read_u16_le(&payload[20]);
+    p_snapshot->similarity_permille = acoustic_read_u16_le(&payload[22]);
+    p_snapshot->background_mse_x1000 = acoustic_read_u16_le(&payload[24]);
+    p_snapshot->background_threshold_x1000 = acoustic_read_u16_le(&payload[26]);
+    p_snapshot->observation_sequence = acoustic_read_u32_le(&payload[28]);
+    p_snapshot->feature_generation = acoustic_read_u32_le(&payload[32]);
+    p_snapshot->inference_count = acoustic_read_u32_le(&payload[36]);
+    p_snapshot->match_count = acoustic_read_u32_le(&payload[40]);
+    p_snapshot->storage_result = payload[44];
+    p_snapshot->reserved[0] = payload[45];
+    p_snapshot->reserved[1] = payload[46];
+    p_snapshot->reserved[2] = payload[47];
+    return true;
+}
+
+/** =================================================================*
+ * @brief AI Lab要約chunkを復号
+ * @param[in] p_frame 受信フレーム
+ * @param[out] p_chunk 受信chunk
+ * @return chunk形式が正しければtrue
+ * ================================================================= */
+bool acoustic_protocol_decode_ai_lab_summary_chunk(const acoustic_frame_t * p_frame,
+                                                   acoustic_ai_lab_summary_chunk_t * p_chunk) {
+    if ((NULL == p_frame) || (NULL == p_chunk) ||
+        (ACOUSTIC_MESSAGE_AI_LAB_SUMMARY_CHUNK != p_frame->type) ||
+        (ACOUSTIC_AI_LAB_SUMMARY_CHUNK_PAYLOAD_SIZE != p_frame->payload_length)) {
+        return false;
+    }
+    p_chunk->feature_generation = acoustic_read_u32_le(&p_frame->payload[0]);
+    p_chunk->chunk_index = p_frame->payload[4];
+    p_chunk->chunk_count = p_frame->payload[5];
+    p_chunk->schema_version = p_frame->payload[6];
+    p_chunk->cpu_drop_count = p_frame->payload[7];
+    memcpy(p_chunk->data, &p_frame->payload[8], sizeof(p_chunk->data));
+    return true;
+}
+
+/** =================================================================*
+ * @brief AI Lab保存見本chunkを復号
+ * @param[in] p_frame 受信フレーム
+ * @param[out] p_chunk 受信chunk
+ * @return chunk形式が正しければtrue
+ * ================================================================= */
+bool acoustic_protocol_decode_ai_lab_profile_chunk(const acoustic_frame_t * p_frame,
+                                                   acoustic_ai_lab_profile_chunk_t * p_chunk) {
+    if ((NULL == p_frame) || (NULL == p_chunk) ||
+        (ACOUSTIC_MESSAGE_AI_LAB_PROFILE_CHUNK != p_frame->type) ||
+        (ACOUSTIC_AI_LAB_PROFILE_CHUNK_PAYLOAD_SIZE != p_frame->payload_length)) {
+        return false;
+    }
+    p_chunk->profile_generation = acoustic_read_u32_le(&p_frame->payload[0]);
+    p_chunk->sample_index = p_frame->payload[4];
+    p_chunk->chunk_index = p_frame->payload[5];
+    p_chunk->chunk_count = p_frame->payload[6];
+    p_chunk->sample_count = p_frame->payload[7];
+    memcpy(p_chunk->data, &p_frame->payload[8], sizeof(p_chunk->data));
     return true;
 }

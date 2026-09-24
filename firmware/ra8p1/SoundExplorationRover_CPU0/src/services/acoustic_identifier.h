@@ -21,6 +21,7 @@
 #define CPU0_ACOUSTIC_IDENTIFIER_ACCEPTANCE_THRESHOLD_MAX (0.055F) /**< 実機照合でTARGETを受理する距離上限 */
 #define CPU0_ACOUSTIC_IDENTIFIER_SIGMA_SCALE (1.5F)         /**< 音響識別しきい値の標準偏差倍率 */
 #define CPU0_ACOUSTIC_IDENTIFIER_PEAK_TOLERANCE_BINS (6U)   /**< TARGETを許す代表ピークbinの差 */
+#define CPU0_ACOUSTIC_LEARNING_OUTLIER_DISTANCE (0.25F)     /**< 4見本から孤立した学習見本の距離 */
 
 /**< 音響要約と現場見本照合の判定状態 */
 typedef enum e_acoustic_identifier_summary_status {
@@ -48,6 +49,7 @@ EXPORT BOOL acoustic_identifier_summary_create(const B * p_frames,
                                                 UB * p_active_frame_count); /* 192次元int8要約生成 */
 /* 見本群の各bin最大パワーから代表ピーク周波数binを特定する。 */
 EXPORT UB acoustic_identifier_find_peak_bin(const B * p_samples, UW sample_count); /* peak bin取得 */
+EXPORT UB acoustic_identifier_consensus_peak_bin(const B * p_samples, UW sample_count); /* 孤立見本を除くpeak bin */
 /* 代表ピーク周波数binおよび暗騒音帯域に基づく32bin重みベクトルを構築する。 */
 EXPORT void acoustic_identifier_build_weights(UB peak_bin, float * p_weights); /* 音響特徴量bin重み生成 */
 EXPORT BOOL acoustic_identifier_weighted_cosine_distance(const B * p_left,
@@ -56,6 +58,9 @@ EXPORT BOOL acoustic_identifier_weighted_cosine_distance(const B * p_left,
                                                          float * p_distance); /* 重み付きcosine距離算出 */
 EXPORT BOOL acoustic_identifier_cosine_distance(const B * p_left, const B * p_right,
                                                float * p_distance); /* cosine距離 */
+EXPORT BOOL acoustic_identifier_isolated_sample_find(const B * p_samples,
+                                                      UW sample_count,
+                                                      UW * p_index); /* 孤立見本を検出 */
 EXPORT BOOL acoustic_identifier_leave_one_out_threshold(const B * p_samples,
                                                          UW sample_count,
                                                          const float * p_bin_weights,

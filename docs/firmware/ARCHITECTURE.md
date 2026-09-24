@@ -316,13 +316,17 @@ CPU0の`task_think`が青LED（LED1/P600）と緑LED（LED2/P303）を一括し�
 
 | 表示 | 意味 |
 |---|---|
-| 青を500 msごとに反転、緑消灯 | USB link待ち・safe stop |
+| 青を500 msごとに反転 | USB link待ち・safe stop |
 | 青を1秒ごとに100 ms点灯 | 停止して音を聴取中 |
 | 青を125 msごとに反転 | 目標方向へservo整定中 |
 | 青点灯 | 1000 msの短距離移動中 |
 | 青を250 msごとに反転 | settleまたはcooldown中 |
-| 緑を1秒ごとに100 ms点灯 | link待ち以外の`task_think` heartbeat |
-| 緑点灯＋青をN回点滅 | CPU0 fault。Nがfault番号 |
+| 緑消灯 | 有効な学習見本なし。SW1長押しで学習開始 |
+| 緑を500 ms点灯・500 ms消灯 | 見本を収集中 |
+| 緑を100 ms点灯・100 ms消灯 | 5見本収集済み。SW1長押しで保存 |
+| 緑点灯 | 5見本をMRAMへ保存済み |
+| 緑が100 msの2回点滅を1秒ごとに繰り返す | MRAM初期化・保存・読出しに失敗 |
+| 青をN回点滅 | CPU0 fault。Nがfault番号 |
 | 赤を500 msごとに反転 | CPU1正常heartbeat |
 | 赤を約50 msごとに反転 | CPU1 driver/FSP error |
 
@@ -652,8 +656,8 @@ e² studioではCPU0/CPU1 projectをRefreshし、Generate Project Content、Clea
 
 ## 14. MRAMを用いたプロトタイプ保存
 
-RA8P1のCode MRAMは全体で1 MiB（`0x02000000`〜`0x020FFFFF`）で、CPU0とCPU1へ512 KiBずつ割り当てる。CPU0は自身の割当末尾4 KiB（`0x0207F000`〜`0x0207FFFF`）をリンカで予約し、64次元int8音響プロトタイプの永続化に使用する。リンカASSERTにより、CPU0イメージが予約領域へ達した場合はビルドを失敗させる。
+RA8P1のCode MRAMは全体で1 MiB（`0x02000000`〜`0x020FFFFF`）で、CPU0とCPU1へ512 KiBずつ割り当てる。CPU0は自身の割当末尾32 KiB（`0x02078000`〜`0x0207FFFF`）をリンカで予約し、192次元int8音響見本5件と背景モデルを永続化する。リンカASSERTにより、CPU0イメージが予約領域へ達した場合はビルドを失敗させる。
 
-書込みはFSP `r_mram`を使用し、直接ポインタへ代入しない。96 byte（32 byteプログラミング単位×3）のA/Bスロットへ、世代番号、形式バージョン、CRC-32、commit markerを付けて交互に保存する。更新対象を`0xFF`へ上書きしてから新レコードを書き、読戻しとCRCを検証するため、更新中に電源が失われても直前の有効スロットを選択できる。
+書込みはFSP `r_mram`を使用し、直接ポインタへ代入しない。16 KiBずつのA/Bスロットへ、世代番号、形式バージョン、CRC-32、commit markerを付けて交互に保存する。通常の保存では更新対象を`0xFF`へ上書きしてから新レコードを書き、読戻しとCRCを検証する。学習開始時は先に停止指令を出し、旧見本が再起動で復活しないようA/B両スロットを`0xFF`へ初期化して読戻しを検証する。初期化が失敗した場合は学習を開始しない。
 
 Code MRAMのプログラム中はCPU0割込みを禁止し、`CPU1WAITCR`でCPU1をquiescent状態へ移して、両コアからの命令フェッチを止める。保存処理の結果、有効データ有無、学習中状態は既存テレメトリの`sensor_reserved`へ格納し、rover-monitorには`learning.storage_result`、`learning.storage_valid`、`learning.active`として記録する。

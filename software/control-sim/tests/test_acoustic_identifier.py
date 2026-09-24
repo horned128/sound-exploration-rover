@@ -192,3 +192,34 @@ def test_classification_accepts_the_measured_six_bin_peak_drift() -> None:
     handle.acoustic_identifier_summary_classify(candidate, 1, 80, samples, 5, None, 0.20, ctypes.byref(output))
     assert output.minimum_cosine_distance <= 0.055
     assert output.status == SUMMARY_TARGET
+
+
+def test_isolated_training_sample_is_detected_and_ignored_for_matching() -> None:
+    """Four matching prototypes identify one contaminating capture, even at the same peak bin."""
+    handle = library()
+    base, _, valid = summary_from_patch(80)
+    assert valid == 1
+    good = list(base)
+    outlier = good.copy()
+    for slot in range(2):
+        for bin_index in range(CPU0_ACOUSTIC_FEATURE_BIN_COUNT):
+            index = slot * 3 * CPU0_ACOUSTIC_FEATURE_BIN_COUNT + bin_index
+            outlier[index] = -outlier[index]
+
+    samples = (ctypes.c_int8 * (5 * CPU0_ACOUSTIC_SUMMARY_DIMENSION))(
+        *(outlier + good * 4)
+    )
+    isolated = ctypes.c_uint32(99)
+    assert handle.acoustic_identifier_isolated_sample_find(samples, 5, ctypes.byref(isolated)) == 1
+    assert isolated.value == 0
+
+    output = AcousticIdentifierSummaryOutput()
+    query = (ctypes.c_int8 * CPU0_ACOUSTIC_SUMMARY_DIMENSION)(*outlier)
+    handle.acoustic_identifier_summary_classify(
+        query, 1, 80, samples, 5, None, 0.20, ctypes.byref(output)
+    )
+    assert output.status == SUMMARY_NOT_TARGET
+    assert output.sample_index != 0
+
+    coherent = (ctypes.c_int8 * (5 * CPU0_ACOUSTIC_SUMMARY_DIMENSION))(*(good * 5))
+    assert handle.acoustic_identifier_isolated_sample_find(coherent, 5, ctypes.byref(isolated)) == 0
