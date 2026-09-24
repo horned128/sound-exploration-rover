@@ -35,7 +35,7 @@ ControllerStep = Callable[[SensorSnapshot, int], ObstacleAvoidanceOutput]
 def run_wall_approach(
     *, speed_mm_s: float = 240, turn_rate_dps: float = 20,
     initial_heading_deg: float = 0, duration_ms: int = 30000,
-    side_angle_deg: float = 0,
+    side_angle_deg: float = 13.0,
     controller_step: ControllerStep | None = None,
 ) -> list[WallSample]:
     """Feed simulated ToF and IMU observations back into the real C controller.
@@ -48,15 +48,17 @@ def run_wall_approach(
         handle = library()
         handle.obstacle_avoidance_controller_init()
 
-        def controller_step(snapshot: SensorSnapshot, now_ms: int) -> ObstacleAvoidanceOutput:
+        def controller_step(snapshot: SensorSnapshot, now_ms: int, vel_mm_s: float) -> ObstacleAvoidanceOutput:
             output = ObstacleAvoidanceOutput()
             handle.obstacle_avoidance_controller_step(
-                ctypes.byref(snapshot), False, now_ms, ctypes.c_int16(0), ctypes.byref(output)
+                ctypes.byref(snapshot), False, now_ms, ctypes.c_int16(0),
+                ctypes.c_int16(int(vel_mm_s)), ctypes.byref(output)
             )
             return output
 
     x, y, heading = -900.0, 0.0, math.radians(initial_heading_deg)
     velocity = steering = yaw_rate = 0.0
+    prev_velocity = 0.0
     filtered = None
     output = ObstacleAvoidanceOutput()
     samples = []
@@ -78,7 +80,14 @@ def run_wall_approach(
             # Match the current vehicle wiring: a positive simulated heading
             # rate is reported as a negative BMI270 Z rate.
             snapshot.gyro_dps_x10[2] = round(-math.degrees(yaw_rate) * 10)
-            output = controller_step(snapshot, now_ms)
+            # Forward acceleration: velocity change over 100 ms step, scaled to mg
+            # (1 g = 9810 mm/s^2; dt=0.1s → accel_mm_s2 = delta_v/0.1)
+            accel_y_mg = int((velocity - prev_velocity) / 0.1 / 9.810)
+            accel_y_mg = max(-700, min(700, accel_y_mg))
+            snapshot.accel_mg[1] = accel_y_mg
+            prev_velocity = velocity
+            # Pass actual simulated velocity for stuck detection
+            output = controller_step(snapshot, now_ms, velocity)
 
         target_velocity = (output.left_rpm + output.right_rpm) / 200 * speed_mm_s if output.actuator_enable else 0
         velocity = ramp(velocity, target_velocity, 40)

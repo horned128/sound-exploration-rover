@@ -5,6 +5,7 @@
 #include "tasks/task_think.h"
 #include "tasks/task_sensor.h"
 #include "tasks/task_command.h"
+#include "ipc/actuator_ipc_client.h"
 #include "tasks/task_acoustic_link.h"
 #include "control/sensor_liveness.h"
 #include "config/sensor_config.h"
@@ -19,6 +20,10 @@ static rover_motion_target_t target;
 bsp_leds_t g_bsp_leds={0,NULL};
 volatile UW g_task_acoustic_link_feature_generation;
 volatile UW g_task_infer_feature_generation;
+BOOL actuator_ipc_client_status_get(actuator_status_t * status) {
+    (void) status;
+    return FALSE;
+}
 void odometry_service_get_pose(odometry_pose_t *pose) {
     *pose=(odometry_pose_t){.valid=TRUE};
 }

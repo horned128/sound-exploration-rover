@@ -200,6 +200,36 @@
       ]
     },
     {
+      "label": "RA8P1: Fast Build All & Flash All",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\.vscode\\scripts\\Invoke-RaBuild.ps1",
+        "-Flash",
+        "-Target",
+        "All"
+      ],
+      "osx": {
+        "command": "/bin/bash",
+        "args": [
+          "${workspaceFolder}/.vscode/scripts/Invoke-RaBuild.sh",
+          "--flash",
+          "--target",
+          "All"
+        ]
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
       "label": "ESP32: Build",
       "type": "process",
       "command": "powershell.exe",

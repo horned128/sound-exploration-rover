@@ -7,7 +7,8 @@
 #include "config/pin_config.h"                              /* LEDの役割設定 */
 #include "config/sensor_config.h"                           /* センサー安全判定値 */
 #include "config/task_config.h"                             /* 思考周期と優先度 */
-#include "control/control_mlp_planner.h"                     /* TFLM制御MLPプランナ */
+#include "ipc/actuator_ipc_client.h"                        /* CPU1実測左右輪速度 */
+#include "control/control_mlp_planner.h"                    /* TFLM制御MLPプランナ */
 #include "control/obstacle_avoidance_controller.h"          /* ToF・IMU走行判断 */
 #include "control/safety_arbiter.h"                         /* 安全調停・ToF veto集約 */
 #include "control/sensor_liveness.h"                        /* 取得タスクと独立した更新監視 */
@@ -401,8 +402,10 @@ LOCAL void task_think_learning_command_apply(void) {
 }
 
 /** =================================================================*
- * @brief  最新の96次元要約を1回だけ現場見本として取り込む
+ * @brief  最新の192次元要約を1回だけ現場見本として取り込む
  * @details 能動フレーム不足は判定不能なので、零ベクトルを見本として保存しない。
+ * @param[in] p_snapshot 最新の音響リンク状態
+ * @param[in] observation_usable 音響観測の有効状態
  * ================================================================= */
 LOCAL void task_think_learning_capture(const task_acoustic_link_snapshot_t * p_snapshot,
                                        BOOL observation_usable) {
@@ -410,11 +413,12 @@ LOCAL void task_think_learning_capture(const task_acoustic_link_snapshot_t * p_s
         (g_task_think_learning_samples >= CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT)) {
         return;
     }
-    if ((NULL == p_snapshot) || (!observation_usable) ||
-        (p_snapshot->observation.level_dbfs_x100 < CPU0_SOUND_TRIGGER_DBFS_X100) ||
-        (0U == p_snapshot->observation.vad)) {
+    if ((NULL == p_snapshot) || (!observation_usable)) {
         return;
     }
+
+    /* 特徴量パッチはESP32S3側で音量トリガ済み。
+     * 推論完了時点のVAD/音量は収録時点と異なるため、ここでは再判定しない。 */
 
     /* 同じfeature_generationを二重保存しないための推論結果保持領域。 */
     LOCAL task_infer_result_t result;
@@ -686,6 +690,8 @@ LOCAL void task_think_led_update(UW state_elapsed_ms, UW heartbeat_elapsed_ms, U
 
 /** =================================================================*
  * @brief  思考タスク本体
+ * @param[in] stacd 起動コード（本関数では未使用）
+ * @param[in] exinf 起動情報（本関数では未使用）
  * ================================================================= */
 LOCAL void task_think_entry(INT stacd, void * exinf) {
     g_task_think_storage_result = prototype_storage_init();
@@ -706,6 +712,7 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
     UW last_infer_generation = 0U;
     UW target_sound_match_timer_ms = 0U;
     BOOL target_sound_matched = FALSE;
+    BOOL target_sound_direction_valid = FALSE;
     BOOL avoidance_motion_latched = FALSE;
 
     while (1) {
@@ -795,28 +802,47 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             if (infer_result.feature_generation != last_infer_generation) {
                 last_infer_generation = infer_result.feature_generation;
                 if (CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_TARGET == infer_result.identifier.status) {
-                    /* peak帯域と距離を通過済みの新しいTARGETは、直ちにDoA取得へ渡す。 */
+                    /* ピーク帯域と距離の判定を通過したTARGETは、直ちにDoA取得へ渡す。 */
                     target_sound_matched = TRUE;
+                    target_sound_direction_valid = TRUE;
                     target_sound_match_timer_ms = CPU0_SOUND_IDENTIFIER_TIMEOUT_MS;
+                } else {
+                    /* 未一致パッチのDoAで方向を更新しない。ピーク帯域が見本と一致する
+                     * NOT_TARGETは走行雑音で距離が揺れ得るため、一致保持を短く継続する。 */
+                    target_sound_direction_valid = FALSE;
+                    UB const current_peak_bin = infer_result.summary_valid ?
+                        acoustic_identifier_find_peak_bin(infer_result.summary, 1U) : 255U;
+                    W const peak_delta = (W) current_peak_bin - (W) storage_data.target_peak_bin;
+                    BOOL const peak_matches = (current_peak_bin < CPU0_ACOUSTIC_FEATURE_BIN_COUNT) &&
+                        (storage_data.target_peak_bin < CPU0_ACOUSTIC_FEATURE_BIN_COUNT) &&
+                        (peak_delta <= (W) CPU0_ACOUSTIC_IDENTIFIER_PEAK_TOLERANCE_BINS) &&
+                        (peak_delta >= -(W) CPU0_ACOUSTIC_IDENTIFIER_PEAK_TOLERANCE_BINS);
+                    float const distance = infer_result.identifier.minimum_cosine_distance;
+                    if ((CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_NOT_TARGET == infer_result.identifier.status) &&
+                        ((distance >= CPU0_SOUND_IDENTIFIER_FORCE_REJECT_DISTANCE) ||
+                         ((distance >= CPU0_SOUND_IDENTIFIER_REJECT_DISTANCE) && !peak_matches))) {
+                        target_sound_matched = FALSE;
+                        target_sound_match_timer_ms = 0U;
+                    }
                 }
-                /* 単発のNOT_TARGETは前回TARGETの判定窓を打ち消さない。
-                 * 断続音の無音境界や一フレームの特徴量ぶれは、下の期限処理で
-                 * CPU0_SOUND_IDENTIFIER_TIMEOUT_MS後にだけ追従許可を失う。 */
             }
         }
         if (0U == target_sound_match_timer_ms) {
             target_sound_matched = FALSE;
+            target_sound_direction_valid = FALSE;
         } else if (target_sound_match_timer_ms >= CPU0_THINK_PERIOD_MS) {
             target_sound_match_timer_ms -= CPU0_THINK_PERIOD_MS;
         } else {
             target_sound_match_timer_ms = 0U;
             target_sound_matched = FALSE;
+            target_sound_direction_valid = FALSE;
         }
 
         /* --- S3: 音源追従コントローラを先に実行し、目標操舵角を取得 --- */
         BOOL const match_required = (0U != CPU0_SOUND_REQUIRE_IDENTIFIER_MATCH) && g_task_think_storage_valid;
-        BOOL const sound_allowed = !match_required || target_sound_matched;
-        BOOL const target_sound_valid = link_ready && sound_allowed &&
+        /* 見本一致の保持は走行継続用とし、別音のDoAを位置推定へ混ぜない。 */
+        BOOL const target_sound_valid = link_ready &&
+            (!match_required || (target_sound_matched && target_sound_direction_valid)) &&
             (snapshot.observation.doa_confidence >= CPU0_SOUND_LOCALIZATION_MIN_CONFIDENCE) &&
             (0U != snapshot.observation.vad) &&
             (snapshot.observation.level_dbfs_x100 >= CPU0_SOUND_TRIGGER_DBFS_X100);
@@ -876,6 +902,7 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             .observation = snapshot.observation,
             .match_required = match_required,
             .target_sound_matched = target_sound_matched,
+            .target_sound_direction_valid = target_sound_direction_valid,
             .navigation_target_valid = (0U != CPU0_SOUND_USE_LOCALIZATION_FOR_STEERING) &&
                                        localizer_output.navigation_target_valid,
             .navigation_bearing_deg = localizer_output.source_bearing_deg,
@@ -889,6 +916,10 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
                          (0U != (sensor_snapshot.valid_flags & CPU0_SENSOR_VALID_IMU)),
             .gyro_z_dps_x10 = sensor_snapshot.gyro_dps_x10[CPU0_SENSOR_YAW_AXIS],
             .imu_update_count = sensor_snapshot.update_count,
+            .pose_heading_valid = pose_valid,
+            .pose_heading_mrad = pose.theta_mrad,
+            .rear_seam_turn_preference = sensor_fresh ?
+                obstacle_avoidance_rear_seam_turn_preference(&sensor_snapshot) : 0,
         };
         /* 音源追従コントローラの出力を回避制御へ引き渡す領域。 */
         LOCAL sound_follow_output_t sf_output;
@@ -907,8 +938,14 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         }
 
         /* --- S3: 音源追従中だけ回避を開始し、開始済みなら通過まで保持する --- */
+        BOOL const spin_requested = (CPU0_THINK_STATE_SPIN_PREP == sf_output.state) ||
+                                    (CPU0_THINK_STATE_SPIN_STEP == sf_output.state);
         BOOL const sound_motion_active = (CPU0_THINK_STATE_MOVE_STEP == sf_output.state) ||
-                                         (CPU0_THINK_STATE_SPIN_STEP == sf_output.state);
+                                         spin_requested;
+        if (match_required && !target_sound_matched) {
+            /* 音源消失後に回避ラッチだけで走り続けない。 */
+            avoidance_motion_latched = FALSE;
+        }
         BOOL const obstacle_motion_context = sound_motion_active || avoidance_motion_latched;
         /* ToF回避コントローラの判断結果を安全調停へ渡す領域。 */
         LOCAL obstacle_avoidance_output_t oa_output;
@@ -922,10 +959,28 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         } else if (obstacle_target_steering_deg < -CPU0_SOUND_STEERING_MAX_DEG) {
             obstacle_target_steering_deg = -CPU0_SOUND_STEERING_MAX_DEG;
         }
-        obstacle_avoidance_controller_step(sensor_fresh ? &sensor_snapshot : NULL,
-                                           (APP_FAULT_NONE != g_task_think_fault_flags) || g_task_think_learning_mode ||
-                                           !obstacle_motion_context,
-                                           sensor_now_ms, obstacle_target_steering_deg, &oa_output);
+        BOOL const spin_space_available = spin_requested && sensor_fresh &&
+            (APP_FAULT_NONE == g_task_think_fault_flags) && !g_task_think_learning_mode &&
+            obstacle_avoidance_spin_space_available(&sensor_snapshot);
+        if (spin_space_available) {
+            /* 前進回避は旋回の代わりにならない。安全な空間では音源への
+             * IMU閉ループ旋回を通し、以前の前進回避ラッチは破棄する。 */
+            obstacle_avoidance_controller_init();
+            avoidance_motion_latched = FALSE;
+            oa_output.state = sf_output.state;
+            oa_output.rule = CPU0_SENSOR_RULE_FORWARD;
+            oa_output.actuator_enable = TRUE;
+        } else {
+            actuator_status_t actuator_feedback = {0};
+            BOOL const feedback_valid = sensor_fresh &&
+                actuator_ipc_client_status_get(&actuator_feedback);
+            obstacle_avoidance_encoder_feedback_set(feedback_valid, actuator_feedback.sequence_number,
+                actuator_feedback.left_encoder_rpm_x10, actuator_feedback.right_encoder_rpm_x10);
+            obstacle_avoidance_controller_step(sensor_fresh ? &sensor_snapshot : NULL,
+                (APP_FAULT_NONE != g_task_think_fault_flags) || g_task_think_learning_mode ||
+                    !obstacle_motion_context,
+                sensor_now_ms, obstacle_target_steering_deg, pose.linear_speed_mm_s, &oa_output);
+        }
         g_task_think_sensor_rule = oa_output.rule;
 
         if (sound_motion_active && oa_output.avoidance_in_progress) {

@@ -402,7 +402,7 @@
                                 <div style="color: #e0e0e0; font-weight: bold; margin-bottom: 3px;">ローバー中心ビュー (Rover-Centric View)</div>
                                 <div style="color: #4caf50; font-size: 10px;">■ Steering 操舵目標 (実線)</div>
                                 <div style="color: #ff9800; font-size: 10px;">■ Audio DoA 車体座標へ変換した音源方位 (点線)</div>
-                                <div style="color: #03a9f4; font-size: 10px;">■ Source bearing 追従に使うDoA方位</div>
+                                <div style="color: #03a9f4; font-size: 10px;" id="radarBearingLabel">■ CPU0 target 方位 (走行・回避中のみ)</div>
                                 <div style="color: #2196f3; font-size: 10px;">● Obstacles (ToF L/C/R 平行ビーム)</div>
                                 <div style="color: #f44336; font-size: 10px;">-- 250mm 停止 / 234mm 交差ライン</div>
                             </div>
@@ -660,9 +660,20 @@
         let latestAudioLevel = -100;
         let latestPose = null;
         let latestNavigation = null;
+        let latestThinkState = 0;
 
         function sensorValue(values, index) { return Number.isFinite(values?.[index]) ? values[index] : null; }
         function isSensorValid(sensors, index) { return ((Number(sensors?.valid_flags) || 0) & (1 << index)) !== 0; }
+        // CPU0と同じ車体方位: 前0°・右正。2026-09-24四方試験で
+        // 前方はXVFの符号反転、後方は生DoAと同符号で整合した。
+        function doaToRoverBearing(doa) {
+            if (!Number.isFinite(doa) || doa < 0 || doa >= 360) return null;
+            let bearing = doa;
+            while (bearing >= 180) bearing -= 360;
+            while (bearing < -180) bearing += 360;
+            if (Math.abs(bearing) <= 90) bearing = -bearing;
+            return bearing;
+        }
 
         /**
          * ① ローバー中心ビュー (Rover-Centric Local View)
@@ -822,22 +833,22 @@
             let audioLenFactor = (latestAudioLevel + 100) / 100;
             audioLenFactor = Math.max(0.15, Math.min(1.0, audioLenFactor));
 
-            // CPU0のsound_follow_doa_to_relative()と同じ変換。XVFの生DoAを
-            // そのまま描くと、鏡映取付け補正後の操舵・Source bearingと左右が
-            // 逆に見えるため、ローバー座標（前0°、右正）だけをレーダーに描く。
-            const doaToRoverBearing = (doa) => {
-                let bearing = -Number(doa); // CPU0_SOUND_DOA_CLOCKWISE_POSITIVE == 0
-                while (bearing >= 180) bearing -= 360;
-                while (bearing < -180) bearing += 360;
-                return bearing;
-            };
-            if (latestAudioDoa !== 65535) {
-                const trackedBearing = doaToRoverBearing(latestAudioDoa);
+            // CPU0へ届いたDoAをCPU0の車体座標へ変換して描画する。
+            const trackedBearing = doaToRoverBearing(latestAudioDoa);
+            if (trackedBearing !== null) {
                 drawArrow(trackedBearing, '#ff9800', true, audioLenFactor, true);
-                // 位置推定器の過去推定値ではなく、実際に追従判断へ入れる
-                // 現在DoAをSource bearingとして重ねる。
-                drawArrow(trackedBearing, '#03a9f4', false, 0.85);
             }
+            // CPU0の目標方位は既に車体の右正。二重反転しない。
+            // 直近DoAと目標は、旋回中や回避中には異なることがある。
+            const following = [2, 3, 7, 8, 9, 10, 14, 15, 16, 17, 18].includes(latestThinkState);
+            const cpuTargetBearing = latestNavigation?.bearing_deg;
+            const targetBearing = Number(cpuTargetBearing);
+            const targetFresh = latestNavigation?.valid && Number(latestNavigation.age_ms) <= 1000;
+            const targetVisible = following && targetFresh && cpuTargetBearing != null && Number.isFinite(targetBearing);
+            if (targetVisible) drawArrow(targetBearing, '#03a9f4', false, 0.85);
+            document.getElementById('radarBearingLabel').textContent = targetVisible
+                ? `■ CPU0 target ${targetBearing > 0 ? '+' : ''}${targetBearing}° (右が正)`
+                : '■ CPU0 target 方位 (走行・回避中のみ)';
             drawArrow(latestSteer, '#4caf50', false, 1.0);
             
             // ローバー原点マーク
@@ -956,9 +967,10 @@
             }
 
             // ③ 音響イベントの重畳記録 (VAD検出時)
-            if (d.audio && d.audio.vad && d.audio.doa_deg !== 65535) {
-                const doaRad = (d.audio.doa_deg * Math.PI) / 180.0;
-                const soundTheta = odomTheta - doaRad;
+            const audioBearing = doaToRoverBearing(Number(d.audio?.doa_deg ?? 65535));
+            if (d.audio?.vad && audioBearing !== null) {
+                // 地図方位は反時計回りが正。右正の車体相対DoAを引く。
+                const soundTheta = odomTheta - (audioBearing * Math.PI / 180.0);
                 const lastEvt = audioEvents[audioEvents.length - 1];
                 if (!lastEvt || (d.esp_ms - lastEvt.ms) > 400) {
                     audioEvents.push({
@@ -1374,8 +1386,9 @@
 
             latestSensors = d.sensors || null;
             latestSteer = d.think?.steering_deg || 0;
-            latestAudioDoa = Number.isFinite(filteredDoa) ? filteredDoa : 65535;
+            latestAudioDoa = Number(d.audio?.doa_deg ?? 65535);
             latestNavigation = d.navigation || null;
+            latestThinkState = Number(d.think?.state);
 
             const validFlags = Number(d.sensors?.valid_flags) || 0;
             const sensorError = Number(d.sensors?.error_flags) || 0;

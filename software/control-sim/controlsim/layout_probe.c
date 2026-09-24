@@ -11,9 +11,11 @@ int main(void)
         "{"
         "\"sound_follow_input_t\":{\"size\":%zu,\"link_ready\":%zu,\"new_observation\":%zu,"
         "\"fault_active\":%zu,\"motion_allowed\":%zu,\"observation\":%zu,"
-        "\"match_required\":%zu,\"target_sound_matched\":%zu,\"navigation_target_valid\":%zu,"
+        "\"match_required\":%zu,\"target_sound_matched\":%zu,\"target_sound_direction_valid\":%zu,"
+        "\"navigation_target_valid\":%zu,"
         "\"navigation_bearing_deg\":%zu,\"arrival_verify\":%zu,\"arrived\":%zu,\"avoidance_relisten\":%zu,"
-        "\"restart_request\":%zu,\"imu_valid\":%zu,\"gyro_z_dps_x10\":%zu,\"imu_update_count\":%zu},"
+        "\"restart_request\":%zu,\"imu_valid\":%zu,\"gyro_z_dps_x10\":%zu,\"imu_update_count\":%zu,"
+        "\"pose_heading_valid\":%zu,\"pose_heading_mrad\":%zu,\"rear_seam_turn_preference\":%zu},"
         "\"sound_follow_output_t\":{\"size\":%zu,\"state\":%zu,\"steering_deg\":%zu,"
         "\"target_bearing_deg\":%zu,\"is_spin_turn\":%zu,\"left_rpm\":%zu,\"right_rpm\":%zu,\"actuator_enable\":%zu,"
         "\"emergency_stop\":%zu},"
@@ -34,12 +36,16 @@ int main(void)
         offsetof(sound_follow_input_t, new_observation), offsetof(sound_follow_input_t, fault_active),
         offsetof(sound_follow_input_t, motion_allowed), offsetof(sound_follow_input_t, observation),
         offsetof(sound_follow_input_t, match_required), offsetof(sound_follow_input_t, target_sound_matched),
+        offsetof(sound_follow_input_t, target_sound_direction_valid),
         offsetof(sound_follow_input_t, navigation_target_valid),
         offsetof(sound_follow_input_t, navigation_bearing_deg), offsetof(sound_follow_input_t, arrival_verify),
         offsetof(sound_follow_input_t, arrived), offsetof(sound_follow_input_t, avoidance_relisten),
         offsetof(sound_follow_input_t, restart_request), offsetof(sound_follow_input_t, imu_valid),
         offsetof(sound_follow_input_t, gyro_z_dps_x10),
         offsetof(sound_follow_input_t, imu_update_count),
+        offsetof(sound_follow_input_t, pose_heading_valid),
+        offsetof(sound_follow_input_t, pose_heading_mrad),
+        offsetof(sound_follow_input_t, rear_seam_turn_preference),
         sizeof(sound_follow_output_t), offsetof(sound_follow_output_t, state),
         offsetof(sound_follow_output_t, steering_deg), offsetof(sound_follow_output_t, target_bearing_deg),
         offsetof(sound_follow_output_t, is_spin_turn),

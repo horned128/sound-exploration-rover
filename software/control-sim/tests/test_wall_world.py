@@ -6,7 +6,7 @@ from controlsim.wall_world import run_wall_approach
 @pytest.mark.parametrize("speed_mm_s", [180, 240, 300])
 @pytest.mark.parametrize("turn_rate_dps", [20, 30])
 @pytest.mark.parametrize("initial_heading_deg", [-10, 0, 10])
-@pytest.mark.parametrize("side_angle_deg", [-5, 0, 5])
+@pytest.mark.parametrize("side_angle_deg", [0, 10, 13, 15])
 def test_closed_loop_wall_approach_prioritizes_forward_escape_without_reverse(
     speed_mm_s, turn_rate_dps, initial_heading_deg, side_angle_deg,
 ) -> None:

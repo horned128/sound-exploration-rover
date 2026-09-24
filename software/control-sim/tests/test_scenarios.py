@@ -15,13 +15,15 @@ class Controller:
         self.handle.obstacle_avoidance_controller_init()
         self.now_ms = start_ms
 
-    def step(self, distances=(1000, 1000, 1000), *, gyro=0, dt=100, snapshot=None, fault=False, target=0):
+    def step(self, distances=(1000, 1000, 1000), *, gyro=0, dt=100, snapshot=None, fault=False, target=0,
+             speed=120):
         if snapshot is None:
             snapshot = sensor_snapshot(left_mm=distances[0], center_mm=distances[1], right_mm=distances[2])
             snapshot.gyro_dps_x10[2] = gyro
         output = ObstacleAvoidanceOutput()
         self.handle.obstacle_avoidance_controller_step(
-            ctypes.byref(snapshot), fault, self.now_ms & 0xFFFFFFFF, ctypes.c_int16(target), ctypes.byref(output)
+            ctypes.byref(snapshot), fault, self.now_ms & 0xFFFFFFFF, ctypes.c_int16(target),
+            ctypes.c_int16(speed), ctypes.byref(output)
         )
         self.now_ms += dt
         return output

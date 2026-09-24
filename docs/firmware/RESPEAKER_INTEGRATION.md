@@ -314,7 +314,7 @@ stateDiagram-v2
 
 1回のloudかつVAD有効な観測で音イベントを開始する。開始直後の500 msはDoAを採用せず、その後の最新5 sampleが相互差20度以内になった時点でDoAと操舵角を固定する。短い拍手ではVADが先に0へ戻るため、取得開始後はVADの継続を要求しない。開始から2000 ms以内に安定しなければイベントを破棄する。servo整定と1000 msの1 stepを完了した後は必ず`COOLDOWN`へ入り、走行後に混ざるモーター音・反射音のDoAを次の移動指令として使わない。
 
-DoAは車体正面を0度、右を正、左を負として操舵角へ変換する。全方位で車体前進を指令し、側方・後方では4輪を最大45度の逆相操舵とし、旋回内側のモーターを90 RPM相当に減速して回頭量を増やす。ReSpeakerはESP32S3実装面を上にして搭載しているため、DoAの左右は`CPU0_SOUND_DOA_CLOCKWISE_POSITIVE=0`で鏡映補正する。`CPU0_SOUND_DOA_ZERO_OFFSET_DEG=0`、正のサーボ指令は物理的な左操舵のため`CPU0_STEERING_SERVO_OUTPUT_SIGN=-1`でサーボ出力だけを反転している。
+DoAは車体正面を0度、右を正、左を負として変換する。2026-09-24の四方向実測に基づき、前方は`CPU0_SOUND_DOA_CLOCKWISE_POSITIVE=0`で符号反転し、後方は`CPU0_SOUND_DOA_REAR_LR_SWAP=1`で左右対応を入れ替える。前方は最大45度の操舵で追従し、後方はX字操舵・左右逆回転で向き直る。真後ろ±180度近辺だけは左右の旋回経路がほぼ等価なので、左右ToFに十分な差がある場合は空き側を選ぶ。`CPU0_SOUND_DOA_ZERO_OFFSET_DEG=0`、正のサーボ指令は物理的な左操舵のため`CPU0_STEERING_SERVO_OUTPUT_SIGN=-1`でサーボ出力だけを反転している。
 
 USB detach、観測timeout、CRC/version異常、XVF3800 I2C error、mute、I2S staleでは新しい移動を開始しない。CRC/version/format異常frameは破棄し、正常観測が600 ms途絶えると`WAIT_LINK`へ戻す。bit 0のI2S overrunは当該観測区間の一時的な欠落を示す診断値であり、単発ではlinkを切らない。移動中にtimeoutへ到達した場合もCPU0は停止目標をIPC送信する。さらにCPU0自体が停止してIPCが途絶えた場合は、CPU1の既存ローカルtimeoutがsafe stopを行う。
 

@@ -5,6 +5,7 @@ param(
 
     [switch] $Clean,
     [switch] $Regenerate,
+    [switch] $Flash,
 
     [ValidateRange(1, 64)]
     [int] $Jobs = [Environment]::ProcessorCount
@@ -20,6 +21,11 @@ $projectNames = switch ($Target) {
     "CPU1" { @("SoundExplorationRover_CPU1") }
     default { @("SoundExplorationRover_CPU0", "SoundExplorationRover_CPU1") }
 }
+
+$jlinkInterface = if ($env:JLINK_INTERFACE) { $env:JLINK_INTERFACE } else { "SWD" }
+$jlinkSpeed = if ($env:JLINK_SPEED) { $env:JLINK_SPEED } else { "4000" }
+$jlinkDeviceCpu0 = if ($env:JLINK_DEVICE_CPU0) { $env:JLINK_DEVICE_CPU0 } else { "R7KA8P1KF_CPU0" }
+$jlinkDeviceCpu1 = if ($env:JLINK_DEVICE_CPU1) { $env:JLINK_DEVICE_CPU1 } else { "R7KA8P1KF_CPU1" }
 
 function Find-E2StudioRoot {
     if ($env:E2STUDIO_HOME) {
@@ -79,6 +85,126 @@ function Find-GnuMake([string] $E2StudioRoot) {
     }
 
     throw "GNU Make was not found in e2 studio or PATH."
+}
+
+function Find-JLinkExecutable {
+    if ($env:JLINK_EXE) {
+        $configuredJLink = $env:JLINK_EXE
+        if (Test-Path -LiteralPath $configuredJLink -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $configuredJLink).Path
+        }
+
+        throw "JLINK_EXE does not point to J-Link Commander: $configuredJLink"
+    }
+
+    foreach ($commandName in @("JLink.exe", "JLinkExe.exe", "JLinkExe")) {
+        $pathCommand = Get-Command $commandName -ErrorAction SilentlyContinue
+        if ($pathCommand) {
+            return $pathCommand.Source
+        }
+    }
+
+    $searchRoots = @()
+    if ($env:ProgramFiles) {
+        $searchRoots += (Join-Path $env:ProgramFiles "SEGGER")
+    }
+    if (${env:ProgramFiles(x86)}) {
+        $searchRoots += (Join-Path ${env:ProgramFiles(x86)} "SEGGER")
+    }
+
+    foreach ($searchRoot in $searchRoots) {
+        if (-not (Test-Path -LiteralPath $searchRoot)) {
+            continue
+        }
+
+        $jlink = Get-ChildItem -Path $searchRoot -Filter "JLink.exe" -File -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+
+        if ($jlink) {
+            return $jlink.FullName
+        }
+    }
+
+    throw "SEGGER J-Link Commander (JLink.exe) was not found. Install the J-Link Software and Documentation Pack, add JLink.exe to PATH, or set JLINK_EXE."
+}
+
+function Invoke-JLinkCommandFile(
+    [string] $JLinkExecutable,
+    [string] $Device,
+    [string] $CommandFile
+) {
+    $arguments = @(
+        "-Device", $Device,
+        "-If", $jlinkInterface,
+        "-Speed", $jlinkSpeed,
+        "-AutoConnect", "1",
+        "-ExitOnError", "1",
+        "-NoGui", "1"
+    )
+
+    if ($env:JLINK_SERIAL) {
+        $arguments += @("-USB", $env:JLINK_SERIAL)
+    }
+
+    $arguments += @("-CommandFile", $CommandFile)
+
+    & $JLinkExecutable @arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "J-Link Commander failed for device $Device with exit code $LASTEXITCODE."
+    }
+}
+
+function Invoke-FlashProject(
+    [string] $ProjectName,
+    [string] $JLinkExecutable
+) {
+    $device = switch ($ProjectName) {
+        "SoundExplorationRover_CPU0" { $jlinkDeviceCpu0 }
+        "SoundExplorationRover_CPU1" { $jlinkDeviceCpu1 }
+        default { throw "No J-Link device mapping for project: $ProjectName" }
+    }
+
+    $elf = Join-Path $raRoot "$ProjectName\Debug\$ProjectName.elf"
+    if (-not (Test-Path -LiteralPath $elf -PathType Leaf)) {
+        throw "ELF to flash was not found: $elf"
+    }
+
+    $commandFile = Join-Path ([System.IO.Path]::GetTempPath()) ("ra8p1-jlink-flash-{0}.jlink" -f [Guid]::NewGuid().ToString("N"))
+
+    try {
+        @(
+            "r"
+            "h"
+            ('loadfile "{0}"' -f $elf)
+            "h"
+            "q"
+        ) | Set-Content -LiteralPath $commandFile -Encoding ASCII
+
+        Write-Host "Flashing $ProjectName with J-Link device $device..."
+        Invoke-JLinkCommandFile -JLinkExecutable $JLinkExecutable -Device $device -CommandFile $commandFile
+    }
+    finally {
+        Remove-Item -LiteralPath $commandFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Restart-TargetFromCpu0([string] $JLinkExecutable) {
+    $commandFile = Join-Path ([System.IO.Path]::GetTempPath()) ("ra8p1-jlink-run-{0}.jlink" -f [Guid]::NewGuid().ToString("N"))
+
+    try {
+        @(
+            "r"
+            "g"
+            "q"
+        ) | Set-Content -LiteralPath $commandFile -Encoding ASCII
+
+        Write-Host "Resetting RA8P1 and starting from CPU0..."
+        Invoke-JLinkCommandFile -JLinkExecutable $JLinkExecutable -Device $jlinkDeviceCpu0 -CommandFile $commandFile
+    }
+    finally {
+        Remove-Item -LiteralPath $commandFile -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Invoke-FastBuild([string] $ProjectName, [string] $MakeExecutable) {
@@ -209,3 +335,24 @@ else {
 }
 
 Write-Host "RA8P1 $Target build completed."
+
+if ($Flash) {
+    $jlinkExecutable = Find-JLinkExecutable
+    Write-Host "J-Link:     $jlinkExecutable"
+    Write-Host "Interface:  $jlinkInterface @ $jlinkSpeed kHz"
+
+    # Program CPU1 first. CPU0 is the boot/master core, so CPU0 is programmed
+    # last and the board is reset only after all selected images are in place.
+    $flashProjectNames = switch ($Target) {
+        "CPU0" { @("SoundExplorationRover_CPU0") }
+        "CPU1" { @("SoundExplorationRover_CPU1") }
+        default { @("SoundExplorationRover_CPU1", "SoundExplorationRover_CPU0") }
+    }
+
+    foreach ($projectName in $flashProjectNames) {
+        Invoke-FlashProject -ProjectName $projectName -JLinkExecutable $jlinkExecutable
+    }
+
+    Restart-TargetFromCpu0 -JLinkExecutable $jlinkExecutable
+    Write-Host "RA8P1 $Target flash completed."
+}

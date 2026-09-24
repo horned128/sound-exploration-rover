@@ -4,6 +4,11 @@ set -euo pipefail
 TARGET="All"
 CLEAN=0
 REGENERATE=0
+FLASH=0
+JLINK_INTERFACE="${JLINK_INTERFACE:-SWD}"
+JLINK_SPEED="${JLINK_SPEED:-4000}"
+JLINK_DEVICE_CPU0="${JLINK_DEVICE_CPU0:-R7KA8P1KF_CPU0}"
+JLINK_DEVICE_CPU1="${JLINK_DEVICE_CPU1:-R7KA8P1KF_CPU1}"
 JOBS="$(sysctl -n hw.logicalcpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)"
 
 usage() {
@@ -14,8 +19,18 @@ Options:
   --target CPU0|CPU1|All   Build target (default: All)
   --clean                  Clean before build
   --regenerate             Use e2 studio headless managed build
+  --flash                  Flash selected target(s) with J-Link after build
+                           (default target All = CPU1 then CPU0, then reset/run)
   --jobs N                 Parallel make jobs
   -h, --help               Show this help
+
+J-Link environment overrides:
+  JLINK_EXE                 Path to JLinkExe
+  JLINK_INTERFACE           Debug interface (default: SWD)
+  JLINK_SPEED               Interface speed in kHz (default: 4000)
+  JLINK_SERIAL              J-Link USB serial number/nickname (optional)
+  JLINK_DEVICE_CPU0         Device name (default: R7KA8P1KF_CPU0)
+  JLINK_DEVICE_CPU1         Device name (default: R7KA8P1KF_CPU1)
 USAGE
 }
 
@@ -32,6 +47,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --regenerate|-Regenerate)
             REGENERATE=1
+            shift
+            ;;
+        --flash|-Flash)
+            FLASH=1
             shift
             ;;
         --jobs|-Jobs)
@@ -83,6 +102,127 @@ case "$TARGET" in
         PROJECT_NAMES=("SoundExplorationRover_CPU0" "SoundExplorationRover_CPU1")
         ;;
 esac
+
+find_jlink_executable() {
+    local configured candidate
+
+    if [[ -n "${JLINK_EXE:-}" ]]; then
+        configured="$JLINK_EXE"
+        if [[ -f "$configured" && -x "$configured" ]]; then
+            printf '%s\n' "$configured"
+            return 0
+        fi
+        echo "JLINK_EXE does not point to an executable JLinkExe: $configured" >&2
+        return 1
+    fi
+
+    if command -v JLinkExe >/dev/null 2>&1; then
+        command -v JLinkExe
+        return 0
+    fi
+
+    for candidate in \
+        "/Applications/SEGGER/JLink/JLinkExe" \
+        "/Applications/JLink/JLinkExe"; do
+        if [[ -f "$candidate" && -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+
+    candidate="$(find /Applications/SEGGER -maxdepth 4 -type f -name JLinkExe -perm -111 2>/dev/null | sort -r | head -n 1 || true)"
+    if [[ -n "$candidate" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+    fi
+
+    echo "SEGGER J-Link Commander (JLinkExe) was not found." >&2
+    echo "Install the J-Link Software and Documentation Pack, add JLinkExe to PATH, or set JLINK_EXE." >&2
+    return 1
+}
+
+jlink_common_args() {
+    local device="$1"
+
+    JLINK_ARGS=(
+        -Device "$device"
+        -If "$JLINK_INTERFACE"
+        -Speed "$JLINK_SPEED"
+        -AutoConnect 1
+        -ExitOnError 1
+        -NoGui 1
+    )
+
+    if [[ -n "${JLINK_SERIAL:-}" ]]; then
+        JLINK_ARGS+=( -USB "$JLINK_SERIAL" )
+    fi
+}
+
+flash_project() {
+    local project_name="$1"
+    local jlink_executable="$2"
+    local device elf command_file
+
+    case "$project_name" in
+        SoundExplorationRover_CPU0)
+            device="$JLINK_DEVICE_CPU0"
+            ;;
+        SoundExplorationRover_CPU1)
+            device="$JLINK_DEVICE_CPU1"
+            ;;
+        *)
+            echo "No J-Link device mapping for project: $project_name" >&2
+            return 1
+            ;;
+    esac
+
+    elf="$RA_ROOT/$project_name/Debug/$project_name.elf"
+    if [[ ! -f "$elf" ]]; then
+        echo "ELF to flash was not found: $elf" >&2
+        return 1
+    fi
+
+    command_file="$(mktemp "${TMPDIR:-/tmp}/ra8p1-jlink-flash.XXXXXX")"
+    cat >"$command_file" <<EOF
+r
+h
+loadfile "$elf"
+h
+q
+EOF
+
+    echo "Flashing $project_name with J-Link device $device..."
+    jlink_common_args "$device"
+    if ! "$jlink_executable" "${JLINK_ARGS[@]}" -CommandFile "$command_file"; then
+        rm -f "$command_file"
+        echo "$project_name J-Link flash failed." >&2
+        return 1
+    fi
+
+    rm -f "$command_file"
+}
+
+restart_target_from_cpu0() {
+    local jlink_executable="$1"
+    local command_file
+
+    command_file="$(mktemp "${TMPDIR:-/tmp}/ra8p1-jlink-run.XXXXXX")"
+    cat >"$command_file" <<'EOF'
+r
+g
+q
+EOF
+
+    echo "Resetting RA8P1 and starting from CPU0..."
+    jlink_common_args "$JLINK_DEVICE_CPU0"
+    if ! "$jlink_executable" "${JLINK_ARGS[@]}" -CommandFile "$command_file"; then
+        rm -f "$command_file"
+        echo "J-Link reset/run failed after flashing." >&2
+        return 1
+    fi
+
+    rm -f "$command_file"
+}
 
 find_e2studio_executable() {
     local configured candidate
@@ -418,3 +558,31 @@ else
 fi
 
 echo "RA8P1 $TARGET build completed."
+
+if [[ $FLASH -eq 1 ]]; then
+    JLINK_EXECUTABLE="$(find_jlink_executable)"
+    echo "J-Link:     $JLINK_EXECUTABLE"
+    echo "Interface:  $JLINK_INTERFACE @ ${JLINK_SPEED} kHz"
+
+    # Program CPU1 first. CPU0 is the boot/master core, so CPU0 is programmed
+    # last and the board is reset only after all selected images are in place.
+    FLASH_PROJECT_NAMES=()
+    case "$TARGET" in
+        CPU0)
+            FLASH_PROJECT_NAMES=("SoundExplorationRover_CPU0")
+            ;;
+        CPU1)
+            FLASH_PROJECT_NAMES=("SoundExplorationRover_CPU1")
+            ;;
+        All)
+            FLASH_PROJECT_NAMES=("SoundExplorationRover_CPU1" "SoundExplorationRover_CPU0")
+            ;;
+    esac
+
+    for project_name in "${FLASH_PROJECT_NAMES[@]}"; do
+        flash_project "$project_name" "$JLINK_EXECUTABLE"
+    done
+
+    restart_target_from_cpu0 "$JLINK_EXECUTABLE"
+    echo "RA8P1 $TARGET flash completed."
+fi

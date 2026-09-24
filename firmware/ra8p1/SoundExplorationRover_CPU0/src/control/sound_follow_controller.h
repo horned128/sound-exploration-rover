@@ -44,6 +44,7 @@ typedef struct st_sound_follow_input {
     acoustic_observation_t observation;                     /**< 最新音響観測 */
     BOOL match_required;                                    /**< 見本照合を要求する状態 */
     BOOL target_sound_matched;                              /**< 対象音一致状態 */
+    BOOL target_sound_direction_valid;                      /**< 最新特徴量がTARGETでDoAを更新可能 */
     BOOL navigation_target_valid;                           /**< 位置推定済み音源目標が有効 */
     H navigation_bearing_deg;                               /**< 現在位置から音源への方位（右正）[deg] */
     BOOL arrival_verify;                                    /**< 到着候補の停止確認要求 */
@@ -53,6 +54,9 @@ typedef struct st_sound_follow_input {
     BOOL imu_valid;                                         /**< 生ジャイロZ値を利用可能な状態 */
     H gyro_z_dps_x10;                                       /**< 生ジャイロZ角速度[0.1dps] */
     UW imu_update_count;                                    /**< センサーの正常更新回数 */
+    BOOL pose_heading_valid;                                /**< オドメトリ姿勢が利用可能 */
+    W pose_heading_mrad;                                    /**< 車体方位[-pi, pi][mrad] */
+    B rear_seam_turn_preference;                            /**< 真後ろ±180°の安全な旋回側（右+1/左-1/不明0） */
 } sound_follow_input_t;
 
 /**< 音源追従ステートマシンが出力する走行指令 */

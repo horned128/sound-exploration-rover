@@ -63,3 +63,4 @@ skills-lock.json
 **/tmp
 AGENTS.md
 software/rover-monitor/logs/rover-monitor-*.jsonl
+opencode.json

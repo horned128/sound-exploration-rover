@@ -49,6 +49,7 @@ class SoundFollowInput(ctypes.Structure):
         ("observation", AcousticObservation),
         ("match_required", BOOL),
         ("target_sound_matched", BOOL),
+        ("target_sound_direction_valid", BOOL),
         ("navigation_target_valid", BOOL),
         ("navigation_bearing_deg", ctypes.c_int16),
         ("arrival_verify", BOOL),
@@ -58,6 +59,9 @@ class SoundFollowInput(ctypes.Structure):
         ("imu_valid", BOOL),
         ("gyro_z_dps_x10", ctypes.c_int16),
         ("imu_update_count", ctypes.c_uint32),
+        ("pose_heading_valid", BOOL),
+        ("pose_heading_mrad", ctypes.c_int32),
+        ("rear_seam_turn_preference", ctypes.c_int8),
     ]
 
 
@@ -266,6 +270,8 @@ def library() -> ctypes.CDLL:
     handle = ctypes.CDLL(native_library)
     handle.sound_follow_controller_init.argtypes = []
     handle.sound_follow_controller_init.restype = None
+    handle.sound_follow_doa_to_relative.argtypes = [ctypes.c_uint16]
+    handle.sound_follow_doa_to_relative.restype = ctypes.c_int16
     handle.sound_follow_controller_step.argtypes = [
         ctypes.POINTER(SoundFollowInput),
         ctypes.c_uint32,
@@ -274,10 +280,19 @@ def library() -> ctypes.CDLL:
     handle.sound_follow_controller_step.restype = None
     handle.obstacle_avoidance_controller_init.argtypes = []
     handle.obstacle_avoidance_controller_init.restype = None
+    handle.obstacle_avoidance_encoder_feedback_set.argtypes = [
+        BOOL, ctypes.c_uint32, ctypes.c_int16, ctypes.c_int16,
+    ]
+    handle.obstacle_avoidance_encoder_feedback_set.restype = None
+    handle.obstacle_avoidance_spin_space_available.argtypes = [ctypes.POINTER(SensorSnapshot)]
+    handle.obstacle_avoidance_spin_space_available.restype = BOOL
+    handle.obstacle_avoidance_rear_seam_turn_preference.argtypes = [ctypes.POINTER(SensorSnapshot)]
+    handle.obstacle_avoidance_rear_seam_turn_preference.restype = ctypes.c_int8
     handle.obstacle_avoidance_controller_step.argtypes = [
         ctypes.POINTER(SensorSnapshot),
         BOOL,
         ctypes.c_uint32,
+        ctypes.c_int16,
         ctypes.c_int16,
         ctypes.POINTER(ObstacleAvoidanceOutput),
     ]
@@ -453,13 +468,18 @@ def sound_follow_trace(inputs: Iterable[tuple[SoundFollowInput, int]]) -> list[S
 
 def obstacle_avoidance_step(
     snapshot: SensorSnapshot, *, fault_active: bool = False, target_steering_deg: int = 0,
+    linear_speed_mm_s: int = 120,
 ) -> ObstacleAvoidanceOutput:
-    return obstacle_avoidance_trace([snapshot], fault_active=fault_active, target_steering_deg=target_steering_deg)[0]
+    return obstacle_avoidance_trace(
+        [snapshot], fault_active=fault_active, target_steering_deg=target_steering_deg,
+        linear_speed_mm_s=linear_speed_mm_s,
+    )[0]
 
 
 def obstacle_avoidance_trace(
     snapshots: Iterable[SensorSnapshot], *, fault_active: bool = False,
     timestamps_ms: Iterable[int] | None = None, target_steering_deg: int = 0,
+    linear_speed_mm_s: int = 120,
 ) -> list[ObstacleAvoidanceOutput]:
     """Run at the firmware's 100 ms period unless measured timestamps are supplied.
 
@@ -473,10 +493,11 @@ def obstacle_avoidance_trace(
     if len(times) != len(snapshots):
         raise ValueError("one timestamp is required per snapshot")
     target = ctypes.c_int16(target_steering_deg)
+    speed = ctypes.c_int16(linear_speed_mm_s)
     for snapshot, now_ms in zip(snapshots, times):
         output = ObstacleAvoidanceOutput()
         handle.obstacle_avoidance_controller_step(
-            ctypes.byref(snapshot), BOOL(fault_active), now_ms, target, ctypes.byref(output)
+            ctypes.byref(snapshot), BOOL(fault_active), now_ms, target, speed, ctypes.byref(output)
         )
         outputs.append(output)
     return outputs

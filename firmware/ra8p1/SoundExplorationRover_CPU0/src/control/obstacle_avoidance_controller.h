@@ -38,8 +38,12 @@ typedef struct st_obstacle_avoidance_output {
 } obstacle_avoidance_output_t;
 
 EXPORT void obstacle_avoidance_controller_init(void);       /* ルール判断初期化 */
+EXPORT void obstacle_avoidance_encoder_feedback_set(BOOL valid, UW status_sequence,
+    H left_rpm_x10, H right_rpm_x10); /* CPU1実測速度を渡す */
+EXPORT BOOL obstacle_avoidance_spin_space_available(const sensor_snapshot_t * p_snapshot); /* 音源旋回の前方クリアランス */
+EXPORT B obstacle_avoidance_rear_seam_turn_preference(const sensor_snapshot_t * p_snapshot); /* 真後ろ音源の安全な旋回側 */
 EXPORT void obstacle_avoidance_controller_step(const sensor_snapshot_t * p_snapshot,
-                                                BOOL fault_active, UW now_ms, H target_steering_deg,
-                                                obstacle_avoidance_output_t * p_output); /* 回避指令算出 */
+    BOOL fault_active, UW now_ms, H target_steering_deg,
+    H linear_speed_mm_s, obstacle_avoidance_output_t * p_output); /* 回避指令算出 */
 
 #endif /* SEROV_CPU0_OBSTACLE_AVOIDANCE_CONTROLLER_H */

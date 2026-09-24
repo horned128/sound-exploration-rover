@@ -187,6 +187,7 @@ def test_trigger_active_resets_immediately_when_sound_becomes_unmatched() -> Non
                 observation=obs,
                 match_required=1,
                 target_sound_matched=1,
+                target_sound_direction_valid=1,
             ),
             50,
         )
@@ -225,6 +226,7 @@ def test_identifier_match_required_allows_motion_when_matched() -> None:
                 observation=obs,
                 match_required=1,
                 target_sound_matched=1,
+                target_sound_direction_valid=1,
             ),
             50,
         )
@@ -252,6 +254,7 @@ def test_identifier_match_lost_initiates_settle_after_timeout() -> None:
                 observation=obs,
                 match_required=1,
                 target_sound_matched=1,
+                target_sound_direction_valid=1,
             ),
             50,
         )
@@ -277,6 +280,66 @@ def test_identifier_match_lost_initiates_settle_after_timeout() -> None:
     assert outputs[-1].state in (1, 4, 5)
     assert outputs[-1].left_rpm == 0
     assert outputs[-1].right_rpm == 0
+
+
+def test_identifier_loss_stops_on_first_cycle_despite_loud_tv_audio() -> None:
+    """確実な別音で照合が取り消されたら、人声が続いても即停止する。"""
+    obs = usable_loud_observation()
+    trace = [(SoundFollowInput(link_ready=1, motion_allowed=1), 500)]
+    trace.extend(
+        (
+            SoundFollowInput(
+                link_ready=1, new_observation=1, motion_allowed=1,
+                observation=obs, match_required=1, target_sound_matched=1,
+                target_sound_direction_valid=1,
+            ),
+            100,
+        )
+        for _ in range(16)
+    )
+    trace.append((SoundFollowInput(
+        link_ready=1, new_observation=1, motion_allowed=1,
+        observation=obs, match_required=1, target_sound_matched=0,
+    ), 100))
+    outputs = sound_follow_trace(trace)
+    assert outputs[-2].state == 3
+    assert outputs[-1].state == 4
+    assert outputs[-1].left_rpm == outputs[-1].right_rpm == 0
+
+
+def test_loud_tv_does_not_trap_matched_mode_in_cooldown() -> None:
+    """停止後は人声の静音を待たず、見本照合付きLISTENへ戻る。"""
+    obs = usable_loud_observation()
+    trace = [(SoundFollowInput(link_ready=1, motion_allowed=1), 500)]
+    trace.extend(
+        (
+            SoundFollowInput(
+                link_ready=1, new_observation=1, motion_allowed=1,
+                observation=obs, match_required=1, target_sound_matched=1,
+                target_sound_direction_valid=1,
+            ),
+            100,
+        )
+        for _ in range(11)
+    )
+    trace.append((SoundFollowInput(
+        link_ready=1, new_observation=1, motion_allowed=0,
+        observation=obs, match_required=1,
+    ), 100))
+    trace.extend(
+        (
+            SoundFollowInput(
+                link_ready=1, new_observation=1, motion_allowed=1,
+                observation=obs, match_required=1,
+            ),
+            100,
+        )
+        for _ in range(6)
+    )
+    outputs = sound_follow_trace(trace)
+    assert any(output.state == 5 for output in outputs)
+    assert outputs[-1].state == 1
+    assert outputs[-1].left_rpm == outputs[-1].right_rpm == 0
 
 
 def test_arrival_states_stop_without_reporting_emergency_or_obstacle_stop() -> None:

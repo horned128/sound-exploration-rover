@@ -21,13 +21,13 @@ int main(void)
     snapshot.tof_distance_mm[CPU0_TOF_LEFT] = 1000U;
     snapshot.tof_distance_mm[CPU0_TOF_CENTER] = 1000U;
     snapshot.tof_distance_mm[CPU0_TOF_RIGHT] = 1000U;
-    obstacle_avoidance_controller_step(&snapshot, FALSE, 0U, 0, &avoidance_output);
+    obstacle_avoidance_controller_step(&snapshot, FALSE, 0U, 0, 120, &avoidance_output);
     /* Exercise timed recovery and signed gyro arithmetic under ASan/UBSan. */
     obstacle_avoidance_controller_init();
     for (UW now_ms = 0U; now_ms <= 6000U; now_ms += 100U) {
         snapshot.update_count++;
         snapshot.tof_distance_mm[CPU0_TOF_CENTER] = 430U;
-        obstacle_avoidance_controller_step(&snapshot, FALSE, now_ms, 0, &avoidance_output);
+        obstacle_avoidance_controller_step(&snapshot, FALSE, now_ms, 0, 120, &avoidance_output);
         /* 後退は正面近接・回頭不成立からの有限復帰として許可する。 */
     }
     assert((CPU0_SENSOR_RULE_PIVOT_LEFT == avoidance_output.rule) ||
@@ -40,7 +40,7 @@ int main(void)
     for (UW index = 0U; index < 3U; index++) {
         snapshot.update_count++;
         snapshot.tof_distance_mm[CPU0_TOF_CENTER] = 120U;
-        obstacle_avoidance_controller_step(&snapshot, FALSE, 6100U + index * 100U, 0, &avoidance_output);
+        obstacle_avoidance_controller_step(&snapshot, FALSE, 6100U + index * 100U, 0, 0, &avoidance_output);
     }
     assert(CPU0_SENSOR_RULE_BACKUP == avoidance_output.rule);
     obstacle_avoidance_controller_init();
@@ -49,12 +49,13 @@ int main(void)
         snapshot.tof_distance_mm[CPU0_TOF_CENTER] = (now_ms == 0U) ? 430U : 1500U;
         snapshot.tof_distance_mm[CPU0_TOF_LEFT] = 1500U;
         snapshot.tof_distance_mm[CPU0_TOF_RIGHT] = 1500U;
+        snapshot.accel_mg[1] = (now_ms % 200U == 0U) ? 50 : -50;
         snapshot.gyro_dps_x10[2] = -200;
-        obstacle_avoidance_controller_step(&snapshot, FALSE, now_ms, 0, &avoidance_output);
+        obstacle_avoidance_controller_step(&snapshot, FALSE, now_ms, 0, 120, &avoidance_output);
     }
     assert(CPU0_SENSOR_RULE_FORWARD == avoidance_output.rule);
     snapshot.gyro_dps_x10[2] = INT16_MIN;
-    obstacle_avoidance_controller_step(&snapshot, FALSE, 8100U, 0, &avoidance_output);
+    obstacle_avoidance_controller_step(&snapshot, FALSE, 8100U, 0, 0, &avoidance_output);
     assert(CPU0_SENSOR_RULE_IMU_STOP == avoidance_output.rule);
 
     /* Exercise smooth_avoidance_plan under ASan/UBSan */
