@@ -9,6 +9,7 @@
 - XVF3800 I2C: SDA GPIO5、SCL GPIO6、7-bit address `0x2C`、100 kHz
 - XVF3800 I2S: WS GPIO7、BCLK GPIO8、DIN GPIO43、DOUT GPIO44
 - I2S形式: XIAO master、16 kHz、stereo、32 bit、Philips I2S
+- 音響識別用mono PCM: I2S右slot（index 1）。左slotは音量と任意の2ch診断にのみ残す。実測混合音のCPU0 C照合比較は[評価結果](../../software/acoustic-trainer/BASELINE_SLOT1_DEPLOYMENT.md)を参照。
 - USB: XIAO側USB-CをTinyUSBのCDC-ACM deviceとして使用
 - 送信: `HELLO`（接続時と1 s周期）、`ACOUSTIC_OBSERVATION`（20 ms周期）、`HEALTH`（1 s周期）、`ACOUSTIC_FEATURE`（音量イベント時）
 - 受信: CPU0の`ROVER_TELEMETRY`、`ACTUATOR_TELEMETRY`、`POSE_TELEMETRY`、`NAV_DIAGNOSTICS`に加え、AI Lab形式の推論snapshot・192次元要約chunk・保存見本chunk
@@ -36,6 +37,10 @@ CPU0のAI Lab形式フレームはgeneration/sample単位で再組立し、`acou
 （72 B payload）のパケットを20 ms間隔でUSB CDCへ送ります。送信失敗時はそのイベントの残りを
 送らず、次のイベントの`frame_index=0`でCPU0側の再組立を再同期させます。無音後は次の立ち上がりを
 待たず即時収集し、連続音中は上記周期より速くイベントを連発しません。
+
+音響特徴量のI2S slotは`APP_AUDIO_FEATURE_CHANNEL_INDEX`で指定する。右slotのファームはHELLOの
+`ACOUSTIC_CAPABILITY_FEATURE_SLOT1`を立て、CPU0は同capabilityがない旧ESP32-S3と走行を開始しない。
+CPU0 Code MRAM version 5では右slotの5例を現場で改めて登録する。以前の左slot用version 4見本は互換ではない。
 
 DoA/VADのI2CコマンドはSeeed Studio公式例にあるresource ID 20、read command `(19 | 0x80)`、4-byte payloadをそのまま実装しています。応答先頭のraw status byteは公式例に意味の定義がないため、成功値やbitを推測して判定に使いません。共有プロトコルの`xvf_status`はraw値ではなく、ESP32側で確認した通信・取得状態（STARTING/READY/ERROR）です。
 

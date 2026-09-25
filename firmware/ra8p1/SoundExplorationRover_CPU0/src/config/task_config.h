@@ -9,6 +9,8 @@
 #define CPU0_COMMAND_PERIOD_MS             (50U)            /**< 指令の周期[ms] */
 #define CPU0_COMMAND_TARGET_TIMEOUT_MS     (500U)           /**< 指令目標の期限[ms] */
 #define CPU0_THINK_PERIOD_MS               (50U)            /**< 思考の周期[ms] */
+/* 評価収録時のみ1。通常走行中のSW1短押しでは駆動しない。 */
+#define CPU0_DEBUG_MOTOR_RECORDING_ENABLE  (0U)
 #define CPU0_AUDIO_USB_POLL_MS             (1U)             /**< 音響USBのpoll[ms] */
 #define CPU0_AUDIO_USB_RX_SIZE             (512U)           /**< 音響USBRXのサイズ */
 #define CPU0_AUDIO_TELEMETRY_PERIOD_MS     (250U)           /**< 音響テレメトリの周期[ms] */

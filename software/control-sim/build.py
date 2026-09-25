@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import platform
 import subprocess
 from pathlib import Path
@@ -13,7 +14,7 @@ CONTROL_SIM_ROOT = Path(__file__).resolve().parent
 REPOSITORY_ROOT = CONTROL_SIM_ROOT.parents[1]
 CPU0_SOURCE_ROOT = REPOSITORY_ROOT / "firmware/ra8p1/SoundExplorationRover_CPU0/src"
 SHIM_ROOT = CONTROL_SIM_ROOT / "shim"
-BUILD_ROOT = CONTROL_SIM_ROOT / "build"
+BUILD_ROOT = Path(os.environ["CONTROL_SIM_BUILD_ROOT"]) if "CONTROL_SIM_BUILD_ROOT" in os.environ else CONTROL_SIM_ROOT / "build"
 
 CONTROLLER_SOURCES = (
     CPU0_SOURCE_ROOT / "control/sound_follow_controller.c",
@@ -118,12 +119,21 @@ def run_feature_protocol_test() -> None:
     run([str(executable)])
 
 
+def run_debug_motor_recording_test() -> None:
+    BUILD_ROOT.mkdir(exist_ok=True)
+    executable = BUILD_ROOT / "debug_motor_recording_test"
+    source = CONTROL_SIM_ROOT / "controlsim/debug_motor_recording_test.c"
+    run(compile_command(shared=False, sanitized=True, output=executable, sources=(source,)))
+    run([str(executable)])
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--layout", action="store_true", help="build and run the C layout probe")
     mode.add_argument("--sanitized-smoke", action="store_true", help="run portable code under ASan and UBSan")
     mode.add_argument("--feature-protocol", action="store_true", help="test feature protocol and reassembly")
+    mode.add_argument("--debug-motor", action="store_true", help="test short/long press and bounded debug drive")
     arguments = parser.parse_args()
 
     if arguments.layout:
@@ -132,6 +142,8 @@ def main() -> None:
         run_sanitized_smoke()
     elif arguments.feature_protocol:
         run_feature_protocol_test()
+    elif arguments.debug_motor:
+        run_debug_motor_recording_test()
     else:
         print(build_library())
 

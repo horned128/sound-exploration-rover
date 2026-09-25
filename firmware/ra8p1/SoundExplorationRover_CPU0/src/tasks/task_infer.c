@@ -57,6 +57,8 @@ EXPORT volatile UW g_task_infer_feature_generation;         /**< 最後に処理
 EXPORT volatile UW g_task_infer_inference_count;            /**< 音響推論実行回数 */
 EXPORT volatile UW g_task_infer_failure_count;              /**< 音響推論失敗回数 */
 EXPORT volatile UW g_task_infer_match_count;                /**< 音響見本一致回数 */
+EXPORT volatile UW g_task_infer_processing_last_ms;
+EXPORT volatile UW g_task_infer_processing_max_ms;
 EXPORT volatile ER g_task_infer_last_kernel_error;          /**< 音響推論タスクの最終Kernelエラー */
 
 /** =================================================================*
@@ -109,6 +111,8 @@ EXPORT void task_infer_start_optional(void) {
     g_task_infer_inference_count = 0U;
     g_task_infer_failure_count = 0U;
     g_task_infer_match_count = 0U;
+    g_task_infer_processing_last_ms = 0U;
+    g_task_infer_processing_max_ms = 0U;
     g_task_infer_last_kernel_error = E_OK;
 
     /* 任意機能の資源は依存順に生成し、途中失敗時は同じ順序の逆順で解放する。 */
@@ -320,6 +324,8 @@ LOCAL void task_infer_feature_process(void) {
         g_task_infer_failure_count++;
         return;
     }
+    SYSTIM started = {0};
+    (void) tk_get_otm(&started);
 
     /* タスクスタックを圧迫せず、mutex保護下で完成結果を公開する作業領域。 */
     LOCAL task_infer_result_t next;
@@ -360,6 +366,13 @@ LOCAL void task_infer_feature_process(void) {
     }
     infer_result = next;
     infer_result_ready = TRUE;
+    SYSTIM finished = {0};
+    if (E_OK == tk_get_otm(&finished)) {
+        g_task_infer_processing_last_ms = finished.lo - started.lo;
+        if (g_task_infer_processing_last_ms > g_task_infer_processing_max_ms) {
+            g_task_infer_processing_max_ms = g_task_infer_processing_last_ms;
+        }
+    }
     (void) tk_unl_mtx(infer_mutex_id);
 }
 

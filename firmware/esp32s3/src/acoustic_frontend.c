@@ -174,7 +174,8 @@ static esp_err_t frontend_send_hello(void) {
         .firmware_patch = FRONTEND_FIRMWARE_PATCH,
         .reserved = 0U,
         .capabilities = ACOUSTIC_CAPABILITY_DOA | ACOUSTIC_CAPABILITY_VAD | ACOUSTIC_CAPABILITY_LEVEL |
-                        ACOUSTIC_CAPABILITY_WIFI | ACOUSTIC_CAPABILITY_DOA_DIAGNOSTICS,
+                        ACOUSTIC_CAPABILITY_WIFI | ACOUSTIC_CAPABILITY_DOA_DIAGNOSTICS |
+                        ((APP_AUDIO_FEATURE_CHANNEL_INDEX == 1U) ? ACOUSTIC_CAPABILITY_FEATURE_SLOT1 : 0U),
         .boot_id = s_boot_id,
     };
     uint8_t frame[ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE];

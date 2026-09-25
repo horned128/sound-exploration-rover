@@ -6,6 +6,7 @@
 #define RESPEAKER_AUDIO_CAPTURE_H
 
 #include "acoustic_protocol.h"                            /* 特徴量イベントの固定サイズ */
+#include "app_config.h"                                   /* 評価用PCM送信の有効化 */
 #include "esp_err.h"                                        /* ESP-IDFエラー型 */
 #include <stdbool.h>                                        /* 真偽値 */
 #include <stdint.h>                                         /* 固定幅整数型 */
@@ -29,6 +30,20 @@ typedef struct {
     int8_t frames[ACOUSTIC_FEATURE_EVENT_FRAME_COUNT][ACOUSTIC_FEATURE_BIN_COUNT];
                                                             /**< 300 ms前から500 ms後までのlog-mel */
 } audio_capture_feature_event_t;                            /**< 完成した特徴量イベント */
+
+#if APP_AUDIO_DATASET_STREAM_ENABLE
+typedef struct {
+    uint32_t first_sample;                                   /**< 起動後mono PCM sample番号 */
+    uint32_t dropped_blocks;                                 /**< キュー溢れの累積数 */
+    uint16_t sample_count;
+    int16_t samples[APP_AUDIO_BLOCK_FRAMES];                 /**< mono PCM、16 kHz */
+#if APP_AUDIO_STEREO_DIAGNOSTIC_ENABLE
+    int16_t second_channel[APP_AUDIO_BLOCK_FRAMES];          /**< XVF I2S右slot、用途は実測で判定 */
+#endif
+} audio_capture_pcm_block_t;
+/* 音声タスクを待たせず、古いブロックを破棄するbounded診断キュー。 */
+bool audio_capture_pcm_block_take(audio_capture_pcm_block_t * block);
+#endif
 
 esp_err_t audio_capture_start(void);                        /* 音声キャプチャタスク開始 */
 void audio_capture_get_snapshot(audio_capture_snapshot_t * snapshot); /* 最新音声キャプチャ状態取得 */

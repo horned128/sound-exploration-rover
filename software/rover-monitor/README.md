@@ -55,6 +55,8 @@ CPU0が未接続で`cpu_valid:false`の場合も、`esp_audio`診断は記録さ
 
 走行中のAI診断は通常状態JSONと別datagramで受信し、`record_type`が`acoustic_diagnostic`の行に特徴量generationごとの192次元要約と推論結果・距離を、`acoustic_sample`の行に起動時／再学習後の保存見本を記録します。baseline制御では`match_state=UNKNOWN`、`reason=baseline_policy`です。これらの行はJSONL専用で、通常状態WebSocketには転送しません。
 
+PCM収録ファームの `acoustic_pcm` 行もJSONL専用です。デバッグ走行対応のCPU0とESP32-S3を組み合わせると、SW1短押しでTARGETなしに走る間は通常状態行の `debug_motor.active=1` になります。旧ESP32でも `command.left_rpm` / `right_rpm` と `recognition.status_name` で録音区間を識別できます。詳細は [現場音響収録手順](../audio_ml/README.md#targetなしのモーター音収録sw1デバッグ走行) を参照してください。
+
 | 項目 | 合格条件 |
 |---|---|
 | `esp_audio.self_test_pass` | 常に`true` |

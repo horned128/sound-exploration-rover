@@ -67,6 +67,8 @@ IMPORT volatile UW g_task_think_autonomous_backup_count;    /**< 自律両輪後
 IMPORT volatile obstacle_avoidance_rule_t g_task_think_sensor_rule;
 IMPORT volatile UW g_task_think_fault_flags;                /**< CPU0異常ラッチ（Live Watch用） */
 IMPORT volatile BOOL g_task_think_learning_mode;            /**< 現場学習モード */
+IMPORT volatile BOOL g_task_think_debug_motor_active;       /**< SW短押しで収録走行中 */
+IMPORT volatile UW g_task_think_debug_motor_remaining_ms;   /**< 自動停止まで[ms] */
 IMPORT volatile UB g_task_think_learning_samples;           /**< 収集済み96次元見本数 */
 IMPORT volatile BOOL g_task_think_storage_valid;            /**< 有効なMRAM背景モデル・見本有無 */
 /**< 直近MRAM処理結果 */

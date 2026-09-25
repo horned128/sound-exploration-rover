@@ -9,7 +9,9 @@
 LOCAL B acoustic_identifier_int8_round(float value, B minimum); /* 仕様どおりのint8丸め */
 LOCAL UW acoustic_identifier_peak_bin_delta(UB left, UB right); /* peak binの絶対差 */
 LOCAL UB acoustic_identifier_peak_bin_skip(const B * p_samples, UW sample_count,
-                                           UW excluded_index); /* 孤立見本を除くpeak bin */
+                                            UW excluded_index); /* 孤立見本を除くpeak bin */
+LOCAL UB acoustic_identifier_peak_bin_mask(const B * p_samples, UW sample_count,
+                                           UB included_mask); /* 合意見本のpeak bin */
 
 /** =================================================================*
  * @brief  float値を最も近いint8へ半端をゼロから遠ざけて丸める
@@ -181,6 +183,32 @@ LOCAL UB acoustic_identifier_peak_bin_skip(const B * p_samples, UW sample_count,
     return peak_bin;
 }
 
+/* 4-of-5または3-of-5の合意見本だけからpeakを決める。 */
+LOCAL UB acoustic_identifier_peak_bin_mask(const B * p_samples, UW sample_count, UB included_mask) {
+    if ((NULL == p_samples) || (0U == included_mask)) {
+        return 0U;
+    }
+    W bin_sums[CPU0_ACOUSTIC_FEATURE_BIN_COUNT] = {0};
+    for (UW sample = 0U; sample < sample_count; sample++) {
+        if (0U == (included_mask & (UB) (1U << sample))) {
+            continue;
+        }
+        const B * const p = &p_samples[sample * CPU0_ACOUSTIC_SUMMARY_DIMENSION];
+        for (UW bin = 0U; bin < CPU0_ACOUSTIC_FEATURE_BIN_COUNT; bin++) {
+            B const m1 = p[2U * CPU0_ACOUSTIC_FEATURE_BIN_COUNT + bin];
+            B const m2 = p[5U * CPU0_ACOUSTIC_FEATURE_BIN_COUNT + bin];
+            bin_sums[bin] += (m1 > m2) ? m1 : m2;
+        }
+    }
+    UB peak_bin = 0U;
+    for (UW bin = 1U; bin < CPU0_ACOUSTIC_FEATURE_BIN_COUNT; bin++) {
+        if (bin_sums[bin] > bin_sums[peak_bin]) {
+            peak_bin = (UB) bin;
+        }
+    }
+    return peak_bin;
+}
+
 /** =================================================================*
  * @brief  代表ピーク周波数binおよび暗騒音帯域に基づく32bin重みベクトルを構築
  * ================================================================= */
@@ -329,13 +357,85 @@ EXPORT BOOL acoustic_identifier_isolated_sample_find(const B * p_samples,
     return FALSE;
 }
 
+/* 合意が一意に決まらない場合は勝手に見本を消さない。4-of-5を先に優先する。 */
+EXPORT UB acoustic_identifier_consensus_mask(const B * p_samples, UW sample_count) {
+    if ((NULL == p_samples) || (0U == sample_count) || (sample_count > CPU0_ACOUSTIC_SAMPLE_COUNT)) {
+        return 0U;
+    }
+    UB const all = (UB) ((1U << sample_count) - 1U);
+    UW isolated = ~(UW) 0U;
+    if (acoustic_identifier_isolated_sample_find(p_samples, sample_count, &isolated)) {
+        return (UB) (all & (UB) ~(1U << isolated));
+    }
+    if (sample_count != CPU0_ACOUSTIC_SAMPLE_COUNT) {
+        return all;
+    }
+
+    UB peaks[CPU0_ACOUSTIC_SAMPLE_COUNT];
+    for (UW i = 0U; i < sample_count; i++) {
+        peaks[i] = acoustic_identifier_find_peak_bin(
+            &p_samples[i * CPU0_ACOUSTIC_SUMMARY_DIMENSION], 1U);
+    }
+    UB answer = all;
+    UW found = 0U;
+    for (UW a = 0U; a < sample_count; a++) {
+        for (UW b = a + 1U; b < sample_count; b++) {
+            for (UW c = b + 1U; c < sample_count; c++) {
+                UW const members[3] = {a, b, c};
+                UB const mask = (UB) ((1U << a) | (1U << b) | (1U << c));
+                float weights[CPU0_ACOUSTIC_FEATURE_BIN_COUNT];
+                acoustic_identifier_build_weights(peaks[a], weights);
+                BOOL agreed = TRUE;
+                for (UW i = 0U; (i < 3U) && agreed; i++) {
+                    for (UW j = i + 1U; j < 3U; j++) {
+                        float distance = 0.0F;
+                        if ((acoustic_identifier_peak_bin_delta(peaks[members[i]], peaks[members[j]]) >
+                             CPU0_ACOUSTIC_IDENTIFIER_PEAK_TOLERANCE_BINS) ||
+                            !acoustic_identifier_weighted_cosine_distance(
+                                &p_samples[members[i] * CPU0_ACOUSTIC_SUMMARY_DIMENSION],
+                                &p_samples[members[j] * CPU0_ACOUSTIC_SUMMARY_DIMENSION], weights, &distance) ||
+                            (distance > CPU0_ACOUSTIC_LEARNING_OUTLIER_DISTANCE)) {
+                            agreed = FALSE;
+                            break;
+                        }
+                    }
+                }
+                if (!agreed) {
+                    continue;
+                }
+                for (UW outsider = 0U; (outsider < sample_count) && agreed; outsider++) {
+                    if (mask & (1U << outsider)) {
+                        continue;
+                    }
+                    for (UW i = 0U; i < 3U; i++) {
+                        float distance = 0.0F;
+                        if ((acoustic_identifier_peak_bin_delta(peaks[outsider], peaks[members[i]]) <=
+                             CPU0_ACOUSTIC_IDENTIFIER_PEAK_TOLERANCE_BINS) &&
+                            acoustic_identifier_weighted_cosine_distance(
+                                &p_samples[outsider * CPU0_ACOUSTIC_SUMMARY_DIMENSION],
+                                &p_samples[members[i] * CPU0_ACOUSTIC_SUMMARY_DIMENSION], weights, &distance) &&
+                            (distance <= CPU0_ACOUSTIC_LEARNING_OUTLIER_DISTANCE)) {
+                            agreed = FALSE;
+                            break;
+                        }
+                    }
+                }
+                if (agreed) {
+                    answer = mask;
+                    found++;
+                }
+            }
+        }
+    }
+    return (1U == found) ? answer : all;
+}
+
 /** =================================================================*
  * @brief 孤立見本を除いた代表ピーク周波数binを返す
  * ================================================================= */
 EXPORT UB acoustic_identifier_consensus_peak_bin(const B * p_samples, UW sample_count) {
-    UW isolated_index = ~(UW) 0U;
-    (void) acoustic_identifier_isolated_sample_find(p_samples, sample_count, &isolated_index);
-    return acoustic_identifier_peak_bin_skip(p_samples, sample_count, isolated_index);
+    return acoustic_identifier_peak_bin_mask(p_samples, sample_count,
+                                              acoustic_identifier_consensus_mask(p_samples, sample_count));
 }
 
 /** =================================================================*
@@ -452,10 +552,9 @@ EXPORT void acoustic_identifier_summary_classify(const B * p_summary,
     }
 
     BOOL found = FALSE;
-    UW isolated_index = ~(UW) 0U;
-    (void) acoustic_identifier_isolated_sample_find(p_samples, sample_count, &isolated_index);
+    UB const consensus_mask = acoustic_identifier_consensus_mask(p_samples, sample_count);
     for (UW sample = 0U; sample < sample_count; sample++) {
-        if (sample == isolated_index) {
+        if (0U == (consensus_mask & (UB) (1U << sample))) {
             continue;
         }
         float distance = 0.0F;

@@ -106,6 +106,7 @@ LOCAL acoustic_hello_t audio_hello;                         /**< 最新HELLO */
 LOCAL acoustic_health_t audio_health;                       /**< 最新HEALTH */
 LOCAL acoustic_feature_assembler_t audio_feature_assembler; /**< 特徴量再組立状態 */
 LOCAL acoustic_feature_patch_t audio_feature_patch;         /**< 最新完成特徴量パッチ */
+LOCAL UW audio_feature_first_rx_ms;                         /**< feature frame_index=0受信時刻 */
 LOCAL BOOL audio_feature_ready;                             /**< 完成特徴量保持状態 */
 /**< CDC仮想UART設定 (115200bps, 1 stop bit, no parity, 8 data bits - 7 bytes packed) */
 LOCAL UB audio_cdc_line_coding[CPU0_AUDIO_LINE_CODING_LENGTH] = {
@@ -165,6 +166,7 @@ EXPORT volatile UW g_task_acoustic_link_observation_max_interval_ms; /**< 最大
 EXPORT volatile UW g_task_acoustic_link_observation_source_uptime_ms; /**< ESP32S3観測時刻[ms] */
 /**< 特徴量イベント完成数 */
 EXPORT volatile UW g_task_acoustic_link_feature_complete_count;
+EXPORT volatile UW g_task_acoustic_link_feature_transport_ms; /**< 最初から最後のpacket受信間隔 */
 EXPORT volatile UW g_task_acoustic_link_feature_drop_count; /**< 特徴量イベント破棄数 */
 EXPORT volatile UW g_task_acoustic_link_feature_generation; /**< 最新特徴量世代 */
 EXPORT volatile UW g_task_acoustic_link_observation_age_ms; /**< 観測経過時間 */
@@ -245,6 +247,7 @@ EXPORT app_fault_t task_acoustic_link_create(void) {
     g_task_acoustic_link_observation_max_interval_ms = 0U;
     g_task_acoustic_link_observation_source_uptime_ms = 0U;
     g_task_acoustic_link_feature_complete_count = 0U;
+    g_task_acoustic_link_feature_transport_ms = 0U;
     g_task_acoustic_link_feature_drop_count = 0U;
     g_task_acoustic_link_feature_generation = 0U;
     g_task_acoustic_link_telemetry_send_count = 0U;
@@ -513,6 +516,7 @@ EXPORT ER task_acoustic_link_snapshot_get(task_acoustic_link_snapshot_t * p_snap
  * ================================================================= */
 LOCAL void task_acoustic_link_feature_reset(void) {
     audio_feature_ready = FALSE;
+    audio_feature_first_rx_ms = audio_now_ms;
     memset(&audio_feature_patch, 0, sizeof(audio_feature_patch));
     acoustic_feature_assembler_init(&audio_feature_assembler);
 }
@@ -1175,7 +1179,8 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
     s_telemetry.sensor_reserved =
         ((UB) g_task_think_storage_result & ACOUSTIC_TELEMETRY_STORAGE_RESULT_MASK) |
         (g_task_think_storage_valid ? ACOUSTIC_TELEMETRY_STORAGE_VALID : 0U) |
-        (g_task_think_learning_mode ? ACOUSTIC_TELEMETRY_LEARNING_MODE : 0U);
+        (g_task_think_learning_mode ? ACOUSTIC_TELEMETRY_LEARNING_MODE : 0U) |
+        (g_task_think_debug_motor_active ? ACOUSTIC_TELEMETRY_DEBUG_MOTOR_RECORDING : 0U);
     s_telemetry.tof_distance_mm[0] = s_sensor_snapshot.tof_distance_mm[0];
     s_telemetry.tof_distance_mm[1] = s_sensor_snapshot.tof_distance_mm[1];
     s_telemetry.tof_distance_mm[2] = s_sensor_snapshot.tof_distance_mm[2];
@@ -1249,7 +1254,7 @@ LOCAL void task_acoustic_link_frame_handle(const acoustic_frame_t * p_frame) {
         }
 
         UW const required = ACOUSTIC_CAPABILITY_DOA | ACOUSTIC_CAPABILITY_VAD | ACOUSTIC_CAPABILITY_LEVEL |
-                            ACOUSTIC_CAPABILITY_DOA_DIAGNOSTICS;
+                            ACOUSTIC_CAPABILITY_DOA_DIAGNOSTICS | ACOUSTIC_CAPABILITY_FEATURE_SLOT1;
         audio_hello = hello;
         audio_boot_id = hello.boot_id;
         audio_boot_id_valid = TRUE;
@@ -1310,9 +1315,13 @@ LOCAL void task_acoustic_link_frame_handle(const acoustic_frame_t * p_frame) {
             return;
         }
 
+        if (0U == feature.frame_index) {
+            audio_feature_first_rx_ms = audio_now_ms;
+        }
         acoustic_feature_assembler_result_t const result =
             acoustic_feature_assembler_push(&audio_feature_assembler, &feature);
         if (CPU0_ACOUSTIC_FEATURE_COMPLETE == result) {
+            g_task_acoustic_link_feature_transport_ms = audio_now_ms - audio_feature_first_rx_ms;
             memcpy(&audio_feature_patch, &audio_feature_assembler.patch, sizeof(audio_feature_patch));
             audio_feature_ready = TRUE;
             g_task_acoustic_link_feature_generation++;

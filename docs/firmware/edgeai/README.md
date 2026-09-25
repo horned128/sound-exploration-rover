@@ -2,7 +2,7 @@
 
 この文書には、エッジAIに必要な設計上の固定契約を置く。現在は音響特徴量とCPU間状態語を対象とし、将来のモデル、特徴量、通信に関する設計判断もここへ集約する。
 
-最終更新: 2026-09-16
+最終更新: 2026-09-25
 
 この文書は、音響特徴量、ESP32S3–CPU0間プロトコル、CPU0–CPU1状態語の
 実装が共有する固定契約をまとめたものです。実装の進捗や作業順とは独立した
@@ -13,7 +13,7 @@
 
 | 項目 | 固定値 |
 |---|---|
-| 入力 | signed 32-bit PCM、16 kHz / mono。XVF3800処理済みI2Sの先頭チャンネルを`INT32_MAX`で正規化 |
+| 入力 | signed 32-bit PCM、16 kHz / mono。XVF3800処理済みI2Sの**右slot (index 1)**を`INT32_MAX`で正規化。2026-09-25に実録音の混合音照合を比較して左slot (index 0)から変更 |
 | 窓 | 400 samples（25 ms） |
 | FFT | 512 points、非正規化。400 samplesの後ろを0埋め、片側257 binsのpower spectrum、bin間隔31.25 Hz |
 | ホップ | 160 samples（10 ms、100 frames/s） |
@@ -28,6 +28,9 @@ I2Sの読み出し単位は256 samplesなので、160-sample hopと一致しま�
 フレーム生成器は読み出し境界をまたぐサンプルを繰り越します。
 FFT、mel加算、対数、平均減算はESP32S3上で単精度演算します。ホスト参照実装は
 同じ演算順を再現し、最終int8出力のビット一致を固定ベクトルで検証します。
+音声チャネルを変えたため、MRAMの旧左slot見本はversion 4とし使用しません。
+現行version 5でTARGETを5回再登録してから走行します。ESP32-S3のHELLO capability
+`ACOUSTIC_CAPABILITY_FEATURE_SLOT1`がない間はCPU0がリンクを受理しません。
 ESP32S3起動時にも固定インパルスを全処理へ通す自己テストを行い、結果と生成fps、
 リング充填数、256-sampleブロックの直近・最大処理時間、I2S overrunをUDP JSONの
 `esp_audio`へ出力します。この診断はCPU0未接続時のheartbeatにも含めます。
@@ -91,4 +94,3 @@ I2Sの256-sample読み出し境界をまたぐ固定入力でも、C実装とホ
 方式、実装順、実録音で確定すべきしきい値は[音響の現場学習方式](acoustic_learning_method.md)を参照してください。
 
 TFLMランタイムによる障害物回避制御MLP（Policy Distillation）は実装・int8量子化・ファームウェア統合・実機始動トルク調整まで完了しており、`CPU0_USE_CONTROL_MLP`（`control_config.h`）によりルールベースと即時切替可能です。詳細は[TFLM 障害物回避制御 MLP 設計書](control_mlp_avoidance.md)を参照してください。
-

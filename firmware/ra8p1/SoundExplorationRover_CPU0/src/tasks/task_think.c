@@ -9,6 +9,7 @@
 #include "config/task_config.h"                             /* 思考周期と優先度 */
 #include "ipc/actuator_ipc_client.h"                        /* CPU1実測左右輪速度 */
 #include "control/control_mlp_planner.h"                    /* TFLM制御MLPプランナ */
+#include "control/debug_motor_recording.h"                  /* SW短押しの期限付き録音走行 */
 #include "control/obstacle_avoidance_controller.h"          /* ToF・IMU走行判断 */
 #include "control/safety_arbiter.h"                         /* 安全調停・ToF veto集約 */
 #include "control/sensor_liveness.h"                        /* 取得タスクと独立した更新監視 */
@@ -47,8 +48,11 @@ LOCAL void task_think_learning_commit(void);                 /* 5見本をMRAM�
 LOCAL void task_think_learning_cancel(void);                 /* 未保存見本を破棄 */
 LOCAL void task_think_learning_command_apply(void);          /* キュー済み学習操作を反映 */
 
+#if (CPU0_DEBUG_MOTOR_RECORDING_ENABLE == 0U)
 LOCAL UW learning_button_press_ms;                          /**< SW1継続押下時間[ms] */
 LOCAL BOOL learning_button_handled;                         /**< 同一押下の多重切替防止 */
+#endif
+LOCAL debug_motor_recording_t debug_motor_state;            /**< 収録用デバッグ走行とSW状態 */
 LOCAL UW learning_last_feature_generation;                  /**< 最後に収集した特徴量世代 */
 LOCAL volatile task_think_learning_command_t learning_command_pending; /**< 次周期に反映する外部操作 */
 LOCAL volatile BOOL restart_request_pending;                /**< 次周期に反映する再開操作 */
@@ -140,6 +144,8 @@ EXPORT volatile UW g_task_think_autonomous_backup_count;    /**< 自律両輪後
 EXPORT volatile obstacle_avoidance_rule_t g_task_think_sensor_rule;
 EXPORT volatile UW g_task_think_fault_flags;                /**< CPU0異常ラッチ */
 EXPORT volatile BOOL g_task_think_learning_mode;            /**< 現場学習モード */
+EXPORT volatile BOOL g_task_think_debug_motor_active;       /**< PCM収録用デバッグ走行中 */
+EXPORT volatile UW g_task_think_debug_motor_remaining_ms;   /**< 自動停止まで[ms] */
 EXPORT volatile UB g_task_think_learning_samples;           /**< 収集済み音響見本数 */
 EXPORT volatile BOOL g_task_think_storage_valid;            /**< 有効なMRAMプロトタイプ有無 */
 /**< 直近MRAM処理結果 */
@@ -205,6 +211,9 @@ EXPORT app_fault_t task_think_create(void) {
     g_task_think_sensor_rule = CPU0_SENSOR_RULE_SAFE_STOP;
     g_task_think_fault_flags = APP_FAULT_NONE;
     g_task_think_learning_mode = FALSE;
+    g_task_think_debug_motor_active = FALSE;
+    g_task_think_debug_motor_remaining_ms = 0U;
+    memset(&debug_motor_state, 0, sizeof(debug_motor_state));
     g_task_think_learning_samples = 0U;
     g_task_think_storage_valid = FALSE;
     g_task_think_storage_result = CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
@@ -458,18 +467,23 @@ LOCAL void task_think_learning_capture(const task_acoustic_link_snapshot_t * p_s
            sizeof(storage_data.samples[g_task_think_learning_samples]));
     g_task_think_learning_samples++;
     if (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT == g_task_think_learning_samples) {
-        UW isolated_index = 0U;
-        if (acoustic_identifier_isolated_sample_find((const B *) storage_data.samples,
-                                                    g_task_think_learning_samples, &isolated_index)) {
-            /* 明確な異音が混ざった場合は保存せず、次の特徴量で1見本を取り直す。 */
-            if (isolated_index != (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT - 1U)) {
-                memcpy(storage_data.samples[isolated_index],
-                       storage_data.samples[CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT - 1U],
-                       sizeof(storage_data.samples[isolated_index]));
+        UB const mask = acoustic_identifier_consensus_mask((const B *) storage_data.samples,
+                                                            g_task_think_learning_samples);
+        if (mask != ((1U << CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT) - 1U)) {
+            /* 4/5または3/5が一意に合意した場合のみ、異音の1〜2件を再取得する。 */
+            UW kept = 0U;
+            for (UW index = 0U; index < CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT; index++) {
+                if (mask & (1U << index)) {
+                    if (kept != index) {
+                        memcpy(storage_data.samples[kept], storage_data.samples[index],
+                               sizeof(storage_data.samples[0]));
+                    }
+                    kept++;
+                }
             }
-            memset(storage_data.samples[CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT - 1U], 0,
-                   sizeof(storage_data.samples[0]));
-            g_task_think_learning_samples--;
+            memset(&storage_data.samples[kept], 0,
+                   (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT - kept) * sizeof(storage_data.samples[0]));
+            g_task_think_learning_samples = (UB) kept;
         }
     }
     storage_data.sample_count = g_task_think_learning_samples;
@@ -779,23 +793,41 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
 
         bsp_io_level_t sw1_level = BSP_IO_LEVEL_HIGH;
         (void) g_ioport.p_api->pinRead(g_ioport.p_ctrl, BSP_IO_PORT_00_PIN_09, &sw1_level);
+#if (CPU0_DEBUG_MOTOR_RECORDING_ENABLE != 0U)
+        debug_motor_button_t const sw_event = debug_motor_button_step(&debug_motor_state,
+            BSP_IO_LEVEL_LOW == sw1_level, CPU0_THINK_PERIOD_MS);
+        BOOL learning_long_press = FALSE;
+        if (DEBUG_MOTOR_BUTTON_LONG == sw_event) {
+            if (debug_motor_state.active || debug_motor_state.press_started_during_drive) {
+                /* デバッグ走行中の長押しは停止だけ。MRAM学習を開始しない。 */
+                debug_motor_recording_step(&debug_motor_state, sw_event, FALSE, CPU0_THINK_PERIOD_MS);
+            } else {
+                learning_long_press = TRUE;
+            }
+        }
+#else
+        BOOL learning_long_press = FALSE;
         if (BSP_IO_LEVEL_LOW == sw1_level) {
             if (!learning_button_handled) {
                 learning_button_press_ms += CPU0_THINK_PERIOD_MS;
                 if (learning_button_press_ms >= 2000U) {
                     learning_button_handled = TRUE;
-                    if (!g_task_think_learning_mode) {
-                        task_think_learning_start();
-                    } else if (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT == g_task_think_learning_samples) {
-                        task_think_learning_commit();
-                    } else {
-                        task_think_learning_cancel();
-                    }
+                    learning_long_press = TRUE;
                 }
             }
         } else {
             learning_button_press_ms = 0U;
             learning_button_handled = FALSE;
+        }
+#endif
+        if (learning_long_press) {
+            if (!g_task_think_learning_mode) {
+                task_think_learning_start();
+            } else if (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT == g_task_think_learning_samples) {
+                task_think_learning_commit();
+            } else {
+                task_think_learning_cancel();
+            }
         }
         /* センサー取得結果を以降の安全判定と制御へ渡す再利用バッファ。 */
         LOCAL sensor_snapshot_t sensor_snapshot;
@@ -882,7 +914,8 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         }
 
         /* --- S3: 音源追従コントローラを先に実行し、目標操舵角を取得 --- */
-        BOOL const match_required = (0U != CPU0_SOUND_REQUIRE_IDENTIFIER_MATCH) && g_task_think_storage_valid;
+        /* slot変更で旧見本が無効になった場合も、未学習のDoA/VADだけで発進しない。 */
+        BOOL const match_required = (0U != CPU0_SOUND_REQUIRE_IDENTIFIER_MATCH);
         /* 見本一致の保持は走行継続用とし、別音のDoAを位置推定へ混ぜない。 */
         BOOL const target_sound_valid = link_ready &&
             (!match_required || (target_sound_matched && target_sound_direction_valid)) &&
@@ -1199,11 +1232,6 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             (void) task_think_spin_breakaway_rpm_update(FALSE, FALSE, 0);
         }
 
-        g_task_think_state = output.state;
-        if (previous_state != g_task_think_state) {
-            state_elapsed_ms = 0U;
-        }
-
         if (g_task_think_learning_mode) {
             output.emergency_stop = TRUE;
             output.actuator_enable = FALSE;
@@ -1211,6 +1239,38 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
             output.left_rpm = 0;
             output.right_rpm = 0;
             task_think_learning_capture(&snapshot, observation_usable);
+        }
+
+#if (CPU0_DEBUG_MOTOR_RECORDING_ENABLE != 0U)
+        /* TARGET識別結果は走行開始条件に使わない。音源追従や回避走行と競合しない
+         * 静止聴取状態からのみ、正面550/側面380 mm以上で低速直進。毎50 ms再検査。 */
+        BOOL const debug_clearance = debug_motor_recording_clearance(
+            sensor_snapshot.tof_distance_mm[0], sensor_snapshot.tof_distance_mm[1],
+            sensor_snapshot.tof_distance_mm[2], CPU0_SENSOR_ESCAPE_SIDE_MM, CPU0_SENSOR_ESCAPE_FRONT_MM);
+        BOOL const debug_allowed = (CPU0_THINK_STATE_LISTEN == sf_output.state) &&
+            (APP_FAULT_NONE == g_task_think_fault_flags) && !g_task_think_learning_mode &&
+            !target_sound_matched && !avoidance_motion_latched &&
+            (E_OK == snapshot_err) && snapshot.usb_configured && snapshot.hello_received &&
+            !sf_output.emergency_stop && !oa_output.emergency_stop && debug_clearance &&
+            safety_arbiter_motion_allowed(&sensor_snapshot, sensor_fresh, NULL);
+        debug_motor_recording_step(&debug_motor_state, sw_event, debug_allowed, CPU0_THINK_PERIOD_MS);
+        if (debug_motor_state.active) {
+            output.state = CPU0_THINK_STATE_SENSOR_FORWARD;
+            output.steering_deg = 0;
+            output.is_spin_turn = FALSE;
+            output.left_rpm = CPU0_SENSOR_MIN_FORWARD_RPM;
+            output.right_rpm = CPU0_SENSOR_MIN_FORWARD_RPM;
+            output.actuator_enable = TRUE;
+            output.emergency_stop = FALSE;
+            g_task_think_sensor_rule = CPU0_SENSOR_RULE_FORWARD;
+        }
+        g_task_think_debug_motor_active = debug_motor_state.active;
+        g_task_think_debug_motor_remaining_ms = debug_motor_state.remaining_ms;
+#endif
+
+        g_task_think_state = output.state;
+        if (previous_state != g_task_think_state) {
+            state_elapsed_ms = 0U;
         }
 
         /* --- S3: safety_arbiter 経由で安全クランプしてから発行 --- */

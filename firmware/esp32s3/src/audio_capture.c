@@ -30,6 +30,14 @@ static audio_capture_feature_event_t s_feature_event;       /**< 送信待ちま
 static uint16_t s_feature_event_frame_count;                /**< イベントに退避済みのフレーム数 */
 static bool s_feature_event_active;                         /**< 後続500 msを収集中 */
 static bool s_feature_event_ready;                          /**< 80フレーム揃い、送信側が取得可能 */
+#if APP_AUDIO_DATASET_STREAM_ENABLE
+#define AUDIO_CAPTURE_PCM_QUEUE_CAPACITY (16U)
+static audio_capture_pcm_block_t s_pcm_queue[AUDIO_CAPTURE_PCM_QUEUE_CAPACITY];
+static uint8_t s_pcm_head;
+static uint8_t s_pcm_count;
+static uint32_t s_pcm_drops;
+static uint32_t s_pcm_sample_index;
+#endif
 /**< 音声状態を保護する排他ロック */
 static portMUX_TYPE s_snapshot_lock = portMUX_INITIALIZER_UNLOCKED;
 /**< 音声タスクと参照元で共有する最新状態 */
@@ -148,13 +156,38 @@ static void audio_capture_task(void * context) {
         }
 
         for (size_t index = 0U; index < audio_frame_count; index++) {
-            mono_samples[index] = samples[index * APP_AUDIO_CHANNEL_COUNT];
+            mono_samples[index] = samples[index * APP_AUDIO_CHANNEL_COUNT + APP_AUDIO_FEATURE_CHANNEL_INDEX];
         }
         int64_t const log_mel_started_us = esp_timer_get_time();
         size_t const generated_features =
             log_mel_extractor_feed(&s_log_mel_extractor, mono_samples, audio_frame_count,
                                    audio_capture_feature_callback, NULL);
         uint32_t const log_mel_elapsed_us = (uint32_t) (esp_timer_get_time() - log_mel_started_us);
+
+#if APP_AUDIO_DATASET_STREAM_ENABLE
+        /* PCMはネットワーク処理を音声タスクで行わず、短いcritical sectionでだけ退避する。 */
+        portENTER_CRITICAL(&s_snapshot_lock);
+        if (s_pcm_count == AUDIO_CAPTURE_PCM_QUEUE_CAPACITY) {
+            s_pcm_head = (uint8_t) ((s_pcm_head + 1U) % AUDIO_CAPTURE_PCM_QUEUE_CAPACITY);
+            s_pcm_count--;
+            s_pcm_drops++;
+        }
+        audio_capture_pcm_block_t * const block =
+            &s_pcm_queue[(s_pcm_head + s_pcm_count) % AUDIO_CAPTURE_PCM_QUEUE_CAPACITY];
+        block->first_sample = s_pcm_sample_index;
+        block->dropped_blocks = s_pcm_drops;
+        block->sample_count = (uint16_t) audio_frame_count;
+        for (size_t index = 0U; index < audio_frame_count; index++) {
+            /* 診断のchannel0/1はDSP選択とは独立に物理I2S slot順を維持。 */
+            block->samples[index] = (int16_t) (samples[index * APP_AUDIO_CHANNEL_COUNT] >> 16U);
+#if APP_AUDIO_STEREO_DIAGNOSTIC_ENABLE
+            block->second_channel[index] = (int16_t) (samples[index * APP_AUDIO_CHANNEL_COUNT + 1U] >> 16U);
+#endif
+        }
+        s_pcm_sample_index += (uint32_t) audio_frame_count;
+        s_pcm_count++;
+        portEXIT_CRITICAL(&s_snapshot_lock);
+#endif
 
         double const block_rms = sqrt(square_sum / (double) sample_count);
         if (!s_snapshot.valid) {
@@ -265,6 +298,11 @@ void audio_capture_feature_event_discard(void) {
 esp_err_t audio_capture_start(void) {
     _Static_assert(LOG_MEL_SAMPLE_RATE_HZ == APP_AUDIO_SAMPLE_RATE_HZ, "log-mel sample rate mismatch");
     _Static_assert(LOG_MEL_BIN_COUNT == ACOUSTIC_FEATURE_BIN_COUNT, "log-mel bin count mismatch");
+    _Static_assert(APP_AUDIO_FEATURE_CHANNEL_INDEX < APP_AUDIO_CHANNEL_COUNT,
+                   "acoustic feature I2S channel is outside capture slot count");
+#if APP_AUDIO_STEREO_DIAGNOSTIC_ENABLE
+    _Static_assert(APP_AUDIO_CHANNEL_COUNT == 2U, "stereo PCM diagnostic requires two I2S slots");
+#endif
     _Static_assert((APP_FEATURE_PRE_TRIGGER_FRAMES + APP_FEATURE_POST_TRIGGER_FRAMES) ==
                        ACOUSTIC_FEATURE_EVENT_FRAME_COUNT,
                    "feature event duration mismatch");
@@ -333,3 +371,21 @@ void audio_capture_get_snapshot(audio_capture_snapshot_t * snapshot) {
         snapshot->peak_dbfs_x100 = INT16_MIN;
     }
 }
+
+#if APP_AUDIO_DATASET_STREAM_ENABLE
+bool audio_capture_pcm_block_take(audio_capture_pcm_block_t * block) {
+    if (block == NULL) {
+        return false;
+    }
+    portENTER_CRITICAL(&s_snapshot_lock);
+    if (s_pcm_count == 0U) {
+        portEXIT_CRITICAL(&s_snapshot_lock);
+        return false;
+    }
+    *block = s_pcm_queue[s_pcm_head];
+    s_pcm_head = (uint8_t) ((s_pcm_head + 1U) % AUDIO_CAPTURE_PCM_QUEUE_CAPACITY);
+    s_pcm_count--;
+    portEXIT_CRITICAL(&s_snapshot_lock);
+    return true;
+}
+#endif

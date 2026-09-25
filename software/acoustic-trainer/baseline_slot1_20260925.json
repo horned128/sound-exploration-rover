@@ -1,0 +1,26 @@
+{
+  "method": "Actual firmware ESP C log-mel and CPU0 C 80-frame / 192D identifier; 5 TARGET-only field examples per I2S slot",
+  "source_logs": ["silence.jsonl", "target.jsonl", "target_noise.jsonl", "motor.jsonl"],
+  "registration": {"samples": 5, "consensus_mask_both_channels": 31, "effective_threshold_max": 0.055},
+  "nonoverlapping_80_frame_comparison": {
+    "slot0": {"target_only": "20/21", "target_with_noise": "9/34", "silence": "0/16", "motor_only": "0/18"},
+    "slot1": {"target_only": "20/21", "target_with_noise": "23/34", "silence": "0/16", "motor_only": "0/18"}
+  },
+  "overlapping_40_frame_hop_comparison": {
+    "slot0": {"target_only": "37/39", "target_with_noise": "21/67", "silence": "0/30", "motor_only": "0/35"},
+    "slot1": {"target_only": "37/39", "target_with_noise": "44/67", "silence": "0/30", "motor_only": "0/35"}
+  },
+  "precision_warning": "Only ~28.8 seconds of silence+motor negatives; no TV-only second-slot or similar-sound negative. Mixed audio labels are session-level; ratios are accepted windows, not annotated event recall.",
+  "selected": "I2S slot1 for target-independent five-example matching",
+  "firmware": {
+    "esp32s3_feature_channel_index": 1,
+    "esp32s3_hello_capability": "ACOUSTIC_CAPABILITY_FEATURE_SLOT1",
+    "cpu0_mram_record_version": 5,
+    "cpu0_requires_matching_hello_capability": true,
+    "cpu0_requires_enrollment_before_motion": true,
+    "cpu1_changed": false,
+    "usb_feature_packet_layout_changed": false,
+    "mram_payload_layout_changed": false
+  },
+  "field_hardware_validation": "not yet flashed; re-register five examples after CPU0 then ESP32-S3 update"
+}

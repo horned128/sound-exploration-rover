@@ -63,4 +63,7 @@ skills-lock.json
 **/tmp
 AGENTS.md
 software/rover-monitor/logs/rover-monitor-*.jsonl
+software/rover-monitor/logs/*.jsonl
+software/audio_ml/dataset/
+software/audio_ml/models/
 opencode.json

@@ -120,6 +120,78 @@ static uint32_t wifi_telemetry_uptime_ms(void) {
     return (uint32_t) ((uint64_t) esp_timer_get_time() / 1000ULL);
 }
 
+#if APP_AUDIO_DATASET_STREAM_ENABLE
+/* 256 sample PCM16を1チャネルずつ送る。既存ch0 JSONとの互換性を保つ。 */
+static void wifi_telemetry_pcm_channel_send(int socket_fd, audio_capture_pcm_block_t const * block,
+                                            unsigned int channel) {
+    static char json[1024];
+    static char const alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    int length = snprintf(json, sizeof(json),
+                          "{\"record_type\":\"%s\",\"schema\":1,\"channel\":%u,\"esp_ms\":%lu,"
+                          "\"first_sample\":%lu,\"sample_count\":%u,\"dropped_blocks\":%lu,\"pcm16le_b64\":\"",
+                          (0U == channel) ? "acoustic_pcm" : "acoustic_pcm_ch1", channel,
+                          (unsigned long) wifi_telemetry_uptime_ms(),
+                          (unsigned long) block->first_sample, (unsigned int) block->sample_count,
+                          (unsigned long) block->dropped_blocks);
+    if ((length < 0) || ((size_t) length >= sizeof(json))) {
+        s_udp_error_count++;
+        return;
+    }
+    size_t const byte_count = (size_t) block->sample_count * 2U;
+    for (size_t offset = 0U; offset < byte_count; offset += 3U) {
+        uint32_t bits = 0U;
+        for (size_t part = 0U; part < 3U; part++) {
+            size_t const byte_index = offset + part;
+            if (byte_index < byte_count) {
+#if APP_AUDIO_STEREO_DIAGNOSTIC_ENABLE
+                uint16_t const sample = (uint16_t) ((0U == channel) ? block->samples[byte_index / 2U] :
+                                                              block->second_channel[byte_index / 2U]);
+#else
+                uint16_t const sample = (uint16_t) block->samples[byte_index / 2U];
+#endif
+                uint32_t const value = (byte_index & 1U) ? (sample >> 8U) : (sample & 0xFFU);
+                bits |= value << (16U - (part * 8U));
+            }
+        }
+        if (((size_t) length + 7U) >= sizeof(json)) {
+            length = -1;
+            break;
+        }
+        json[length++] = alphabet[(bits >> 18U) & 63U];
+        json[length++] = alphabet[(bits >> 12U) & 63U];
+        json[length++] = ((offset + 1U) < byte_count) ? alphabet[(bits >> 6U) & 63U] : '=';
+        json[length++] = ((offset + 2U) < byte_count) ? alphabet[bits & 63U] : '=';
+    }
+    if (length < 0) {
+        s_udp_error_count++;
+        return;
+    }
+    json[length++] = '"';
+    json[length++] = '}';
+    json[length++] = '\n';
+    if (sendto(socket_fd, json, (size_t) length, 0,
+               (struct sockaddr *) &s_destination, sizeof(s_destination)) == length) {
+        s_udp_send_count++;
+    } else {
+        s_udp_error_count++;
+    }
+}
+
+/* PCMブロック256 sample = 16 ms。最大2件/20 ms poll。 */
+static void wifi_telemetry_pcm_send(int socket_fd) {
+    for (unsigned int packet = 0U; packet < 2U; packet++) {
+        audio_capture_pcm_block_t block;
+        if (!audio_capture_pcm_block_take(&block)) {
+            break;
+        }
+        wifi_telemetry_pcm_channel_send(socket_fd, &block, 0U);
+#if APP_AUDIO_STEREO_DIAGNOSTIC_ENABLE
+        wifi_telemetry_pcm_channel_send(socket_fd, &block, 1U);
+#endif
+    }
+}
+#endif
+
 /** =================================================================*
  * @brief  JSON真偽値変換
  * @param[in] flags フラグ集合
@@ -615,9 +687,10 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         "\"sensors\":{\"mode\":%u,\"mode_name\":\"%s\",\"rule\":%u,\"rule_name\":\"%s\"," 
         "\"valid_flags\":%u,\"tof_mm\":[%u,%u,%u],\"accel_mg\":[%d,%d,%d],"
         "\"gyro_dps_x10\":[%d,%d,%d],\"error_flags\":%u,\"last_error\":%ld,\"age_ms\":%lu},"
-        "\"learning\":{\"active\":%d,\"storage_valid\":%d,\"storage_result\":%u,"
-        "\"samples\":%u,\"threshold\":%.3f,\"target_peak_bin\":%d},"
-        "\"recognition\":{\"status\":%u,\"status_name\":\"%s\",\"distance\":%.3f,"
+         "\"learning\":{\"active\":%d,\"storage_valid\":%d,\"storage_result\":%u,"
+         "\"samples\":%u,\"threshold\":%.3f,\"target_peak_bin\":%d},"
+         "\"debug_motor\":{\"active\":%d},"
+         "\"recognition\":{\"status\":%u,\"status_name\":\"%s\",\"distance\":%.3f,"
         "\"threshold\":%.3f,\"similarity\":%.1f,\"active_frames\":%u,\"nearest_sample\":%d,"
         "\"current_peak_bin\":%d},"
         "\"actuator\":{\"valid\":%u,\"age_ms\":%lu,"
@@ -678,9 +751,10 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
         (long) telemetry->sensor_last_error, (unsigned long) telemetry->sensor_age_ms,
         wifi_telemetry_flag(telemetry->sensor_reserved, ACOUSTIC_TELEMETRY_LEARNING_MODE),
         wifi_telemetry_flag(telemetry->sensor_reserved, ACOUSTIC_TELEMETRY_STORAGE_VALID),
-        (unsigned int) (telemetry->sensor_reserved & ACOUSTIC_TELEMETRY_STORAGE_RESULT_MASK),
-        (unsigned int) telemetry->infer_sample_count, (double) threshold, target_peak,
-        (unsigned int) telemetry->infer_status, wifi_telemetry_infer_status(telemetry->infer_status),
+         (unsigned int) (telemetry->sensor_reserved & ACOUSTIC_TELEMETRY_STORAGE_RESULT_MASK),
+         (unsigned int) telemetry->infer_sample_count, (double) threshold, target_peak,
+         wifi_telemetry_flag(telemetry->sensor_reserved, ACOUSTIC_TELEMETRY_DEBUG_MOTOR_RECORDING),
+         (unsigned int) telemetry->infer_status, wifi_telemetry_infer_status(telemetry->infer_status),
         (double) cosine_dist, (double) threshold, (double) similarity,
         (unsigned int) telemetry->infer_active_frames, nearest_sample, current_peak,
         actuator_valid ? 1U : 0U, (unsigned long) actuator_age_ms,
@@ -833,11 +907,6 @@ static void wifi_telemetry_task(void * argument) {
             }
             continue;
         }
-        if ((now_ms - last_send_ms) < APP_UDP_TELEMETRY_PERIOD_MS) {
-            continue;
-        }
-        last_send_ms = now_ms;
-
         if (socket_fd < 0) {
             socket_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
             if (socket_fd < 0) {
@@ -845,6 +914,14 @@ static void wifi_telemetry_task(void * argument) {
                 continue;
             }
         }
+
+#if APP_AUDIO_DATASET_STREAM_ENABLE
+        wifi_telemetry_pcm_send(socket_fd);
+#endif
+        if ((now_ms - last_send_ms) < APP_UDP_TELEMETRY_PERIOD_MS) {
+            continue;
+        }
+        last_send_ms = now_ms;
 
         wifi_ap_record_t access_point = {0};
         int rssi_dbm = -127;

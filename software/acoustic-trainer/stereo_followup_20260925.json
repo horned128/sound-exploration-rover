@@ -1,0 +1,37 @@
+{
+  "hardware_input": "two processed I2S slots, 16 kHz; raw independent four microphones not established",
+  "field_logs": ["silence.jsonl", "target.jsonl", "target_noise.jsonl", "motor.jsonl"],
+  "pcm_seconds_paired": {"silence": 19.568, "target": 18.944, "target_noise": 29.088, "motor": 14.512},
+  "correlation_median_abs_256_sample_blocks": {"silence": 0.9815, "target": 0.957, "target_noise": 0.939, "motor": 0.9426},
+  "target_vs_motor_side_advantage_over_mid_db": -0.83,
+  "handcrafted_20_frame_two_of_three_threshold_0_08": {
+    "slot0_target_noise": "180/349 accepted windows",
+    "slot1_target_noise": "235/349 accepted windows",
+    "silence_motor_negative_total_seconds": 28.8,
+    "negative_events": 0,
+    "warning": "TV-only stereo negative absent; weak interval labels, overlapping windows"
+  },
+  "source_independent_query_model": {
+    "input": "40x32 absolute log-mel query+audio, five field exemplars",
+    "weights": 14249,
+    "trained_on_esc50_classes": 44,
+    "tuning_classes": 3,
+    "unseen_test_classes": 3,
+    "upstream_commit": "33c8ce9eb2cf0b1c2f8bcf322eb349b6be34dbb6",
+    "threshold": 0.9,
+    "vote": "2-of-3 every 80ms",
+    "general_validation_0db_mix_hits": "10/54",
+    "general_test_0db_mix_hits": "13/63",
+    "general_validation_fp_per_hour": 2.22,
+    "general_test_fp_per_hour": 3.81,
+    "stereo_slot0_target_noise": "8/342 accepted windows",
+    "stereo_slot1_target_noise": "94/342 accepted windows",
+    "stereo_slot1_target_only": "122/207 accepted windows",
+    "stereo_motor_silence_false_updates": 0,
+    "decision": "Better on this field target using slot 1; independent unknown-class mixture recall is only ~21% at 0dB, therefore no model selected for driving."
+  },
+  "latency_optimistic_lower_bound_ms": 560,
+  "firmware_model_integration": false,
+  "firmware_pcm_stereo_integration": "built and active as diagnostic, no CPU0/CPU1 IPC change",
+  "user_action_now": "none; TV-only stereo only becomes relevant after a better unknown-class model passes independent general-audio evaluation"
+}

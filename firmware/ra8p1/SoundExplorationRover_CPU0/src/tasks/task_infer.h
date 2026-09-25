@@ -51,6 +51,8 @@ IMPORT volatile UW g_task_infer_feature_generation;         /**< 最後に処理
 IMPORT volatile UW g_task_infer_inference_count;            /**< 音響推論実行回数 */
 IMPORT volatile UW g_task_infer_failure_count;              /**< 音響推論失敗回数 */
 IMPORT volatile UW g_task_infer_match_count;                /**< 音響見本一致回数 */
+IMPORT volatile UW g_task_infer_processing_last_ms;         /**< 推論タスクの処理時間[ms] */
+IMPORT volatile UW g_task_infer_processing_max_ms;          /**< 推論タスクの最大処理時間[ms] */
 IMPORT volatile ER g_task_infer_last_kernel_error;          /**< 音響推論タスクの最終Kernelエラー */
 
 #endif /* SEROV_CPU0_TASK_INFER_H */

@@ -10,6 +10,7 @@
 #include "control/sensor_liveness.h"
 #include "config/sensor_config.h"
 #include "config/control_config.h"
+#include "config/task_config.h"
 
 static void (*entry)(INT,void *);
 static jmp_buf done;
@@ -35,7 +36,9 @@ void sound_source_localizer_step(const sound_source_localizer_input_t *input,
     (void)input;*output=(sound_source_localizer_output_t){0};
 }
 static fsp_err_t pin_read(void *ctrl,bsp_io_port_pin_t pin,bsp_io_level_t *level) {
-    (void)ctrl;(void)pin;*level=BSP_IO_LEVEL_HIGH;return FSP_SUCCESS;
+    (void)ctrl;(void)pin;
+    *level=(mode==5 && loops>=20 && loops<23) ? BSP_IO_LEVEL_LOW : BSP_IO_LEVEL_HIGH;
+    return FSP_SUCCESS;
 }
 static const ioport_api_t io_api={.pinRead=pin_read};
 const ioport_instance_t g_ioport={NULL,&io_api};
@@ -45,10 +48,10 @@ void R_BSP_PinWrite(bsp_io_port_pin_t pin,bsp_io_level_t level) {
     if(pin==11)green_level=level;
 }
 prototype_storage_result_t prototype_storage_init(void) {
-    return mode>=3 ? CPU0_PROTOTYPE_STORAGE_OK : CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED;
+    return mode==6 ? CPU0_PROTOTYPE_STORAGE_NOT_INITIALIZED : CPU0_PROTOTYPE_STORAGE_OK;
 }
 prototype_storage_result_t prototype_storage_load(prototype_storage_data_t *data) {
-    if(mode>=3) {
+    if(mode!=6) {
         *data=(prototype_storage_data_t){.sample_count=5,.generation=18};
         return CPU0_PROTOTYPE_STORAGE_OK;
     }
@@ -67,6 +70,11 @@ ER task_acoustic_link_feature_get(acoustic_feature_patch_t *patch,UW *generation
     (void)patch;(void)generation;return E_NOEXS;
 }
 ER task_infer_result_get(task_infer_result_t *result) {
+    if(mode<3 && loops>=12) {
+        *result=(task_infer_result_t){.feature_generation=loops+1,.summary_valid=TRUE,
+            .identifier={.status=CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_TARGET}};
+        return E_OK;
+    }
     if(mode==3 && loops>=12) {
         *result=(task_infer_result_t){.feature_generation=loops+1,.summary_valid=TRUE};
         return E_OK;
@@ -97,6 +105,11 @@ BOOL acoustic_identifier_isolated_sample_find(const B *samples, UW sample_count,
     (void)sample_count;
     (void)index;
     return FALSE;
+}
+
+UB acoustic_identifier_consensus_mask(const B *samples, UW sample_count) {
+    (void)samples;
+    return (0U < sample_count && sample_count <= 5U) ? (UB)((1U << sample_count) - 1U) : 0U;
 }
 
 void acoustic_identifier_build_weights(UB peak_bin, float *weights) {
@@ -139,6 +152,7 @@ ER task_sensor_snapshot_get(sensor_snapshot_t *out) {
     if(stage!=1)count++;
     *out=(sensor_snapshot_t){.initialized=TRUE,.valid_flags=CPU0_SENSOR_VALID_ALL,.update_count=count,.age_ms=0};
     for(unsigned i=0;i<CPU0_SENSOR_TOF_COUNT;i++)out->tof_distance_mm[i]=2000;
+    if(mode==5 && stage==1 && loops>=26)out->tof_distance_mm[1]=549;
     if(mode==2 && stage==1) { failures++;return E_TMOUT; }
     return 0;
 }
@@ -152,16 +166,44 @@ ER task_acoustic_link_snapshot_get(task_acoustic_link_snapshot_t *out) {
         out->observation.vad=0;
         out->observation.level_dbfs_x100=-8000;
     }
+    if(mode==5) {
+        out->observation.vad=0;
+        out->observation.level_dbfs_x100=-8000;
+    }
     return 0;
 }
 ER task_command_set_target(const rover_motion_target_t *in) { target=*in;publications++;return 0; }
 ER tk_dly_tsk(INT delay) {
-    if(delay==100 && mode>=3) {
+    if(delay==100 && (mode==3 || mode==4)) {
         assert(target.left_target_rpm==0 && target.right_target_rpm==0 && target.emergency_stop);
         now+=delay;return E_OK;
     }
     assert(delay==50);loops++;assert(loops<600);
-    if(mode>=3) {
+    if(mode==5) {
+        if(loops==24) {
+            assert(g_task_think_debug_motor_active);
+            assert(target.left_target_rpm==85 && target.right_target_rpm==85);
+            assert(!target.emergency_stop && target.actuator_enable);
+            stage=1;
+        }
+        if(loops==27) {
+            assert(!g_task_think_debug_motor_active);
+            assert(target.left_target_rpm==0 && target.right_target_rpm==0);
+            assert(!target.actuator_enable);
+            longjmp(done,1);
+        }
+        now+=delay;return 0;
+    }
+    if(mode==6) {
+        if(loops==40) {
+            assert(!g_task_think_storage_valid);
+            assert(target.left_target_rpm==0 && target.right_target_rpm==0);
+            assert(!target.actuator_enable);
+            longjmp(done,1);
+        }
+        now+=delay;return 0;
+    }
+    if(mode==3 || mode==4) {
         if(loops==3) {
             assert(g_task_think_storage_valid && green_level==BSP_IO_LEVEL_HIGH);
             assert(task_think_learning_request(TASK_THINK_LEARNING_COMMAND_START)==E_OK);
@@ -242,5 +284,17 @@ int main(void) {
         if(setjmp(done)==0)entry(0,NULL);
         task_think_delete();
     }
-    puts("sensor liveness and learning UI: stop/recovery, MRAM reset, LED, save and failure passed");
+#if (CPU0_DEBUG_MOTOR_RECORDING_ENABLE != 0U)
+    mode=5;
+    now=count=loops=stage=publications=clear_calls=save_calls=infer_reset_calls=0;
+    assert(task_think_create()==0 && task_think_start()==0);
+    if(setjmp(done)==0)entry(0,NULL);
+    task_think_delete();
+#endif
+    mode=6;
+    now=count=loops=stage=publications=0;
+    assert(task_think_create()==0 && task_think_start()==0);
+    if(setjmp(done)==0)entry(0,NULL);
+    task_think_delete();
+    puts("sensor liveness, learning UI, SW-only debug drive and ToF stop passed");
 }

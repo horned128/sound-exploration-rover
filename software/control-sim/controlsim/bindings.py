@@ -311,6 +311,10 @@ def library() -> ctypes.CDLL:
         ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32,
     ]
     handle.acoustic_identifier_consensus_peak_bin.restype = ctypes.c_uint8
+    handle.acoustic_identifier_consensus_mask.argtypes = [
+        ctypes.POINTER(ctypes.c_int8), ctypes.c_uint32,
+    ]
+    handle.acoustic_identifier_consensus_mask.restype = ctypes.c_uint8
     handle.acoustic_identifier_build_weights.argtypes = [
         ctypes.c_uint8, ctypes.POINTER(ctypes.c_float),
     ]

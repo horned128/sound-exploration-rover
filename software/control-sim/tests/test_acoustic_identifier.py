@@ -223,3 +223,33 @@ def test_isolated_training_sample_is_detected_and_ignored_for_matching() -> None
 
     coherent = (ctypes.c_int8 * (5 * CPU0_ACOUSTIC_SUMMARY_DIMENSION))(*(good * 5))
     assert handle.acoustic_identifier_isolated_sample_find(coherent, 5, ctypes.byref(isolated)) == 0
+
+
+def test_two_contaminated_training_samples_do_not_override_three_agreeing_examples() -> None:
+    """Two coherent wrong examples bypass the former single-outlier check."""
+    handle = library()
+    reference, _, valid = summary_from_patch(80)
+    assert valid == 1
+    good = list(reference)
+    wrong = good.copy()
+    for slot in range(2):
+        for bin_index in range(32):
+            index = slot * 96 + bin_index
+            wrong[index] = -wrong[index]
+    samples = (ctypes.c_int8 * (5 * 192))(*(wrong * 2 + good * 3))
+    assert handle.acoustic_identifier_consensus_mask(samples, 5) == 0b11100
+    assert handle.acoustic_identifier_consensus_peak_bin(samples, 5) == 31
+
+    output = AcousticIdentifierSummaryOutput()
+    handle.acoustic_identifier_summary_classify(
+        (ctypes.c_int8 * 192)(*wrong), 1, 80, samples, 5, None, 0.2, ctypes.byref(output)
+    )
+    assert output.status == SUMMARY_NOT_TARGET
+    assert output.sample_index in (2, 3, 4)
+    handle.acoustic_identifier_summary_classify(
+        (ctypes.c_int8 * 192)(*good), 1, 80, samples, 5, None, 0.2, ctypes.byref(output)
+    )
+    assert output.status == SUMMARY_TARGET
+
+    coherent = (ctypes.c_int8 * (5 * 192))(*(good * 5))
+    assert handle.acoustic_identifier_consensus_mask(coherent, 5) == 0b11111

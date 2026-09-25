@@ -1,0 +1,62 @@
+{
+  "source_log": "software/rover-monitor/logs/rover-monitor-20260925-004412.jsonl",
+  "reproduce": [
+    "python3 software/audio_ml/field_session.py software/rover-monitor/logs/rover-monitor-20260925-004412.jsonl --output /tmp/field-labelled",
+    "software/acoustic-trainer/.venv/bin/python software/audio_ml/short_window_probe.py software/rover-monitor/logs/rover-monitor-20260925-004412.jsonl --manifest /tmp/field-labelled/wav/manifest.json --output /tmp/short-probe"
+  ],
+  "raw_pcm": {"rate_hz": 16000, "blocks": 19724, "gaps": 1, "lost_samples": 256, "longest_run_s": 315.552},
+  "clock_alignment_p95_ms": {"host": 15, "audio": 24},
+  "actual_motor_only_available": false,
+  "debug_drive_readiness_on_quiet_log": {
+    "rows": 145,
+    "link_ready_rows": 145,
+    "listening_rows": 143,
+    "front_ge_550_side_ge_380_rows": 145,
+    "note": "Historical snapshot only; new SW debug firmware has not been flashed/tested on this device."
+  },
+  "isolated_target_pcm_available": false,
+  "legacy_192d_replay": {"matched": 158, "total": 158},
+  "firmware_consensus_replay": {
+    "run": "python3 software/audio_ml/field_firmware_replay.py software/rover-monitor/logs/rover-monitor-20260925-004412.jsonl --output /tmp/field-consensus",
+    "sample_mask": 28,
+    "retained_indices": [2, 3, 4],
+    "changed_accepted_events": 0,
+    "comparison_count": 158,
+    "meaning": "Current saved registration has 3 agreeing examples and 2 discordant ones; legacy peak gate already prevented those 2 from changing this log's final decisions."
+  },
+  "intervals": {
+    "quiet": {"pcm_s": 38.3, "legacy_events": 0},
+    "tv_only": {"pcm_s": 25, "legacy_target": 0, "legacy_other": 16},
+    "speech_only": {"pcm_s": 30, "legacy_target": 0, "legacy_other": 19},
+    "target_motor_possible": {"pcm_s": 60, "legacy_target": 14, "legacy_other": 23, "indeterminate": 1},
+    "target_tv_motor_possible": {"pcm_s": 120, "legacy_target": 21, "legacy_other": 56}
+  },
+  "short_window_in_sample_probe": {
+    "context_ms": 200,
+    "update_ms": 80,
+    "metric": "mean_std_max_96d_nearest_registered_slot",
+    "threshold": 0.08648,
+    "threshold_origin": "minimum of the same quiet/TV/speech negative recording minus epsilon; not an independent validation",
+    "negative_window_accepts": {"quiet": 0, "tv_only": 0, "speech_only": 0},
+    "target_possible_window_accepts": {"target_motor": 352, "target_tv_motor": 586},
+    "target_possible_window_totals": {"target_motor": 678, "target_tv_motor": 1454},
+    "held_out_negative_session_voted_false_updates_2_of_3": {"quiet": 0, "tv_only": 0, "speech_only": 0},
+    "warning": "Windows overlap heavily; target-present intervals can contain silence and motor; the query is the previously saved field profile. No unseen TARGET or motor-only evaluation. Not a recall/precision claim."
+  },
+  "short_window_majority_probe_fixed_0_08": {
+    "run": "software/acoustic-trainer/.venv/bin/python software/audio_ml/short_window_probe.py software/rover-monitor/logs/rover-monitor-20260925-004412.jsonl --manifest /tmp/field-labelled/wav/manifest.json --output /tmp/short-majority --majority-probe",
+    "context_ms": 200,
+    "update_ms": 80,
+    "metric": "mean_std_max_96d_nearest_registered_slot",
+    "retained_profile_samples": 3,
+    "threshold": 0.08,
+    "negative_window_accepts": {"quiet": 0, "tv_only": 0, "speech_only": 0},
+    "target_possible_window_accepts": {"target_motor": 345, "target_tv_motor": 566},
+    "target_possible_window_totals": {"target_motor": 678, "target_tv_motor": 1454},
+    "warning": "Cannot establish recall or unknown-TARGET false positives from these weakly labeled, same-session windows. Not deployed."
+  },
+  "certified_fp_per_hour": null,
+  "recall": null,
+  "precision": null,
+  "decision": "conditional; do not enable shadow probe as driving detector without independent negative and solo registration data"
+}

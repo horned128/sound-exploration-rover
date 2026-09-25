@@ -37,8 +37,14 @@ void log_mel_extractor_init(log_mel_extractor_t * extractor); /* 係数とスト
 void log_mel_extractor_reset(log_mel_extractor_t * extractor); /* PCM繰越し状態初期化 */
 bool log_mel_extractor_self_test(log_mel_extractor_t * extractor); /* 固定ベクトル自己診断 */
 void log_mel_extractor_process_window(log_mel_extractor_t * extractor,
-                                      int32_t const samples[LOG_MEL_WINDOW_SAMPLES],
-                                      int8_t output[LOG_MEL_BIN_COUNT]); /* 1窓の特徴量抽出 */
+                                       int32_t const samples[LOG_MEL_WINDOW_SAMPLES],
+                                       int8_t output[LOG_MEL_BIN_COUNT]); /* 1窓の特徴量抽出 */
+/* 元のcentered出力を維持し、必要時だけ音量情報を残す絶対log-melも同じFFTで生成する。
+ * absolute = clip(round((ln(mel_energy) + 8) / 0.125), -128, 127)。 */
+void log_mel_extractor_process_window_pair(log_mel_extractor_t * extractor,
+                                           int32_t const samples[LOG_MEL_WINDOW_SAMPLES],
+                                           int8_t centered[LOG_MEL_BIN_COUNT],
+                                           int8_t absolute[LOG_MEL_BIN_COUNT]);
 size_t log_mel_extractor_feed(log_mel_extractor_t * extractor, int32_t const * samples, size_t sample_count,
                               log_mel_frame_callback_t callback, void * context); /* PCMストリーム投入 */
 

@@ -187,9 +187,21 @@ bool log_mel_extractor_self_test(log_mel_extractor_t * extractor) {
  * @param[out] output 32 bin int8特徴量
  * ================================================================= */
 void log_mel_extractor_process_window(log_mel_extractor_t * extractor,
-                                      int32_t const samples[LOG_MEL_WINDOW_SAMPLES],
-                                      int8_t output[LOG_MEL_BIN_COUNT]) {
-    if ((extractor == NULL) || (samples == NULL) || (output == NULL) || !extractor->initialized) {
+                                       int32_t const samples[LOG_MEL_WINDOW_SAMPLES],
+                                       int8_t output[LOG_MEL_BIN_COUNT]) {
+    log_mel_extractor_process_window_pair(extractor, samples, output, NULL);
+}
+
+/** =================================================================*
+ * @brief centeredログメルと音量保持ログメルを1回のFFTから計算
+ * @details absoluteのみ必要な場合はcenteredをNULLで呼べる。旧通信契約は不変。
+ * ================================================================= */
+void log_mel_extractor_process_window_pair(log_mel_extractor_t * extractor,
+                                           int32_t const samples[LOG_MEL_WINDOW_SAMPLES],
+                                           int8_t centered[LOG_MEL_BIN_COUNT],
+                                           int8_t absolute[LOG_MEL_BIN_COUNT]) {
+    if ((extractor == NULL) || (samples == NULL) ||
+        ((centered == NULL) && (absolute == NULL)) || !extractor->initialized) {
         return;
     }
 
@@ -239,7 +251,12 @@ void log_mel_extractor_process_window(log_mel_extractor_t * extractor,
     mean /= (float) LOG_MEL_BIN_COUNT;
 
     for (size_t mel_bin = 0U; mel_bin < LOG_MEL_BIN_COUNT; mel_bin++) {
-        output[mel_bin] = log_mel_quantize(log_energy[mel_bin] - mean);
+        if (centered != NULL) {
+            centered[mel_bin] = log_mel_quantize(log_energy[mel_bin] - mean);
+        }
+        if (absolute != NULL) {
+            absolute[mel_bin] = log_mel_quantize(log_energy[mel_bin] + 8.0F);
+        }
     }
 }
 

@@ -1,0 +1,40 @@
+{
+  "logs": {
+    "silence": "software/rover-monitor/logs/silence.jsonl",
+    "target": "software/rover-monitor/logs/target.jsonl",
+    "target_noise": "software/rover-monitor/logs/target_noise.jsonl",
+    "motor": "software/rover-monitor/logs/motor.jsonl"
+  },
+  "paired_pcm_seconds": {"silence": 19.568, "target": 18.944, "target_noise": 29.088, "motor": 14.512},
+  "stereo_reconstruction": "Boot/sample-index pairing rejects incomplete packets and writes only contiguous stereo WAV runs",
+  "slot_0_slot_1_active_block_median_abs_corr": {"silence": 0.9815, "target": 0.957, "target_noise": 0.939, "motor": 0.9426},
+  "slot_1_is_raw_4mic_channel": "not established; I2S has two processed slots",
+  "mid_side_rms_dbfs": {
+    "target": {"mid": -14.72, "side": -26.15},
+    "motor": {"mid": -30.43, "side": -41.03}
+  },
+  "side_target_vs_motor_advantage_over_mid_db": -0.83,
+  "handcrafted_200ms_80ms_hop_96d_threshold_0_08": {
+    "slot_0_target_only": "204/220",
+    "slot_1_target_only": "206/220",
+    "slot_0_target_noise_session": "180/349",
+    "slot_1_target_noise_session": "235/349",
+    "silence_and_motor_false_events_both_slots": 0,
+    "caution": "Only 28.8 seconds of negative audio; target may be intermittent and TV-only is absent"
+  },
+  "frozen_query_network_14249_parameters": {
+    "threshold": 0.95,
+    "vote": "2-of-3",
+    "selection": "selected on independent ESC-50 validation classes, not field stereo",
+    "slot_0_target_only": "4/207",
+    "slot_1_target_only": "155/207",
+    "slot_0_target_noise_session": "10/342",
+    "slot_1_target_noise_session": "197/342",
+    "slot_0_silence_motor_positive_updates": 0,
+    "slot_1_silence_motor_positive_updates": 0,
+    "independent_esc50_unknown_class_fp_per_hour": 51.43,
+    "caution": "TV-only second-channel negative missing; these are overlapping-window acceptances, not recall or validated field FP/hour"
+  },
+  "decision": "Processed second I2S slot helps this captured TARGET+TV condition, but is strongly correlated with slot 0. Low false positives for unseen TARGETs and TV-only cannot yet be certified; do not enable driving detector.",
+  "minimum_next_capture": "None yet. First improve the generic unknown-source detector beyond 51.43 FP/hour on independent ESC-50 classes. Only if that passes, a 20-second TV-only stereo negative would be needed for field acceptance; no reflash."
+}

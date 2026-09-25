@@ -59,8 +59,9 @@ EXPORT BOOL acoustic_identifier_weighted_cosine_distance(const B * p_left,
 EXPORT BOOL acoustic_identifier_cosine_distance(const B * p_left, const B * p_right,
                                                float * p_distance); /* cosine距離 */
 EXPORT BOOL acoustic_identifier_isolated_sample_find(const B * p_samples,
-                                                      UW sample_count,
-                                                      UW * p_index); /* 孤立見本を検出 */
+                                                       UW sample_count,
+                                                       UW * p_index); /* 孤立見本を検出 */
+EXPORT UB acoustic_identifier_consensus_mask(const B * p_samples, UW sample_count); /* 合意した見本のbit集合 */
 EXPORT BOOL acoustic_identifier_leave_one_out_threshold(const B * p_samples,
                                                          UW sample_count,
                                                          const float * p_bin_weights,

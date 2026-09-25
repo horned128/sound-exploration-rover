@@ -64,6 +64,7 @@ IMPORT volatile UW g_task_acoustic_link_observation_max_interval_ms; /**< 最大
 IMPORT volatile UW g_task_acoustic_link_observation_source_uptime_ms; /**< ESP32S3観測時刻[ms] */
 /**< 特徴量完成数 */
 IMPORT volatile UW g_task_acoustic_link_feature_complete_count;
+IMPORT volatile UW g_task_acoustic_link_feature_transport_ms; /**< 特徴量USB転送時間[ms] */
 IMPORT volatile UW g_task_acoustic_link_feature_drop_count; /**< 特徴量イベント破棄数（Live Watch用） */
 IMPORT volatile UW g_task_acoustic_link_feature_generation; /**< 最新特徴量世代（Live Watch用） */
 IMPORT volatile UW g_task_acoustic_link_observation_age_ms; /**< 観測経過時間（Live Watch用） */

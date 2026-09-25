@@ -21,6 +21,9 @@
 #define APP_AUDIO_BITS_PER_SAMPLE          (32U)
 #define APP_AUDIO_BLOCK_FRAMES             (256U)
 #define APP_AUDIO_STALE_TIMEOUT_MS         (100U)
+/* I2S右slotの処理済みPCMは実測のTARGET+TVで現行C照合を改善。
+ * 音種は固定せず、現場の5見本で照合する。既存保存見本は再登録が必要。 */
+#define APP_AUDIO_FEATURE_CHANNEL_INDEX    (1U)
 
 #define APP_OBSERVATION_PERIOD_MS          (20U)
 #define APP_DOA_FILTER_WINDOW              (5U)
@@ -46,6 +49,10 @@
 #define APP_UDP_DESTINATION_PORT           (5005U)
 #define APP_UDP_TELEMETRY_PERIOD_MS        (250U)
 #define APP_TELEMETRY_USB_POLL_MS          (20U)
+/* 評価収録時のみ1。通常の走行ファームではPCM UDP診断を停止する。 */
+#define APP_AUDIO_DATASET_STREAM_ENABLE    (0U)
+/* 評価収録時のみ1。channel 0の既存DSPは変えない。 */
+#define APP_AUDIO_STEREO_DIAGNOSTIC_ENABLE  (0U)
 
 #define APP_AUDIO_TASK_STACK_SIZE          (6144U)
 #define APP_FRONTEND_TASK_STACK_SIZE       (4096U)

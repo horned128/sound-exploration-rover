@@ -165,6 +165,23 @@ static acoustic_frame_t parse_single_frame(uint8_t const * bytes, size_t length)
     return frame;
 }
 
+static void feature_channel_capability_test(void)
+{
+    acoustic_hello_t const hello = {
+        .firmware_major = 1U,
+        .capabilities = ACOUSTIC_CAPABILITY_DOA | ACOUSTIC_CAPABILITY_FEATURE_SLOT1,
+        .boot_id = 1234U,
+    };
+    uint8_t encoded[ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE] = {0};
+    size_t const used = acoustic_protocol_encode_hello(3U, 4U, &hello, encoded, sizeof(encoded));
+    assert(used != 0U);
+    acoustic_frame_t const frame = parse_single_frame(encoded, used);
+    acoustic_hello_t decoded = {0};
+    assert(acoustic_protocol_decode_hello(&frame, &decoded));
+    assert((decoded.capabilities & ACOUSTIC_CAPABILITY_FEATURE_SLOT1) != 0U);
+    assert(decoded.boot_id == hello.boot_id);
+}
+
 static void ai_lab_diagnostic_protocol_test(void)
 {
     assert(ACOUSTIC_ROVER_TELEMETRY_PAYLOAD_SIZE == 96U);
@@ -320,6 +337,7 @@ int main(void)
 {
     protocol_round_trip_test();
     observation_round_trip_test();
+    feature_channel_capability_test();
     navigation_diagnostics_round_trip_test();
     ai_lab_diagnostic_protocol_test();
     assembler_complete_test();

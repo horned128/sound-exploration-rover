@@ -1,0 +1,102 @@
+{
+  "field_logs": {
+    "motor": "software/rover-monitor/logs/rover-monitor-20260925-075415.jsonl",
+    "target": "software/rover-monitor/logs/rover-monitor-20260925-080028.jsonl",
+    "previous_mixed": "software/rover-monitor/logs/rover-monitor-20260925-004412.jsonl",
+    "motor_only_confirmed_pcm_seconds": 26.8,
+    "target_only_session_pcm_seconds": 51.34,
+    "motor_log_esp_reboots": 1,
+    "pcm_gaps_motor_samples": 232192,
+    "pcm_gaps_target_samples": 2048,
+    "legacy_diagnostic_motor_other": 23,
+    "legacy_diagnostic_target_target": 32,
+    "legacy_diagnostic_target_other": 3
+  },
+  "field_handcrafted_probe": {
+    "context_ms": 200,
+    "hop_ms": 80,
+    "feature": "96D mean/std/max from ESP C log-mel; nearest registered sample; 2-of-3 vote",
+    "threshold": 0.08,
+    "negative_window_accepts": 0,
+    "negative_observed_seconds": 120.11,
+    "target_only_nominal_window_accepts": "616/637",
+    "target_motor_possible_window_accepts": "345/678",
+    "target_tv_motor_possible_window_accepts": "566/1454",
+    "warning": "All user labels are session-level. TARGET may be absent between presentations; no event-level recall or latency can be inferred."
+  },
+  "generic_esc10_semantic_fewshot": {
+    "source_commit": "33c8ce9eb2cf0b1c2f8bcf322eb349b6be34dbb6",
+    "license": "ESC-10 subset CC BY 3.0",
+    "setup": "five support fold-1/2 recordings per category, seven fold-3/4/5 test recordings",
+    "200ms_96d_five_shot_recall": 0.2857,
+    "false_alarms_per_hour": 264.29,
+    "note": "Two of ten ESC-10 classes could not enroll using current active-frame gate. Semantic variation between recordings is stricter than repeated use of the same physical sound."
+  },
+  "general_audio_same_source_pcm_mix": {
+    "source_commit": "33c8ce9eb2cf0b1c2f8bcf322eb349b6be34dbb6",
+    "license": "ESC-50 CC BY-NC 3.0; audio stored outside git",
+    "training_audio_classes": 18,
+    "validation_audio_classes": 3,
+    "test_audio_classes": 3,
+    "query_registration": "five repeated waveform presentations; target class never known at development",
+    "negatives": "different recordings including same-category sources",
+    "positive_snr_db": [-6, 0, 6],
+    "handcrafted_200ms_96d_threshold_0_08": {
+      "validation_mixture_hits_at_0db": "21/57",
+      "validation_fp_per_hour": 162.11,
+      "test_mixture_hits_at_0db": "36/60",
+      "test_fp_per_hour": 396.0
+    },
+    "small_metric_network_temporal_pool_48d": {
+      "parameters": 9816,
+      "validation_mixture_hits_at_0db": "4/57",
+      "validation_fp_per_hour": 8.42,
+      "reason_not_selected": "Unknown-source mixture recall too low"
+    },
+    "small_query_conditioned_network": {
+      "parameters": 6869,
+      "threshold_from_pair_validation": 0.88975,
+      "independent_pair_validation": {"recall": 0.5067, "fpr": 0.00067},
+      "independent_pair_test": {"recall": 0.5567, "fpr": 0.01},
+      "streaming_validation_at_low_fp": {"threshold": 0.995, "mixture_hits_0db": "1/51", "false_alarms": 0},
+      "streaming_test_at_low_fp": {"mixture_hits_0db": "0/57", "false_alarms": 0},
+      "reason_not_selected": "Gating to control false alarms eliminates nearly all unknown-source mixture detections"
+    }
+  },
+  "energy_preserving_frontend_experiment": {
+    "feature_contract": "int8 clip(round((ln(mel_energy)+8)/0.125), -128, 127), same 400/160/512/32 frontend",
+    "existing_centered_output_changed": false,
+    "new_c_api": "log_mel_extractor_process_window_pair",
+    "c_and_python_test": "centered bit exact, absolute within 1 LSB",
+    "absolute_query_6869_parameters": {
+      "threshold": 0.9,
+      "validation_0db_mix_hits": "8/54",
+      "test_0db_mix_hits": "7/63",
+      "validation_fp_per_hour": 6.67,
+      "test_fp_per_hour": 5.71,
+      "real_target_motor_detected": false
+    },
+    "absolute_query_14249_parameters": {
+      "threshold": 0.95,
+      "validation_0db_mix_hits": "12/54",
+      "test_0db_mix_hits": "26/63",
+      "validation_fp_per_hour": 6.67,
+      "test_fp_per_hour": 51.43,
+      "real_target_motor_detected": false
+    },
+    "causal_spectral_subtraction": {
+      "background_estimation_ms": 200,
+      "threshold": 0.04,
+      "validation_0db_mix_hits": "3/63",
+      "test_0db_mix_hits": "4/63",
+      "validation_fp_per_hour": 1.90,
+      "test_fp_per_hour": 1.90
+    },
+    "streaming_400ms_cnn_latency_lower_bound_ms": 560,
+    "selected_for_driving": false
+  },
+  "decision": "No acoustic model meets both mixture sensitivity and low false alarm rate on class/source-disjoint validation; do not change driving classifier or ship a fabricated int8 model.",
+  "latency_lower_bound_ms": {"handcrafted_200ms_2of3": 360, "cnn_400ms_2of3": 560},
+  "latency_note": "Acoustic context plus two 80ms updates only; USB, inference and task scheduling add further time. No P50/P95 onset timestamps are available.",
+  "remaining_research": "Stronger general-audio pretraining and/or frontend retaining absolute energy and spatial cues, followed by independent field negative/impact/near-sound evaluation."
+}

@@ -2,6 +2,8 @@
 
 CPU0がReSpeaker/XIAOからUSBで音響観測を受けて短距離の音源追従目標を生成し、CPU1がPWM出力とエンコーダ処理を担当します。この文書は主にアクチュエータ配線と単体確認を扱います。全体構造は[ローバー ファームウェア設計書](../../docs/firmware/ARCHITECTURE.md)、USB接続、音響protocol、DoA校正、音源追従試験は[ReSpeaker統合設計](../../docs/firmware/RESPEAKER_INTEGRATION.md)、I2Cセンサーとルールベース走行は[I2Cセンサー・ルールベース走行](../../docs/firmware/SENSOR_AUTONOMY.md)を参照してください。
 
+2026-09-25の音響見本はI2S右slotの32-bin log-melを用いる。CPU0はESP HELLOの`ACOUSTIC_CAPABILITY_FEATURE_SLOT1`を必須にし、MRAM見本version 5の5例が保存されるまで、DoA/VADだけによる自律発進を認めない。旧version 4の左slot見本は再学習が必要。[同じCPU0 C照合での実録音比較](../../software/acoustic-trainer/BASELINE_SLOT1_DEPLOYMENT.md)に手順を記す。
+
 ```text
 CPU0 / Cortex-M85 / μT-Kernel
   usermain() ──> CPU0 task registry

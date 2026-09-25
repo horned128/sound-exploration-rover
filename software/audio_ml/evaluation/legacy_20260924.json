@@ -1,0 +1,22 @@
+{
+  "source": "python3 software/audio_ml/legacy_audit.py --output /tmp/opencode/audio-audit",
+  "files_without_latest_symlink": 17,
+  "diagnostic_events_with_192d": 864,
+  "complete_profile_sessions": 4,
+  "replay_comparisons": 500,
+  "replay_agreements": 499,
+  "example_moving_proxy": {
+    "log": "rover-monitor-20260924-202215.jsonl",
+    "legacy_target": 34,
+    "legacy_other": 26,
+    "target_presence_ground_truth": null
+  },
+  "acceptance_0_055_no_peak_additional_hits_unverified": 10,
+  "acceptance_0_080_no_peak_additional_hits_unverified": 29,
+  "recall": null,
+  "precision": null,
+  "false_positives_per_hour": null,
+  "detection_latency_p50_ms": null,
+  "detection_latency_p95_ms": null,
+  "reason": "No labeled simultaneous TARGET/background PCM or event onset labels. Predictions cannot be used as ground truth."
+}
