@@ -1158,9 +1158,11 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
     s_telemetry.audio_crc_error_count = g_task_acoustic_link_crc_error_count;
     s_telemetry.fault_flags = g_task_think_fault_flags;
     s_telemetry.steering_deg = g_task_think_steering_deg;
-    s_telemetry.left_target_rpm = s_command_snapshot.last_sent_target.left_target_rpm;
-    s_telemetry.right_target_rpm = s_command_snapshot.last_sent_target.right_target_rpm;
-    s_telemetry.infer_status = infer_ready ? (uint8_t) s_infer_result.identifier.status : 0U;
+    /* 推論ステータス、分類器種別、TFLM状態を1byteへパック */
+    UB const raw_infer_status = infer_ready ? (UB) s_infer_result.identifier.status : 0U;
+    UB const classifier_kind = infer_ready ? s_infer_result.classifier_kind : (UB) CPU0_ACOUSTIC_CLASSIFIER_NONE;
+    BOOL const tflm_available = g_task_infer_tflm_available ? TRUE : FALSE;
+    s_telemetry.infer_status = acoustic_infer_status_pack(raw_infer_status, classifier_kind, (bool) tflm_available);
     s_telemetry.infer_sample_count = proto_ready ? proto_telem.sample_count : 0U;
     s_telemetry.infer_active_frames = infer_ready ? s_infer_result.active_frame_count : 0U;
     s_telemetry.infer_nearest_sample = infer_ready ? (uint8_t) s_infer_result.identifier.sample_index : 255U;

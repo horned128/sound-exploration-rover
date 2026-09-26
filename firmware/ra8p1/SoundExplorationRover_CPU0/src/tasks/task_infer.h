@@ -9,10 +9,18 @@
 #include "services/prototype_storage.h"                     /* 背景モデル・見本の保存型 */
 #include <tk/tkernel.h>                                     /* μT-Kernel型 */
 
+/**< 判定を実行した分類器の種類 */
+typedef enum e_acoustic_classifier_kind {
+    CPU0_ACOUSTIC_CLASSIFIER_NONE = 0U,                     /**< 未判定 */
+    CPU0_ACOUSTIC_CLASSIFIER_DSP_SUMMARY = 1U,              /**< 192次元要約・周波数ビン直接照合 (ベースライン) */
+    CPU0_ACOUSTIC_CLASSIFIER_NN_EMBEDDING = 2U,             /**< TFLM音響埋め込みCNN照合 */
+} acoustic_classifier_kind_t;
+
 /**< 音響推論タスクが生成した背景判定・見本照合結果 */
 typedef struct st_task_infer_result {
     UW feature_generation;                                  /**< 処理した完成特徴量世代 */
     UB active_frame_count;                                  /**< 80frame中の能動フレーム数 */
+    UB classifier_kind;                                     /**< 判定を実行した分類器 (acoustic_classifier_kind_t) */
     BOOL summary_valid;                                     /**< N_min以上で96次元要約が有効 */
     BOOL background_threshold_valid;                        /**< 背景MSEしきい値が学習済み */
     BOOL background_anomaly;                                /**< 背景候補として異常ならTRUE */
@@ -45,8 +53,11 @@ EXPORT ER task_infer_result_get(task_infer_result_t * p_result); /* 音響推論
 EXPORT ER task_infer_prototype_get(prototype_storage_data_t * p_data, BOOL * p_storage_valid); /* 現場見本取得 */
 /* テレメトリ用の軽量見本情報取得（スタック消費を抑える） */
 EXPORT ER task_infer_prototype_telemetry_get(task_infer_prototype_telemetry_t * p_telemetry); /* telemetry取得 */
+EXPORT ER task_infer_prototype_embedding_register(UW sample_index); /* 現場見本埋め込み登録 */
+EXPORT ER task_infer_prototype_embeddings_compact(UB mask); /* 埋め込み配列同期圧縮 */
 
 IMPORT volatile BOOL g_task_infer_available;                /**< 音響推論機能の利用可能状態 */
+IMPORT volatile BOOL g_task_infer_tflm_available;           /**< TFLM音響モデルの利用可能状態 */
 IMPORT volatile UW g_task_infer_feature_generation;         /**< 最後に処理した特徴量世代 */
 IMPORT volatile UW g_task_infer_inference_count;            /**< 音響推論実行回数 */
 IMPORT volatile UW g_task_infer_failure_count;              /**< 音響推論失敗回数 */

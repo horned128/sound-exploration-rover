@@ -34,5 +34,6 @@
 #define CPU0_SENSOR_TASK_STACK_SIZE        (2048U)          /**< センサータスクスタックのサイズ */
 #define CPU0_THINK_TASK_STACK_SIZE         (4096U)          /**< 思考タスクスタックのサイズ */
 #define CPU0_INFER_TASK_STACK_SIZE         (4096U)          /**< 推論タスクスタックのサイズ */
+#define CPU0_USE_ACOUSTIC_EMBEDDING_TFLM   (0U)             /**< TFLM音響埋め込みCNN照合有効化フラグ */
 
 #endif /* SEROV_CPU0_CONFIG_TASK_H */

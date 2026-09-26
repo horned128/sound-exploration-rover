@@ -86,6 +86,14 @@ ER task_infer_prototype_set(const prototype_storage_data_t *data,BOOL storage_va
     if(!storage_valid)infer_reset_calls++;
     return E_OK;
 }
+ER task_infer_prototype_embedding_register(UW sample_index) {
+    (void)sample_index;
+    return E_OK;
+}
+ER task_infer_prototype_embeddings_compact(UB mask) {
+    (void)mask;
+    return E_OK;
+}
 ER task_infer_background_export(prototype_storage_data_t *data) {
     (void)data;return mode==3 ? E_OK : E_NOEXS;
 }

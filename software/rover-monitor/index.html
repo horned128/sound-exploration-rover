@@ -106,6 +106,8 @@
         .val-warn { color: var(--warn); }
         .val-error { color: var(--error); }
         .val-blue { color: #2196f3; }
+        .val-purple { color: #ce93d8; }
+        .val-cyan { color: #4dd0e1; }
 
         .content-pane {
             flex: 1;
@@ -216,6 +218,10 @@
         .recog-badge.not-target { background: #e65100; color: #ffb74d; border: 1px solid #f57c00; }
         .recog-badge.listening { background: #0d47a1; color: #90caf9; border: 1px solid #1976d2; }
         .recog-badge.idle { background: #2a2a2a; color: #888; border: 1px solid #444; }
+        .recog-badge.tflm { background: #4a148c; color: #e1bee7; border: 1px solid #ab47bc; box-shadow: 0 0 6px rgba(171, 71, 188, 0.4); }
+        .recog-badge.dsp { background: #1a237e; color: #c5cae9; border: 1px solid #3f51b5; }
+        .recog-badge.fallback { background: #bf360c; color: #ffccbc; border: 1px solid #ff7043; }
+        .recog-badge.none { background: #2a2a2a; color: #777; border: 1px solid #444; }
         .recog-meter-container {
             position: relative;
             background: #222;
@@ -308,6 +314,8 @@
             <div class="panel">
                 <h3 class="panel-title">Acoustic AI & Learning</h3>
                 <div class="data-grid">
+                    <span class="data-label" data-help="音響照合を実行した推論器モデルです。TFLM NN (64D)は学習済みCNNによる埋め込みベクトル照合、DSP SUMMARY (192D)は旧来の周波数ビン要約照合です。">Classifier</span><span class="data-value" id="val_recog_model">-</span>
+                    <span class="data-label" data-help="TFLM音響モデルランタイムの初期化状態です。READYは実機初期化完了、NOT READYは初期化失敗または未有効化を示します。">TFLM Runtime</span><span class="data-value" id="val_tflm_runtime">-</span>
                     <span class="data-label" data-help="音響認識の判定状態です。TARGETには、距離しきい値と主ピーク周波数帯（±3 bin）の両方が必要です。">Match Status</span><span class="data-value" id="val_recog_status">-</span>
                     <span class="data-label" data-help="現在の音が学習したターゲット音とどれくらい似ているかを示す指標（0〜100%）です。高くても主ピーク周波数帯が異なればTARGETにはなりません。">Similarity</span><span class="data-value" id="val_recog_similarity">-</span>
                     <span class="data-label" data-help="学習音の最近傍見本との重み付きコサイン距離（0.0〜2.0）です。192次元（時間2スロット）およびピーク周波数重視で計算され、値が小さいほど酷似しています。">Cosine Dist</span><span class="data-value" id="val_recog_distance">-</span>
@@ -424,7 +432,10 @@
                         <div class="recog-widget">
                             <div class="recog-header">
                                 <span class="recog-title">Acoustic AI Recognition</span>
-                                <span id="recogBadge" class="recog-badge idle">IDLE</span>
+                                <div style="display: flex; gap: 6px; align-items: center;">
+                                    <span id="recogModelBadge" class="recog-badge none" title="Inference Model Engine">MODEL: -</span>
+                                    <span id="recogBadge" class="recog-badge idle">IDLE</span>
+                                </div>
                             </div>
                             <div class="recog-meter-container" title="Target Similarity vs Threshold">
                                 <div id="recogMeterFill" class="recog-meter-fill"></div>
@@ -1302,6 +1313,23 @@
             else if (recog.status === 2) recogClass = 'val-warn';
             else if (recog.status === 3) recogClass = 'val-blue';
 
+            // 推論器モデル・TFLMランタイム状態
+            const classifier = recog.classifier || (recog.classifier_kind === 2 ? 'TFLM' : recog.classifier_kind === 1 ? 'DSP' : 'NONE');
+            const tflmAvail = recog.tflm_available === true;
+            let modelText = '-';
+            let modelClass = '';
+            if (classifier === 'TFLM') {
+                modelText = 'TFLM NN (64D)';
+                modelClass = 'val-purple';
+            } else if (classifier === 'DSP') {
+                modelText = tflmAvail ? 'DSP (FALLBACK)' : 'DSP SUMMARY (192D)';
+                modelClass = tflmAvail ? 'val-warn' : '';
+            } else {
+                modelText = 'NONE';
+            }
+            setVal('val_recog_model', recogAvailable ? modelText : '-', modelClass);
+            setVal('val_tflm_runtime', recogAvailable ? (tflmAvail ? 'READY' : 'DISABLED') : '-', tflmAvail ? 'val-ok' : '');
+
             setVal('val_recog_status', recogAvailable ? recogStatus : '-', recogClass);
             const simVal = recogAvailable && recog.similarity !== undefined ? Number(recog.similarity) : null;
             const distVal = recogAvailable && recog.distance !== undefined ? Number(recog.distance) : null;
@@ -1320,6 +1348,7 @@
             setVal('val_recog_current_peak', currentPeakBin !== null ? getLogMelFreqLabel(currentPeakBin) : '-');
 
             // Dashboard の 音響照合ウィジェット更新
+            const modelBadgeEl = document.getElementById('recogModelBadge');
             const badgeEl = document.getElementById('recogBadge');
             const fillEl = document.getElementById('recogMeterFill');
             const threshMarkerEl = document.getElementById('recogThreshMarker');
@@ -1328,6 +1357,19 @@
             const threshValEl = document.getElementById('recogThreshVal');
             const targetPeakValEl = document.getElementById('recogTargetPeakVal');
             const currentPeakValEl = document.getElementById('recogCurrentPeakVal');
+
+            if (modelBadgeEl) {
+                if (classifier === 'TFLM') {
+                    modelBadgeEl.textContent = 'TFLM NN (64D)';
+                    modelBadgeEl.className = 'recog-badge tflm';
+                } else if (classifier === 'DSP') {
+                    modelBadgeEl.textContent = tflmAvail ? 'DSP FALLBACK' : 'DSP SUMMARY';
+                    modelBadgeEl.className = tflmAvail ? 'recog-badge fallback' : 'recog-badge dsp';
+                } else {
+                    modelBadgeEl.textContent = 'NO MODEL';
+                    modelBadgeEl.className = 'recog-badge none';
+                }
+            }
 
             if (badgeEl) {
                 if (recog.status === 1) {

@@ -332,8 +332,8 @@ def test_closed_loop_wall_approach_safety_arbiter_and_mlp(
     handle.control_mlp_planner_reset()
     handle.control_mlp_planner_init()
 
-    def controller_step(snapshot: SensorSnapshot, now_ms: int) -> ObstacleAvoidanceOutput:
-        mlp_out = control_mlp_plan_step(snapshot, 0.0)
+    def controller_step(snapshot: SensorSnapshot, now_ms: int, velocity: float = 0.0) -> ObstacleAvoidanceOutput:
+        mlp_out = control_mlp_plan_step(snapshot, velocity)
         oa_out = ObstacleAvoidanceOutput()
         handle.obstacle_avoidance_controller_step(ctypes.byref(snapshot), False, now_ms, 0, ctypes.c_int16(120), ctypes.byref(oa_out))
         cmd = SafetyMotionCommand()

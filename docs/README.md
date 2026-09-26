@@ -8,6 +8,7 @@
 - [`firmware/ARCHITECTURE.md`](firmware/ARCHITECTURE.md): CPU0、CPU1、XIAO ESP32S3の全体設計とRA8P1の5層構成
 - [`firmware/archify/SEROV_ARCHITECTURE.html`](firmware/archify/SEROV_ARCHITECTURE.html): 現行コードのCPU0、CPU1、XIAO ESP32S3、監視ツール間の構造を示すインタラクティブ図
 - [`firmware/SENSOR_AUTONOMY.md`](firmware/SENSOR_AUTONOMY.md): BMI270、TCA9548A、VL53L1X×3の接続、ルールベース走行、FSP生成、試験手順
+- [`firmware/validation/ACOUSTIC_TFLM_INTEGRATION_FINDINGS.md`](firmware/validation/ACOUSTIC_TFLM_INTEGRATION_FINDINGS.md): 音響TFLM埋め込みCNN実機統合の検証知見、メモリ制約、ベースライン比較
 - [`firmware/edgeai/`](firmware/edgeai/): 音源識別AIの設計・共有契約
 - [`firmware/validation/`](firmware/validation/): タイミング、生存性、基盤実装の検証記録
 - [`hardware/`](hardware/): 車体・駆動系・エンコーダの測定結果と採用値

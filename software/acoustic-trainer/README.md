@@ -2,7 +2,7 @@
 
 Sound Exploration Roverの音響特徴量と現場学習のホスト参照・検証環境。NumPyによる特徴量参照実装と、
 背景AE＋能動フレーム照合の決定論的な参照実装を含む。音響認識はTensorFlow Lite Microを使わず、
-CPU0の純C実装とこの数値契約だけで完結する。
+CPU0の純C実装とこの数値契約だけで完結する（※TFLM音響埋め込みCNN実機統合の検証知見と結論は [ACOUSTIC_TFLM_INTEGRATION_FINDINGS.md](../../docs/firmware/validation/ACOUSTIC_TFLM_INTEGRATION_FINDINGS.md) を参照）。
 
 ## 環境
 

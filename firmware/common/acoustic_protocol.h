@@ -77,6 +77,32 @@
 #define ACOUSTIC_TELEMETRY_LEARNING_MODE   (1U << 5)
 #define ACOUSTIC_TELEMETRY_DEBUG_MOTOR_RECORDING (1U << 6) /**< SW1録音走行（診断のみ） */
 
+#define ACOUSTIC_INFER_STATUS_MASK             (0x0FU)     /**< 認識判定状態 (0:INVALID..4:TARGET) */
+#define ACOUSTIC_INFER_CLASSIFIER_SHIFT        (4U)        /**< 分類器種別ビットシフト */
+#define ACOUSTIC_INFER_CLASSIFIER_MASK         (0x30U)     /**< 分類器種別マスク (2bit) */
+#define ACOUSTIC_INFER_CLASSIFIER_NONE         (0U)        /**< 未判定 */
+#define ACOUSTIC_INFER_CLASSIFIER_DSP_SUMMARY  (1U)        /**< 192次元要約・周波数ビン直接照合 */
+#define ACOUSTIC_INFER_CLASSIFIER_NN_EMBEDDING (2U)        /**< TFLM音響埋め込みCNN照合 */
+#define ACOUSTIC_INFER_TFLM_AVAILABLE_BIT      (1U << 6)   /**< TFLMランタイム初期化成功フラグ */
+
+static inline uint8_t acoustic_infer_status_pack(uint8_t status, uint8_t classifier_kind, bool tflm_available) {
+    return (uint8_t) ((status & ACOUSTIC_INFER_STATUS_MASK) |
+                      ((classifier_kind & 0x03U) << ACOUSTIC_INFER_CLASSIFIER_SHIFT) |
+                      (tflm_available ? ACOUSTIC_INFER_TFLM_AVAILABLE_BIT : 0U));
+}
+
+static inline uint8_t acoustic_infer_status_unpack_status(uint8_t packed) {
+    return (uint8_t) (packed & ACOUSTIC_INFER_STATUS_MASK);
+}
+
+static inline uint8_t acoustic_infer_status_unpack_classifier(uint8_t packed) {
+    return (uint8_t) ((packed & ACOUSTIC_INFER_CLASSIFIER_MASK) >> ACOUSTIC_INFER_CLASSIFIER_SHIFT);
+}
+
+static inline bool acoustic_infer_status_unpack_tflm_available(uint8_t packed) {
+    return (packed & ACOUSTIC_INFER_TFLM_AVAILABLE_BIT) != 0U;
+}
+
 #define ACOUSTIC_NAV_FLAG_RAW_DOA_VALID       (1U << 0)
 #define ACOUSTIC_NAV_FLAG_FILTERED_DOA_VALID  (1U << 1)
 #define ACOUSTIC_NAV_FLAG_SOURCE_VALID        (1U << 2)

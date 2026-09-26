@@ -253,6 +253,23 @@ static char const * wifi_telemetry_infer_status(uint8_t status) {
 }
 
 /** =================================================================*
+ * @brief  音響推論器名を取得
+ * @param[in] kind 推論器種別値
+ * @return JSONに記録する分類器名
+ * ================================================================= */
+static char const * wifi_telemetry_classifier_name(uint8_t kind) {
+    switch (kind) {
+        case ACOUSTIC_INFER_CLASSIFIER_DSP_SUMMARY:
+            return "DSP";
+        case ACOUSTIC_INFER_CLASSIFIER_NN_EMBEDDING:
+            return "TFLM";
+        case ACOUSTIC_INFER_CLASSIFIER_NONE:
+        default:
+            return "NONE";
+    }
+}
+
+/** =================================================================*
  * @brief 低優先度診断イベントを有限UDP queueへ追加
  * @param[in] event 完成した特徴量または保存見本イベント
  * @return queueへ追加した場合true
@@ -649,6 +666,11 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
     uint16_t const filtered_doa_deg = nav_valid ? nav_diagnostics->filtered_doa_deg : telemetry->doa_deg;
     uint8_t const doa_confidence = nav_valid ? nav_diagnostics->doa_confidence : 0U;
 
+    uint8_t const raw_infer_status = telemetry->infer_status;
+    uint8_t const infer_status = acoustic_infer_status_unpack_status(raw_infer_status);
+    uint8_t const classifier_kind = acoustic_infer_status_unpack_classifier(raw_infer_status);
+    bool const tflm_available = acoustic_infer_status_unpack_tflm_available(raw_infer_status);
+
     float const cosine_dist = (0xFFFFU == telemetry->infer_cosine_dist_x1000)
                                   ? -1.0f
                                   : ((float) telemetry->infer_cosine_dist_x1000 / 1000.0f);
@@ -690,7 +712,8 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
          "\"learning\":{\"active\":%d,\"storage_valid\":%d,\"storage_result\":%u,"
          "\"samples\":%u,\"threshold\":%.3f,\"target_peak_bin\":%d},"
          "\"debug_motor\":{\"active\":%d},"
-         "\"recognition\":{\"status\":%u,\"status_name\":\"%s\",\"distance\":%.3f,"
+         "\"recognition\":{\"status\":%u,\"status_name\":\"%s\",\"classifier\":\"%s\","
+        "\"classifier_kind\":%u,\"tflm_available\":%s,\"distance\":%.3f,"
         "\"threshold\":%.3f,\"similarity\":%.1f,\"active_frames\":%u,\"nearest_sample\":%d,"
         "\"current_peak_bin\":%d},"
         "\"actuator\":{\"valid\":%u,\"age_ms\":%lu,"
@@ -754,7 +777,9 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
          (unsigned int) (telemetry->sensor_reserved & ACOUSTIC_TELEMETRY_STORAGE_RESULT_MASK),
          (unsigned int) telemetry->infer_sample_count, (double) threshold, target_peak,
          wifi_telemetry_flag(telemetry->sensor_reserved, ACOUSTIC_TELEMETRY_DEBUG_MOTOR_RECORDING),
-         (unsigned int) telemetry->infer_status, wifi_telemetry_infer_status(telemetry->infer_status),
+         (unsigned int) infer_status, wifi_telemetry_infer_status(infer_status),
+         wifi_telemetry_classifier_name(classifier_kind), (unsigned int) classifier_kind,
+         tflm_available ? "true" : "false",
         (double) cosine_dist, (double) threshold, (double) similarity,
         (unsigned int) telemetry->infer_active_frames, nearest_sample, current_peak,
         actuator_valid ? 1U : 0U, (unsigned long) actuator_age_ms,

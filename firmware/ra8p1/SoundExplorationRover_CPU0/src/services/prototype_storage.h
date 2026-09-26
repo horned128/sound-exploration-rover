@@ -11,6 +11,7 @@
 
 #define CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT (CPU0_ACOUSTIC_SAMPLE_COUNT) /**< MRAMへ保存する音響見本数 */
 #define CPU0_PROTOTYPE_STORAGE_SUMMARY_BYTES (CPU0_ACOUSTIC_SUMMARY_DIMENSION) /**< 要約保存要素数 */
+#define CPU0_PROTOTYPE_STORAGE_EMBEDDING_DIMENSION (64U)    /**< 音響埋め込みCNNのベクトル次元数 */
 
 /**< 音響プロトタイプMRAM永続化の処理結果 */
 typedef enum e_prototype_storage_result {
@@ -39,6 +40,10 @@ typedef struct st_prototype_storage_data {
     UB reserved[2];                                         /**< 将来拡張用の予約領域 */
     /**< MRAMへ保存する音響見本の要約列 */
     B samples[CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT][CPU0_PROTOTYPE_STORAGE_SUMMARY_BYTES];
+    /**< MRAMへ保存する音響埋め込みCNNの5見本 (各64次元float) */
+    float prototype_embeddings[CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT][CPU0_PROTOTYPE_STORAGE_EMBEDDING_DIMENSION];
+    UB embedding_valid;                                     /**< 埋め込みベクトルの有効フラグ (1: 有効, 0: 無効) */
+    UB reserved_emb[3];                                     /**< アライメント用予約領域 */
 } prototype_storage_data_t;
 
 EXPORT prototype_storage_result_t prototype_storage_init(void); /* MRAMドライバと保存領域検証 */

@@ -9,8 +9,8 @@
 
 #define CPU0_PROTOTYPE_STORAGE_MAGIC       (0x53525650U)    /**< 見本保存の識別値 */
 #define CPU0_PROTOTYPE_STORAGE_COMMIT      (0x434F4D54U)    /**< 見本保存の確定 */
-/* v5ではI2S slot 1のDSP見本を保存する。slot 0で登録したv4見本を混同しない。 */
-#define CPU0_PROTOTYPE_STORAGE_VERSION     (5U)             /**< 見本保存の版 */
+/* v6ではDSP見本に加えて音響埋め込みCNNの5見本(64D)を保存する。 */
+#define CPU0_PROTOTYPE_STORAGE_VERSION     (6U)             /**< 見本保存の版 */
 #define CPU0_PROTOTYPE_STORAGE_SLOT_BYTES  (16384U)         /**< 見本保存のスロット[byte] */
 #define CPU0_PROTOTYPE_STORAGE_SLOT_COUNT  (2U)             /**< 見本保存スロットの個数 */
 #define CPU0_PROTOTYPE_STORAGE_REGION_BYTES (32768U)        /**< 見本保存の領域[byte] */

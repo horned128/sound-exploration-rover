@@ -465,6 +465,9 @@ LOCAL void task_think_learning_capture(const task_acoustic_link_snapshot_t * p_s
     }
     memcpy(storage_data.samples[g_task_think_learning_samples], result.summary,
            sizeof(storage_data.samples[g_task_think_learning_samples]));
+#if (CPU0_USE_ACOUSTIC_EMBEDDING_TFLM != 0U)
+    (void) task_infer_prototype_embedding_register((UW) g_task_think_learning_samples);
+#endif
     g_task_think_learning_samples++;
     if (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT == g_task_think_learning_samples) {
         UB const mask = acoustic_identifier_consensus_mask((const B *) storage_data.samples,
@@ -477,12 +480,21 @@ LOCAL void task_think_learning_capture(const task_acoustic_link_snapshot_t * p_s
                     if (kept != index) {
                         memcpy(storage_data.samples[kept], storage_data.samples[index],
                                sizeof(storage_data.samples[0]));
+#if (CPU0_USE_ACOUSTIC_EMBEDDING_TFLM != 0U)
+                        memcpy(storage_data.prototype_embeddings[kept], storage_data.prototype_embeddings[index],
+                               sizeof(storage_data.prototype_embeddings[0]));
+#endif
                     }
                     kept++;
                 }
             }
             memset(&storage_data.samples[kept], 0,
                    (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT - kept) * sizeof(storage_data.samples[0]));
+#if (CPU0_USE_ACOUSTIC_EMBEDDING_TFLM != 0U)
+            memset(&storage_data.prototype_embeddings[kept], 0,
+                   (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT - kept) * sizeof(storage_data.prototype_embeddings[0]));
+            (void) task_infer_prototype_embeddings_compact(mask);
+#endif
             g_task_think_learning_samples = (UB) kept;
         }
     }

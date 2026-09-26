@@ -6,11 +6,21 @@
 #include "config/task_config.h"                             /* 推論タスク優先度・スタック */
 #include "services/background_model.h"                      /* 固定乱数AEとRLSデコーダ */
 #include "task_acoustic_link.h"                             /* 完成特徴量パッチ取得 */
+#if (CPU0_USE_ACOUSTIC_EMBEDDING_TFLM != 0U)
+#include "ai/acoustic_embedding_identifier.h"              /* TFLM音響埋め込みCNN */
+#endif
 #include <string.h>                                         /* 結果・背景デコーダコピー */
 
 #define CPU0_INFER_EVENT_FEATURE_READY     (1UL << 0)       /**< 完成特徴量の推論開始イベントビット */
 #define CPU0_INFER_EVENT_MASK              /**< 推論タスクが待つイベントビット全体 */ \
     ((UINT) CPU0_INFER_EVENT_FEATURE_READY)
+
+#if (CPU0_USE_ACOUSTIC_EMBEDDING_TFLM != 0U)
+LOCAL float infer_current_embedding[ACOUSTIC_EMBEDDING_DIMENSION]; /**< 現在窓の64次元音響埋め込み */
+/**< 現場学習で登録された5見本の64次元音響埋め込み */
+LOCAL float infer_prototype_embeddings[CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT * ACOUSTIC_EMBEDDING_DIMENSION];
+LOCAL BOOL infer_embedding_ready = FALSE;                   /**< 現場学習埋め込み配列の有効フラグ */
+#endif
 
 LOCAL void task_infer_entry(INT stacd, void * exinf);       /* 音響推論タスク本体 */
 LOCAL void task_infer_resources_delete(void);               /* 音響推論資源解放 */
@@ -53,6 +63,7 @@ LOCAL acoustic_feature_patch_t infer_feature_patch;         /**< 推論対象の
 LOCAL task_infer_result_t infer_result;                     /**< 最新の音響推論結果 */
 
 EXPORT volatile BOOL g_task_infer_available;                /**< 音響推論機能の利用可能状態 */
+EXPORT volatile BOOL g_task_infer_tflm_available;           /**< TFLM音響モデルの利用可能状態 */
 EXPORT volatile UW g_task_infer_feature_generation;         /**< 最後に処理した特徴量世代 */
 EXPORT volatile UW g_task_infer_inference_count;            /**< 音響推論実行回数 */
 EXPORT volatile UW g_task_infer_failure_count;              /**< 音響推論失敗回数 */
@@ -105,6 +116,14 @@ EXPORT void task_infer_start_optional(void) {
     infer_last_feature_generation = 0U;
     memset(&infer_storage_data, 0, sizeof(infer_storage_data));
     background_model_init(&infer_background_model, CPU0_BACKGROUND_MODEL_DEFAULT_SEED);
+#if (CPU0_USE_ACOUSTIC_EMBEDDING_TFLM != 0U)
+    g_task_infer_tflm_available = acoustic_embedding_identifier_init();
+    infer_embedding_ready = FALSE;
+    memset(infer_current_embedding, 0, sizeof(infer_current_embedding));
+    memset(infer_prototype_embeddings, 0, sizeof(infer_prototype_embeddings));
+#else
+    g_task_infer_tflm_available = FALSE;
+#endif
     task_infer_result_clear(&infer_result);
     g_task_infer_available = FALSE;
     g_task_infer_feature_generation = 0U;
@@ -201,9 +220,84 @@ EXPORT ER task_infer_prototype_set(const prototype_storage_data_t * p_data, BOOL
         memcpy(infer_background_model.decoder, p_data->background_decoder,
                sizeof(infer_background_model.decoder));
     }
+#if (CPU0_USE_ACOUSTIC_EMBEDDING_TFLM != 0U)
+    if (storage_valid && (p_data->sample_count > 0U) && (p_data->embedding_valid != 0U)) {
+        memcpy(infer_prototype_embeddings, p_data->prototype_embeddings,
+               sizeof(infer_prototype_embeddings));
+        infer_embedding_ready = TRUE;
+    } else {
+        infer_embedding_ready = FALSE;
+    }
+#endif
     ER const unlock_err = tk_unl_mtx(infer_mutex_id);
     g_task_infer_last_kernel_error = (E_OK == unlock_err) ? E_OK : unlock_err;
     return unlock_err;
+}
+
+/** =================================================================*
+ * @brief  現場見本音響埋め込み登録
+ * @param[in] sample_index 登録先見本番号 (0〜4)
+ * @return 処理結果 (E_OK: 成功, E_PAR: 引数不正, E_NOEXS: ミューテックス未生成)
+ * ================================================================= */
+EXPORT ER task_infer_prototype_embedding_register(UW sample_index) {
+#if (CPU0_USE_ACOUSTIC_EMBEDDING_TFLM != 0U)
+    if (sample_index >= CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT) {
+        return E_PAR;
+    }
+    if (infer_mutex_id <= 0) {
+        return E_NOEXS;
+    }
+    ER const err = tk_loc_mtx(infer_mutex_id, TMO_FEVR);
+    if (E_OK != err) {
+        return err;
+    }
+    float * p_dest = &infer_prototype_embeddings[sample_index * ACOUSTIC_EMBEDDING_DIMENSION];
+    memcpy(p_dest, infer_current_embedding, sizeof(infer_current_embedding));
+    if ((CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT - 1U) == sample_index) {
+        infer_embedding_ready = TRUE;
+    }
+    return tk_unl_mtx(infer_mutex_id);
+#else
+    (void) sample_index;
+    return E_OK;
+#endif
+}
+
+/** =================================================================*
+ * @brief  外れ値除外後の音響埋め込み配列同期圧縮
+ * @param[in] mask 保持する見本のビットマスク
+ * @return 処理結果 (E_OK: 成功, E_NOEXS: ミューテックス未生成)
+ * ================================================================= */
+EXPORT ER task_infer_prototype_embeddings_compact(UB mask) {
+#if (CPU0_USE_ACOUSTIC_EMBEDDING_TFLM != 0U)
+    if (infer_mutex_id <= 0) {
+        return E_NOEXS;
+    }
+    ER const err = tk_loc_mtx(infer_mutex_id, TMO_FEVR);
+    if (E_OK != err) {
+        return err;
+    }
+    UW kept = 0U;
+    for (UW index = 0U; index < CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT; index++) {
+        if (mask & (1U << index)) {
+            if (kept != index) {
+                memcpy(&infer_prototype_embeddings[kept * ACOUSTIC_EMBEDDING_DIMENSION],
+                       &infer_prototype_embeddings[index * ACOUSTIC_EMBEDDING_DIMENSION],
+                       ACOUSTIC_EMBEDDING_DIMENSION * sizeof(float));
+            }
+            kept++;
+        }
+    }
+    memset(&infer_prototype_embeddings[kept * ACOUSTIC_EMBEDDING_DIMENSION], 0,
+           (CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT - kept) * ACOUSTIC_EMBEDDING_DIMENSION * sizeof(float));
+    if (kept < CPU0_PROTOTYPE_STORAGE_SAMPLE_COUNT) {
+        infer_embedding_ready = FALSE;
+    }
+    return tk_unl_mtx(infer_mutex_id);
+#else
+    (void) mask;
+    return E_OK;
+#endif
 }
 
 /** =================================================================*
@@ -273,6 +367,14 @@ EXPORT ER task_infer_prototype_get(prototype_storage_data_t * p_data, BOOL * p_s
         return err;
     }
     *p_data = infer_storage_data;
+#if (CPU0_USE_ACOUSTIC_EMBEDDING_TFLM != 0U)
+    memcpy(p_data->prototype_embeddings, infer_prototype_embeddings,
+           sizeof(p_data->prototype_embeddings));
+    p_data->embedding_valid = (UB) (infer_embedding_ready ? 1U : 0U);
+#else
+    memset(p_data->prototype_embeddings, 0, sizeof(p_data->prototype_embeddings));
+    p_data->embedding_valid = 0U;
+#endif
     *p_storage_valid = infer_storage_valid;
     return tk_unl_mtx(infer_mutex_id);
 }
@@ -361,6 +463,26 @@ LOCAL void task_infer_feature_process(void) {
                                          infer_storage_data.sample_count,
                                          infer_bin_weights,
                                          infer_storage_data.identifier_threshold, &next.identifier);
+    next.classifier_kind = CPU0_ACOUSTIC_CLASSIFIER_DSP_SUMMARY;
+#if (CPU0_USE_ACOUSTIC_EMBEDDING_TFLM != 0U)
+    /* TFLM音響埋め込みCNNによる高精度照合 (有効かつ登録済みかつパッチ有効時に適用) */
+    if (next.summary_valid && g_task_infer_tflm_available &&
+        acoustic_embedding_identifier_extract((const B *) infer_feature_patch.frames, infer_current_embedding)) {
+        if (infer_storage_valid && (infer_storage_data.sample_count > 0U) && infer_embedding_ready) {
+            acoustic_identifier_summary_output_t tflm_output;
+            acoustic_embedding_identifier_classify(
+                infer_current_embedding,
+                infer_prototype_embeddings,
+                infer_storage_data.sample_count,
+                ACOUSTIC_EMBEDDING_SAFE_THRESHOLD,
+                &tflm_output);
+            if (CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_NOT_READY != tflm_output.status) {
+                next.identifier = tflm_output;
+                next.classifier_kind = CPU0_ACOUSTIC_CLASSIFIER_NN_EMBEDDING;
+            }
+        }
+    }
+#endif
     if (CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_TARGET == next.identifier.status) {
         g_task_infer_match_count++;
     }
