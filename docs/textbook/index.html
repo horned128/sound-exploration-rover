@@ -4,6 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SEROV 開発・設計教科書ポータル | Sound Exploration ROVer</title>
+
+  <!-- Marked.js, Mermaid.js, Highlight.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/c.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+  <link id="hljsDarkTheme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <link id="hljsLightTheme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" disabled>
+
   <style>
     :root {
       --bg: #0b0f19;
@@ -19,6 +31,8 @@
       --success: #10b981;
       --warning: #f59e0b;
       --code-bg: #0d1321;
+      --sidebar-width: 280px;
+      --toc-width: 240px;
     }
     [data-theme="light"] {
       --bg: #f8fafc;
@@ -30,7 +44,7 @@
       --text-muted: #64748b;
       --primary: #0284c7;
       --primary-hover: #0369a1;
-      --code-bg: #e2e8f0;
+      --code-bg: #f1f5f9;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -46,7 +60,7 @@
     nav {
       position: sticky;
       top: 0;
-      background: rgba(19, 27, 46, 0.85);
+      background: rgba(19, 27, 46, 0.9);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--surface-border);
       padding: 0.8rem 2rem;
@@ -55,10 +69,14 @@
       align-items: center;
       z-index: 100;
     }
+    [data-theme="light"] nav {
+      background: rgba(255, 255, 255, 0.9);
+    }
     .brand {
       display: flex;
       align-items: center;
       gap: 0.8rem;
+      cursor: pointer;
     }
     .brand-logo {
       width: 34px;
@@ -92,6 +110,7 @@
       font-size: 0.9rem;
       font-weight: 500;
       transition: color 0.2s;
+      cursor: pointer;
     }
     .nav-link:hover { color: var(--primary); }
     .btn {
@@ -124,7 +143,12 @@
       color: #fff !important;
     }
 
-    /* ヒーローセクション */
+    /* ========================================================
+       ポータルビュー (#portalView)
+       ======================================================== */
+    #portalView {
+      display: block;
+    }
     .hero {
       max-width: 1200px;
       margin: 3rem auto 2rem;
@@ -159,9 +183,9 @@
       -webkit-text-fill-color: transparent;
     }
     .hero p {
-      font-size: 1.1rem;
+      font-size: 1.05rem;
       color: var(--text-muted);
-      max-width: 750px;
+      max-width: 800px;
       margin: 0 auto 2rem;
     }
     .hero-buttons {
@@ -171,10 +195,9 @@
       flex-wrap: wrap;
     }
 
-    /* インタラクティブバナー */
     .banner-card {
       max-width: 1200px;
-      margin: 0 auto 3rem;
+      margin: 0 auto 2rem;
       padding: 0 1.5rem;
     }
     .banner-inner {
@@ -183,24 +206,23 @@
       border-radius: 12px;
       padding: 1.5rem 2rem;
       display: flex;
-      justify-content: space-between;
       align-items: center;
-      flex-wrap: wrap;
+      justify-content: space-between;
       gap: 1.5rem;
+      flex-wrap: wrap;
     }
     .banner-text h3 {
-      font-size: 1.3rem;
+      font-size: 1.2rem;
       font-weight: 700;
-      color: var(--primary);
       margin-bottom: 0.4rem;
+      color: var(--text);
     }
     .banner-text p {
+      font-size: 0.9rem;
       color: var(--text-muted);
-      font-size: 0.95rem;
       max-width: 650px;
     }
 
-    /* 学習ロードマップ */
     .section-title {
       max-width: 1200px;
       margin: 0 auto 1.5rem;
@@ -234,7 +256,6 @@
       border-color: var(--primary);
     }
 
-    /* 検索バー */
     .search-box {
       max-width: 1200px;
       margin: 0 auto 2rem;
@@ -255,7 +276,6 @@
       border-color: var(--primary);
     }
 
-    /* カードグリッド */
     .chapter-grid {
       max-width: 1200px;
       margin: 0 auto 4rem;
@@ -336,7 +356,6 @@
       color: var(--text-muted);
     }
 
-    /* 用語集セクション */
     .glossary-section {
       max-width: 1200px;
       margin: 0 auto 4rem;
@@ -365,6 +384,331 @@
       color: var(--text-muted);
     }
 
+    /* ========================================================
+       リーダービュー (#readerView)
+       ======================================================== */
+    #readerView {
+      display: none;
+      min-height: calc(100vh - 60px);
+    }
+    .reader-header {
+      position: sticky;
+      top: 60px;
+      background: rgba(19, 27, 46, 0.95);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--surface-border);
+      padding: 0.6rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      z-index: 90;
+    }
+    [data-theme="light"] .reader-header {
+      background: rgba(255, 255, 255, 0.95);
+    }
+    .reader-header-left {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .reader-header-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text);
+      max-width: 500px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .reader-header-right {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .reader-layout {
+      display: flex;
+      max-width: 1440px;
+      margin: 0 auto;
+      position: relative;
+    }
+    /* 左サイドバー: 章一覧 */
+    .reader-sidebar {
+      width: var(--sidebar-width);
+      flex-shrink: 0;
+      border-right: 1px solid var(--surface-border);
+      height: calc(100vh - 110px);
+      position: sticky;
+      top: 110px;
+      overflow-y: auto;
+      padding: 1.5rem 1rem;
+    }
+    .sidebar-section-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--primary);
+      margin-bottom: 0.6rem;
+      padding-left: 0.5rem;
+      letter-spacing: 0.05em;
+    }
+    .sidebar-list {
+      list-style: none;
+      margin-bottom: 1.5rem;
+    }
+    .sidebar-item {
+      padding: 0.45rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.2rem;
+    }
+    .sidebar-item:hover {
+      background: var(--surface);
+      color: var(--text);
+    }
+    .sidebar-item.active {
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    /* 中央: Markdown 本文 */
+    .reader-content-wrap {
+      flex-grow: 1;
+      min-width: 0;
+      padding: 2.5rem 3rem;
+    }
+    .markdown-body {
+      max-width: 860px;
+      margin: 0 auto;
+      font-size: 1rem;
+      line-height: 1.75;
+      color: var(--text);
+    }
+    .markdown-body h1 {
+      font-size: 2.1rem;
+      font-weight: 800;
+      border-bottom: 1px solid var(--surface-border);
+      padding-bottom: 0.8rem;
+      margin-bottom: 1.5rem;
+      line-height: 1.25;
+    }
+    .markdown-body h2 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      border-bottom: 1px solid var(--surface-border);
+      padding-bottom: 0.5rem;
+      margin-top: 2.5rem;
+      margin-bottom: 1rem;
+    }
+    .markdown-body h3 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-top: 2rem;
+      margin-bottom: 0.8rem;
+    }
+    .markdown-body h4 {
+      font-size: 1.05rem;
+      font-weight: 700;
+      margin-top: 1.5rem;
+      margin-bottom: 0.6rem;
+    }
+    .markdown-body p {
+      margin-bottom: 1.2rem;
+    }
+    .markdown-body ul, .markdown-body ol {
+      margin-bottom: 1.2rem;
+      padding-left: 2rem;
+    }
+    .markdown-body li {
+      margin-bottom: 0.4rem;
+    }
+    .markdown-body a {
+      color: var(--primary);
+      text-decoration: underline;
+    }
+    .markdown-body a:hover {
+      text-decoration: none;
+    }
+    .markdown-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.5rem 0;
+      font-size: 0.9rem;
+      background: var(--surface);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .markdown-body th, .markdown-body td {
+      border: 1px solid var(--surface-border);
+      padding: 0.65rem 1rem;
+      text-align: left;
+    }
+    .markdown-body th {
+      background: rgba(56, 189, 248, 0.08);
+      font-weight: 700;
+    }
+    .markdown-body blockquote {
+      border-left: 4px solid var(--primary);
+      padding: 0.8rem 1.2rem;
+      background: var(--surface);
+      border-radius: 0 8px 8px 0;
+      margin: 1.5rem 0;
+      color: var(--text-muted);
+    }
+    /* GitHub Alerts */
+    .markdown-body blockquote.alert-note {
+      border-left-color: #38bdf8;
+      background: rgba(56, 189, 248, 0.08);
+    }
+    .markdown-body blockquote.alert-tip {
+      border-left-color: #10b981;
+      background: rgba(16, 185, 129, 0.08);
+    }
+    .markdown-body blockquote.alert-important {
+      border-left-color: #a855f7;
+      background: rgba(168, 85, 247, 0.08);
+    }
+    .markdown-body blockquote.alert-warning {
+      border-left-color: #f59e0b;
+      background: rgba(245, 158, 11, 0.08);
+    }
+    .markdown-body blockquote.alert-caution {
+      border-left-color: #f43f5e;
+      background: rgba(244, 63, 94, 0.08);
+    }
+
+    .markdown-body pre {
+      background: var(--code-bg);
+      border: 1px solid var(--surface-border);
+      border-radius: 8px;
+      padding: 1.2rem;
+      margin: 1.5rem 0;
+      overflow-x: auto;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+    .markdown-body code {
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.88em;
+      background: var(--code-bg);
+      padding: 0.2em 0.4em;
+      border-radius: 4px;
+      border: 1px solid var(--surface-border);
+    }
+    .markdown-body pre code {
+      background: transparent;
+      padding: 0;
+      border: none;
+    }
+    .markdown-body hr {
+      border: 0;
+      border-top: 1px solid var(--surface-border);
+      margin: 2.5rem 0;
+    }
+
+    /* Mermaid コンテナ */
+    .mermaid-container {
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin: 1.5rem 0;
+      display: flex;
+      justify-content: center;
+      overflow-x: auto;
+    }
+
+    /* 右サイドバー: 見出しTOC */
+    .reader-toc {
+      width: var(--toc-width);
+      flex-shrink: 0;
+      height: calc(100vh - 110px);
+      position: sticky;
+      top: 110px;
+      overflow-y: auto;
+      padding: 1.5rem 1rem;
+      border-left: 1px solid var(--surface-border);
+    }
+    .toc-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 0.8rem;
+      letter-spacing: 0.05em;
+    }
+    .toc-list {
+      list-style: none;
+      font-size: 0.8rem;
+    }
+    .toc-item {
+      margin-bottom: 0.4rem;
+    }
+    .toc-link {
+      color: var(--text-muted);
+      text-decoration: none;
+      display: block;
+      padding: 0.2rem 0.4rem;
+      border-radius: 4px;
+      transition: color 0.15s, background 0.15s;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .toc-link:hover {
+      color: var(--primary);
+      background: var(--surface);
+    }
+    .toc-link.level-3 {
+      padding-left: 1rem;
+      font-size: 0.75rem;
+    }
+
+    /* ローディング & エラー表示 */
+    .loading-spinner {
+      text-align: center;
+      padding: 4rem 1rem;
+      color: var(--primary);
+      font-size: 1.1rem;
+    }
+    .error-box {
+      background: rgba(244, 63, 94, 0.1);
+      border: 1px solid rgba(244, 63, 94, 0.3);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin: 2rem 0;
+      color: var(--accent);
+    }
+    .error-box h4 { margin-bottom: 0.5rem; font-size: 1.1rem; }
+    .error-box p { font-size: 0.9rem; color: var(--text); }
+    .error-code {
+      margin-top: 1rem;
+      background: var(--code-bg);
+      padding: 0.8rem;
+      border-radius: 6px;
+      font-family: monospace;
+      color: var(--text);
+      font-size: 0.85rem;
+    }
+
+    /* 章ナビゲーション下部 */
+    .reader-chapter-nav {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--surface-border);
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+
     /* フッター */
     footer {
       background: var(--surface);
@@ -375,13 +719,26 @@
       color: var(--text-muted);
     }
     footer p { margin-bottom: 0.5rem; }
+
+    @media (max-width: 1024px) {
+      .reader-toc { display: none; }
+      .reader-sidebar { width: 220px; }
+      .reader-content-wrap { padding: 2rem 1.5rem; }
+    }
+    @media (max-width: 768px) {
+      .reader-sidebar { display: none; }
+      .reader-content-wrap { padding: 1.5rem 1rem; }
+      nav { padding: 0.8rem 1rem; }
+      .hero h2 { font-size: 1.8rem; }
+      .chapter-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
 
   <!-- ナビゲーション -->
   <nav>
-    <div class="brand">
+    <div class="brand" onclick="showPortal()">
       <div class="brand-logo">S</div>
       <div class="brand-text">
         <h1>SEROV 教科書ポータル</h1>
@@ -389,318 +746,535 @@
       </div>
     </div>
     <div class="nav-links">
-      <a href="#chapters" class="nav-link">教科書目次</a>
-      <a href="edgeai/README.md" class="nav-link" style="color: #38bdf8; font-weight: 700;">🎧 エッジAI特化編</a>
-      <a href="#glossary" class="nav-link">用語集</a>
-      <a href="interactive_system_architecture.html" class="btn btn-primary">⚡ アーキテクチャ図</a>
-      <button id="themeToggle" class="btn">🌓</button>
+      <a href="#chapters" class="nav-link" onclick="showPortal()">教科書目次</a>
+      <a class="nav-link" onclick="openChapter('edgeai/README.md')" style="color: #38bdf8; font-weight: 700;">🎧 エッジAI特化編</a>
+      <a href="#glossary" class="nav-link" onclick="showPortal()">用語集</a>
+      <button class="btn btn-primary" onclick="openChapter('01_introduction_and_overview.md')">📖 教科書を読む</button>
+      <button id="themeToggle" class="btn" title="テーマ切り替え">🌓</button>
     </div>
   </nav>
 
-  <!-- ヒーロー -->
-  <section class="hero">
-    <div class="hero-badge">TRONプログラミングコンテスト2026 参加プロジェクト</div>
-    <h2>極限環境を走破する、音源探査ローバーの全貌</h2>
-    <p>
-      Arm Cortex-M85 / Cortex-M33 デュアルコア（RA8P1）と μT-Kernel 3.0、
-      XVF3800 音響DSP、ESP32-S3 によるLog-MelエッジAI、そして火星探査ローバー直系のロッカーボギー機構。
-      最先端の組み込みリアルタイム技術を完全制覇するための総合教科書です。
-    </p>
-    <div class="hero-buttons">
-      <a href="#chapters" class="btn btn-primary">📚 第1章から学習を始める</a>
-      <a href="edgeai/README.md" class="btn" style="border-color: #38bdf8; color: #38bdf8;">🎧 エッジAI特化教科書へ</a>
-      <a href="interactive_system_architecture.html" class="btn">🗺️ インタラクティブ構造図を見る</a>
-      <a href="README.md" class="btn">📖 教科書README</a>
-    </div>
-  </section>
+  <!-- ========================================================
+       ポータル画面 (#portalView)
+       ======================================================== -->
+  <div id="portalView">
 
-  <!-- インタラクティブバナー群 -->
-  <div class="banner-card" style="margin-bottom: 1.5rem;">
-    <div class="banner-inner" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(56, 189, 248, 0.08)); border-color: rgba(16, 185, 129, 0.4);">
-      <div class="banner-text">
-        <span style="font-size: 0.75rem; font-weight: 700; color: #10b981; text-transform: uppercase;">New 特化サブ教科書 新設</span>
-        <h3 style="color: #10b981;">🎧 エッジAI & 音響DSP 完全理解サブ教科書（全7章）</h3>
-        <p>
-          「AI周りが難しすぎる」という声に応え、音響DSPからLog-Mel抽出、int8量子化、TFLM推論、現場学習（プロトタイプ照合）までを初心者にも優しくステップバイステップで徹底解説する特化教科書を公開しました！
-        </p>
+    <!-- ヒーロー -->
+    <section class="hero">
+      <div class="hero-badge">TRONプログラミングコンテスト2026 参加プロジェクト</div>
+      <h2>極限環境を走破する、音源探査ローバーの全貌</h2>
+      <p>
+        Arm Cortex-M85 / Cortex-M33 デュアルコア（RA8P1）と μT-Kernel 3.0、
+        XVF3800 音響DSP、TFLM障害物回避制御MLP、192次元DSP要約照合、そして火星探査ローバー直系のロッカーボギー機構。
+        最先端の組み込みリアルタイム技術を1つの画面で美しく学び尽くす総合教科書です。
+      </p>
+      <div class="hero-buttons">
+        <button onclick="openChapter('01_introduction_and_overview.md')" class="btn btn-primary">📚 第1章から学習を始める</button>
+        <button onclick="openChapter('edgeai/README.md')" class="btn" style="border-color: #38bdf8; color: #38bdf8;">🎧 エッジAI特化教科書へ</button>
+        <button onclick="openChapter('README.md')" class="btn">📖 教科書全体ガイド</button>
       </div>
-      <div style="display: flex; gap: 0.8rem; flex-wrap: wrap;">
-        <a href="edgeai/README.md" class="btn btn-primary" style="background: #10b981; border-color: #10b981;">特化教科書を読む →</a>
-        <a href="edgeai/interactive_audio_pipeline.html" class="btn">波形シミュレータ体験 ⚡</a>
-      </div>
-    </div>
-  </div>
+    </section>
 
-  <div class="banner-card">
-    <div class="banner-inner">
-      <div class="banner-text">
-        <h3>⚡ インタラクティブ・システムアーキテクチャ図</h3>
-        <p>
-          4つのプロセッサ（XVF3800, ESP32-S3, RA8P1 CPU0/CPU1）、センサ、アクチュエータ、通信バス（USB, IPC, I2C, PWM）の結線とデータフローを視覚的・対話的に探索できるWeb教材です。
-        </p>
-      </div>
-      <a href="interactive_system_architecture.html" class="btn btn-primary">今すぐ体験する →</a>
-    </div>
-  </div>
-
-  <!-- 検索バー -->
-  <div class="search-box">
-    <input type="text" id="searchInput" class="search-input" placeholder="章のタイトル、トピック、キーワード（例: IPC, ToF, TFLM, エンコーダ, 周期ハンドラ）を検索...">
-  </div>
-
-  <!-- 目次セクション -->
-  <div id="chapters" class="section-title">
-    <h3>全10章 学習カリキュラム</h3>
-    <div class="roadmap-steps">
-      <span class="roadmap-badge active">入門・全体像 (1-3)</span>
-      <span class="roadmap-badge active">ファームウェア中核 (4-7)</span>
-      <span class="roadmap-badge active">検証・運用・実践 (8-10)</span>
-    </div>
-  </div>
-
-  <div class="chapter-grid" id="chapterGrid">
-
-    <!-- 第1章 -->
-    <div class="chapter-card" data-keywords="プロジェクト概要 ミッション 背景 TRON2026 モノレポ 設計哲学">
-      <div class="chapter-card-top">
-        <span class="chapter-tag">Chapter 01 / 入門</span>
-        <h4 class="chapter-title">プロジェクト概要とミッション</h4>
-        <p class="chapter-desc">TRONプログラミングコンテスト2026に向けた挑戦目的、暗闇や濃霧での音源探査の意義、モノレポ構成、および4つの基本設計哲学を解説。</p>
-        <ul class="chapter-topics">
-          <li>音源探査ローバー（SEROV）の挑戦課題</li>
-          <li>リポジトリ構造とモノレポの必然性</li>
-          <li>安全第一・実時間性の分離・固定契約哲学</li>
-        </ul>
-      </div>
-      <div class="chapter-footer">
-        <span class="file-ref">01_introduction_and_overview.md</span>
-        <a href="01_introduction_and_overview.md" class="btn">読む →</a>
-      </div>
-    </div>
-
-    <!-- 第2章 -->
-    <div class="chapter-card" data-keywords="ハードウェア メカニクス ロッカーボギー サスペンション モータ サーボ 電源 GND スター配線 SW4">
-      <div class="chapter-card-top">
-        <span class="chapter-tag">Chapter 02 / メカ・電気</span>
-        <h4 class="chapter-title">ハードウェア機構とメカニカル設計</h4>
-        <p class="chapter-desc">火星探査機直系のロッカーボギー機構の動作原理、独自3Dプリント追加パーツ、モータ・サーボ選定、ノイズを排除する独立電源・スターGND設計。</p>
-        <ul class="chapter-topics">
-          <li>バネを使わない6輪接地サスペンションの幾何学</li>
-          <li>JGA25-370 モータ × 6 ＆ DS3225MG サーボ × 4</li>
-          <li>大電流モータ系と弱電マイコン系のスターGND分離</li>
-        </ul>
-      </div>
-      <div class="chapter-footer">
-        <span class="file-ref">02_hardware_and_mechanics.md</span>
-        <a href="02_hardware_and_mechanics.md" class="btn">読む →</a>
-      </div>
-    </div>
-
-    <!-- 第3章 -->
-    <div class="chapter-card" data-keywords="アーキテクチャ 4プロセッサ 責務分離 5層レイヤー FSP ピン所有権 Solution">
-      <div class="chapter-card-top">
-        <span class="chapter-tag">Chapter 03 / アーキテクチャ</span>
-        <h4 class="chapter-title">4プロセッサ協調アーキテクチャとレイヤー設計</h4>
-        <p class="chapter-desc">XVF3800、ESP32-S3、RA8P1 CPU0/CPU1の4プロセッサ責務分離、L0〜L4の5層ソフトウェアレイヤー、デュアルコア特有のピン所有権モデル。</p>
-        <ul class="chapter-topics">
-          <li>なぜプロセッサとコアを分離するのか？（通信ジッタ隔離）</li>
-          <li>L0 Platform 〜 L4 Tasks 5層アーキテクチャ</li>
-          <li>Solution pins によるCPU0一括ピン所有権（CPU1は0ピン）</li>
-        </ul>
-      </div>
-      <div class="chapter-footer">
-        <span class="file-ref">03_system_architecture.md</span>
-        <a href="03_system_architecture.md" class="btn">読む →</a>
-      </div>
-    </div>
-
-    <!-- 第4章 -->
-    <div class="chapter-card" data-keywords="RTOS μT-Kernel 3.0 デュアルコア Cortex-M85 Cortex-M33 SRAM 起動シーケンス 周期ハンドラ 実時間化">
-      <div class="chapter-card-top">
-        <span class="chapter-tag">Chapter 04 / RTOS・制御</span>
-        <h4 class="chapter-title">μT-Kernel 3.0とデュアルコア制御</h4>
-        <p class="chapter-desc">Cortex-M85（1GHz）とCortex-M33（250MHz）の異種マルチコア構成、SRAM領域完全分離、BSP上書き手法、および周期ハンドラによる1ms実時間化。</p>
-        <ul class="chapter-topics">
-          <li>R_BSP_SecondaryCoreStart による安全な起動順序</li>
-          <li>mtkernel_config によるBSPクリーン上書き</li>
-          <li>tk_dly_tskのドリフト解消: 周期ハンドラ＋イベントフラグ</li>
-        </ul>
-      </div>
-      <div class="chapter-footer">
-        <span class="file-ref">04_rtos_and_multicore.md</span>
-        <a href="04_rtos_and_multicore.md" class="btn">読む →</a>
-      </div>
-    </div>
-
-    <!-- 第5章 -->
-    <div class="chapter-card" data-keywords="通信プロトコル IPC FIFO 32bit アトミックコミット SEQUENCE USB CDC CRC-16 Wi-Fi UDP">
-      <div class="chapter-card-top">
-        <span class="chapter-tag">Chapter 05 / 通信プロトコル</span>
-        <h4 class="chapter-title">プロセッサ間通信プロトコル（IPC & USB CDC）</h4>
-        <p class="chapter-desc">4段32-bit IPC FIFOのフォーマット、SEQUENCEマーカーによる6出力アトミックコミット、USB CDC固定長バイナリフレーム、CRC-16検証技術。</p>
-        <ul class="chapter-topics">
-          <li>Staging → Committed ダブルバッファによる安全コミット</li>
-          <li>緊急停止（estop）の即時割り込み処理</li>
-          <li>Magic('S''R')・CRC-16付きバイナリプロトコル設計</li>
-        </ul>
-      </div>
-      <div class="chapter-footer">
-        <span class="file-ref">05_interprocessor_communication.md</span>
-        <a href="05_interprocessor_communication.md" class="btn">読む →</a>
-      </div>
-    </div>
-
-    <!-- 第6章 -->
-    <div class="chapter-card" data-keywords="音響DSP エッジAI XVF3800 DoA VAD Log-Mel int8 量子化 TFLM TensorFlow 停止聴取型">
-      <div class="chapter-card-top">
-        <span class="chapter-tag">Chapter 06 / 音響・AI</span>
-        <h4 class="chapter-title">音響信号処理・Log-Mel特徴量・エッジAI</h4>
-        <p class="chapter-desc">XVF3800によるビームフォーミング、ESP32-S3での100fps Log-Mel抽出とint8量子化、CPU0のTFLM推論基盤、および「停止聴取型」音源追従。</p>
-        <ul class="chapter-topics">
-          <li>固定数値契約: 400点窓/160点ホップ/32bin/int8</li>
-          <li>CPU0 TFLMランタイム: 96 KiB静的テンソルアリーナ</li>
-          <li>自車ノイズを排除する「停止聴取型」ステートマシン</li>
-        </ul>
-      </div>
-      <div class="chapter-footer" style="flex-wrap: wrap; gap: 0.5rem;">
-        <span class="file-ref">06_acoustic_dsp_and_edge_ai.md</span>
-        <div style="display: flex; gap: 0.4rem;">
-          <a href="edgeai/README.md" class="btn" style="border-color: #10b981; color: #10b981; font-size: 0.75rem;">🎧 特化編 (全7章) →</a>
-          <a href="06_acoustic_dsp_and_edge_ai.md" class="btn">読む →</a>
+    <!-- 特化サブ教科書バナー -->
+    <div class="banner-card">
+      <div class="banner-inner" style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(56, 189, 248, 0.08)); border-color: rgba(16, 185, 129, 0.4);">
+        <div class="banner-text">
+          <span style="font-size: 0.75rem; font-weight: 700; color: #10b981; text-transform: uppercase;">🎧 特化サブ教科書</span>
+          <h3 style="color: #10b981;">エッジAI & 音響DSP 完全理解サブ教科書（全7章）</h3>
+          <p>
+            音響DSPからLog-Mel抽出、int8量子化、TFLM制御MLP・音響推論、現場学習（プロトタイプ照合）までを初心者にも優しくステップバイステップで徹底解説！
+          </p>
+        </div>
+        <div style="display: flex; gap: 0.8rem; flex-wrap: wrap;">
+          <button onclick="openChapter('edgeai/README.md')" class="btn btn-primary" style="background: #10b981; border-color: #10b981;">特化教科書を開く →</button>
+          <a href="#ai-chapters" class="btn">エッジAI全章一覧 ↓</a>
         </div>
       </div>
     </div>
 
-    <!-- 第7章 -->
-    <div class="chapter-card" data-keywords="センサ自律走行 ToF VL53L1X TCA9548A BMI270 IMU 回避ルール 生存性監視 ウォッチドッグ">
-      <div class="chapter-card-top">
-        <span class="chapter-tag">Chapter 07 / センサ・自律走行</span>
-        <h4 class="chapter-title">センサ統合と自律走行アルゴリズム</h4>
-        <p class="chapter-desc">TCA9548Aによる前方3眼ToF分離、死角ゼロの幾何学配置、ルールベース回避判断、および200msセンサ生存性監視（Liveness Watchdog）。</p>
-        <ul class="chapter-topics">
-          <li>前方3眼ToF（LEFT -45°, CENTER 0°, RIGHT +45°）</li>
-          <li>自律後退の禁止理由と前進・減速・旋回・停止ルール</li>
-          <li>I2Cハング時の暴走を防ぐ200ms独立生存性監視</li>
+    <!-- 検索バー -->
+    <div class="search-box">
+      <input type="text" id="searchInput" class="search-input" placeholder="章のタイトル、トピック、キーワード（例: IPC, ToF, TFLM, 制御MLP, 周期ハンドラ）を検索...">
+    </div>
+
+    <!-- 目次セクション -->
+    <div id="chapters" class="section-title">
+      <h3>全10章 学習カリキュラム</h3>
+      <div class="roadmap-steps">
+        <span class="roadmap-badge active">入門・全体像 (1-3)</span>
+        <span class="roadmap-badge active">ファームウェア中核 (4-7)</span>
+        <span class="roadmap-badge active">検証・運用・実践 (8-10)</span>
+      </div>
+    </div>
+
+    <div class="chapter-grid" id="chapterGrid">
+
+      <!-- 第1章 -->
+      <div class="chapter-card" data-keywords="プロジェクト概要 ミッション 背景 TRON2026 モノレポ 設計哲学">
+        <div class="chapter-card-top">
+          <span class="chapter-tag">Chapter 01 / 入門</span>
+          <h4 class="chapter-title">プロジェクト概要とミッション</h4>
+          <p class="chapter-desc">TRONプログラミングコンテスト2026に向けた挑戦目的、暗闇や濃霧での音源探査の意義、モノレポ構成、および4つの基本設計哲学を解説。</p>
+          <ul class="chapter-topics">
+            <li>音源探査ローバー（SEROV）の挑戦課題</li>
+            <li>リポジトリ構造とモノレポの必然性（rover-sim含む）</li>
+            <li>安全第一・実時間性の分離・固定契約哲学・task_infer隔離</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">01_introduction_and_overview.md</span>
+          <button onclick="openChapter('01_introduction_and_overview.md')" class="btn">読む →</button>
+        </div>
+      </div>
+
+      <!-- 第2章 -->
+      <div class="chapter-card" data-keywords="ハードウェア メカニクス ロッカーボギー サスペンション モータ サーボ 電源 GND スター配線 SW4">
+        <div class="chapter-card-top">
+          <span class="chapter-tag">Chapter 02 / メカ・電気</span>
+          <h4 class="chapter-title">ハードウェア機構とメカニカル設計</h4>
+          <p class="chapter-desc">火星探査機直系のロッカーボギー機構の動作原理、独自3Dプリント追加パーツ、モータ・サーボ選定、ノイズを排除する独立電源・スターGND設計。</p>
+          <ul class="chapter-topics">
+            <li>バネを使わない6輪接地サスペンションの幾何学</li>
+            <li>JGA25-370 モータ × 6 ＆ DS3225MG サーボ × 4</li>
+            <li>大電流モータ系と弱電マイコン系のスターGND分離</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">02_hardware_and_mechanics.md</span>
+          <button onclick="openChapter('02_hardware_and_mechanics.md')" class="btn">読む →</button>
+        </div>
+      </div>
+
+      <!-- 第3章 -->
+      <div class="chapter-card" data-keywords="アーキテクチャ 4プロセッサ 責務分離 5層レイヤー AIレイヤー FSP ピン所有権 Solution">
+        <div class="chapter-card-top">
+          <span class="chapter-tag">Chapter 03 / アーキテクチャ</span>
+          <h4 class="chapter-title">4プロセッサ協調アーキテクチャとレイヤー設計</h4>
+          <p class="chapter-desc">XVF3800、ESP32-S3、RA8P1 CPU0/CPU1の4プロセッサ責務分離、L0〜L4＋AIレイヤー構造、デュアルコア特有のピン所有権モデル。</p>
+          <ul class="chapter-topics">
+            <li>なぜプロセッサとコアを分離するのか？（通信ジッタ隔離）</li>
+            <li>L0 Platform 〜 L4 Tasks ＋ AIレイヤー（TFLM・制御MLP）</li>
+            <li>Solution pins によるCPU0一括ピン所有権（CPU1は0ピン）</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">03_system_architecture.md</span>
+          <button onclick="openChapter('03_system_architecture.md')" class="btn">読む →</button>
+        </div>
+      </div>
+
+      <!-- 第4章 -->
+      <div class="chapter-card" data-keywords="RTOS μT-Kernel 3.0 デュアルコア Cortex-M85 Cortex-M33 SRAM 起動シーケンス task_infer 周期ハンドラ 実時間化">
+        <div class="chapter-card-top">
+          <span class="chapter-tag">Chapter 04 / RTOS・制御</span>
+          <h4 class="chapter-title">μT-Kernel 3.0とデュアルコア制御</h4>
+          <p class="chapter-desc">Cortex-M85（1GHz）とCortex-M33（250MHz）の異種マルチコア構成、SRAM領域分離、task_infer非致命隔離設計、および周期ハンドラによる1ms実時間化。</p>
+          <ul class="chapter-topics">
+            <li>R_BSP_SecondaryCoreStart と task_infer_start_optional</li>
+            <li>CPU0タスク優先度・50ms思考周期（Command: 6, Think: 10, Infer: 11）</li>
+            <li>tk_dly_tskのドリフト解消: 周期ハンドラ＋イベントフラグ</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">04_rtos_and_multicore.md</span>
+          <button onclick="openChapter('04_rtos_and_multicore.md')" class="btn">読む →</button>
+        </div>
+      </div>
+
+      <!-- 第5章 -->
+      <div class="chapter-card" data-keywords="通信プロトコル IPC FIFO 32bit アトミックコミット SEQUENCE USB CDC v2 CRC-16 Wi-Fi UDP NAV_DIAGNOSTICS">
+        <div class="chapter-card-top">
+          <span class="chapter-tag">Chapter 05 / 通信プロトコル</span>
+          <h4 class="chapter-title">プロセッサ間通信プロトコル（IPC & USB CDC）</h4>
+          <p class="chapter-desc">4段32-bit IPC FIFOのフォーマット、SEQUENCEマーカーによる6出力アトミックコミット、USB CDC v2バイナリフレーム、状態ビットパッキングとナビ診断。</p>
+          <ul class="chapter-topics">
+            <li>Staging → Committed ダブルバッファによる安全コミット</li>
+            <li>USBプロトコルv2: 状態・分類器種別・TFLMフラグの1バイトパッキング</li>
+            <li>0x23 NAV_DIAGNOSTICS による音源位置・残差・到着診断配信</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">05_interprocessor_communication.md</span>
+          <button onclick="openChapter('05_interprocessor_communication.md')" class="btn">読む →</button>
+        </div>
+      </div>
+
+      <!-- 第6章 -->
+      <div class="chapter-card" data-keywords="音響DSP エッジAI XVF3800 DoA VAD Log-Mel TFLM知見 192D DSP要約 スピンターン 音源位置推定">
+        <div class="chapter-card-top">
+          <span class="chapter-tag">Chapter 06 / 音響・AI・ナビ</span>
+          <h4 class="chapter-title">音響信号処理・エッジAI・音源ナビゲーション</h4>
+          <p class="chapter-desc">XVF3800、100fps Log-Mel抽出、音響TFLM実機検証知見と192D DSP要約照合ベースラインの圧倒的優位性、ジャイロ帰還スピンターンと音源位置推定。</p>
+          <ul class="chapter-topics">
+            <li>音響TFLM実機検証の知見（128KiBアリーナ・Op混入・走行ノイズ過適合）</li>
+            <li>実機本番採用: 192次元DSP要約 ＋ 主ピーク周波数照合（誤検知ゼロ）</li>
+            <li>ジャイロZ軸帰還スピンターン & bearing-only音源位置推定（到着判定）</li>
+          </ul>
+        </div>
+        <div class="chapter-footer" style="flex-wrap: wrap; gap: 0.5rem;">
+          <span class="file-ref">06_acoustic_dsp_and_edge_ai.md</span>
+          <div style="display: flex; gap: 0.4rem;">
+            <button onclick="openChapter('edgeai/README.md')" class="btn" style="border-color: #10b981; color: #10b981; font-size: 0.75rem;">🎧 特化編 →</button>
+            <button onclick="openChapter('06_acoustic_dsp_and_edge_ai.md')" class="btn">読む →</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 第7章 -->
+      <div class="chapter-card" data-keywords="センサ自律走行 ToF VL53L1X TCA9548A SCL移設 TFLM 制御MLP 多層防御 スタック脱出 生存性監視">
+        <div class="chapter-card-top">
+          <span class="chapter-tag">Chapter 07 / センサ・自律走行</span>
+          <h4 class="chapter-title">センサ統合・TFLM制御MLP・多層防御自律走行</h4>
+          <p class="chapter-desc">SCL端子移設、TFLM障害物回避制御MLP（Policy Distillation）、5層多層防御安全アーキテクチャ、片輪スタック脱出、200msセンサ生存性監視。</p>
+          <ul class="chapter-topics">
+            <li>SCL破損対策（J23-8 / P312移設）と前方3眼幾何学</li>
+            <li>TFLM制御MLP: 完全int8量子化・クリアランス重視安全教師・差動配分</li>
+            <li>5層多層防御（Hardware Veto 〜 スルーレート制限）＆ 片輪スタック脱出</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">07_sensor_and_autonomy.md</span>
+          <button onclick="openChapter('07_sensor_and_autonomy.md')" class="btn">読む →</button>
+        </div>
+      </div>
+
+      <!-- 第8章 -->
+      <div class="chapter-card" data-keywords="ソフトウェア検証 rover-monitor jsonl control-sim ASan UBSan rover-sim acoustic-trainer ホストTFLM">
+        <div class="chapter-card-top">
+          <span class="chapter-tag">Chapter 08 / 検証環境</span>
+          <h4 class="chapter-title">ソフトウェアエコシステムとシミュレーション</h4>
+          <p class="chapter-desc">FastAPIテレメトリモニタ（.jsonlログ保存）、Clangネイティブ制御シミュレータ、ASan/UBSanテスト、rover-sim物理環境、ホストTFLM事前検証。</p>
+          <ul class="chapter-topics">
+            <li>rover-monitor: オドメトリ・音源位置プロット・.jsonl自動記録</li>
+            <li>control-sim: 制御MLP閉ループ壁面テスト（54条件）＆ 回帰テスト200件超</li>
+            <li>acoustic-trainer: ビット完全一致テスト ＆ review_acoustic_tflm_host</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">08_software_ecosystem_and_sim.md</span>
+          <button onclick="openChapter('08_software_ecosystem_and_sim.md')" class="btn">読む →</button>
+        </div>
+      </div>
+
+      <!-- 第9章 -->
+      <div class="chapter-card" data-keywords="開発ワークフロー ビルド e2studio VS Code macOS Equinox Fast Build J-Link Flash FSP">
+        <div class="chapter-card-top">
+          <span class="chapter-tag">Chapter 09 / 開発・ビルド</span>
+          <h4 class="chapter-title">開発ワークフロー・ビルド・FSP生成手順</h4>
+          <p class="chapter-desc">macOSでのSIGABRTクラッシュを防ぐInvoke-RaBuildスクリプト、高速並列差分ビルド（Fast Build）、J-Link一括書き込み、FSP生成黄金7ステップ。</p>
+          <ul class="chapter-topics">
+            <li>Invoke-RaBuild.sh によるEquinoxランチャ直接起動（macOS完全対応）</li>
+            <li>make -j 並列差分ビルド ＆ J-Link一括Flashコマンド（--flash）</li>
+            <li>FSP生成とMulticore Launch Groupによるペア書込み運用</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">09_development_workflow_and_build.md</span>
+          <button onclick="openChapter('09_development_workflow_and_build.md')" class="btn">読む →</button>
+        </div>
+      </div>
+
+      <!-- 第10章 -->
+      <div class="chapter-card" data-keywords="実機校正 キャリブレーション 702 counts/rev トレッド260mm Live Watch デバッグ トラブルシューティング 実機知見">
+        <div class="chapter-card-top">
+          <span class="chapter-tag">Chapter 10 / 実機テスト</span>
+          <h4 class="chapter-title">実機キャリブレーション・テスト・トラブルシューティング</h4>
+          <p class="chapter-desc">手押し実測702 counts/rev、Live Watch必携監視変数、最新の実機検証知見（DoA極性反転、片輪スタック、真後ろ境界、SCL破損）に基づく処方箋。</p>
+          <ul class="chapter-topics">
+            <li>実測統計によるエンコーダ校正（702 counts/rev）＆ トレッド260mm</li>
+            <li>CPU0/CPU1 Live Watch 必須デバッグシンボル一覧（AI・ナビ診断含む）</li>
+            <li>実機走行検証（2026-09-24/26）から得られた実践トラブル対策集</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">10_testing_tuning_and_troubleshooting.md</span>
+          <button onclick="openChapter('10_testing_tuning_and_troubleshooting.md')" class="btn">読む →</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- エッジAI特化編 目次セクション -->
+    <div id="ai-chapters" class="section-title" style="margin-top: 4rem;">
+      <h3 style="color: #10b981;">🎧 エッジAI & 音響DSP 特化編カリキュラム（全7章＋ガイド）</h3>
+      <div class="roadmap-steps">
+        <span class="roadmap-badge active" style="background: rgba(16, 185, 129, 0.2); border-color: #10b981; color: #10b981;">基礎編 (1-3)</span>
+        <span class="roadmap-badge active" style="background: rgba(16, 185, 129, 0.2); border-color: #10b981; color: #10b981;">中級編 (4-6)</span>
+        <span class="roadmap-badge active" style="background: rgba(16, 185, 129, 0.2); border-color: #10b981; color: #10b981;">応用・実機編 (7)</span>
+      </div>
+    </div>
+
+    <div class="chapter-grid" id="aiChapterGrid">
+
+      <!-- AI-00: ガイド -->
+      <div class="chapter-card" data-keywords="エッジAI ガイド 全体鳥瞰図 TFLM 2大柱 制御MLP 音響DSP ロードマップ テンソルアリーナ">
+        <div class="chapter-card-top">
+          <span class="chapter-tag" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4);">Edge AI / ガイド</span>
+          <h4 class="chapter-title">エッジAI特化編 ガイド & 全体鳥瞰図</h4>
+          <p class="chapter-desc">SEROVにおけるエッジAIの2大柱（TFLM障害物回避制御MLPと192次元音響DSP要約照合）、学習ロードマップ、ハードウェア制約の全体像を解説。</p>
+          <ul class="chapter-topics">
+            <li>制御MLPと音響DSP要約の明確な責務分離</li>
+            <li>TFLMテンソルアリーナとArm Helium(MVE)ベクトル最適化</li>
+            <li>初心者から実機実装まで繋ぐステップバイステップの学び方</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">edgeai/README.md</span>
+          <button onclick="openChapter('edgeai/README.md')" class="btn" style="border-color: #10b981; color: #10b981;">読む →</button>
+        </div>
+      </div>
+
+      <!-- AI-01 -->
+      <div class="chapter-card" data-keywords="なぜマイコン エッジAI クラウド限界 リアルタイム 通信途絶 プライバシー 低消費電力">
+        <div class="chapter-card-top">
+          <span class="chapter-tag" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4);">Edge AI 01 / 基礎</span>
+          <h4 class="chapter-title">第1章: なぜマイコンでAIなのか？</h4>
+          <p class="chapter-desc">クラウドや大型SBCに依存せず、なぜRA8P1単独でAIを動かす必要があるのか？通信途絶、1ms未満の自律反射、バッテリ駆動の物理的理由を直観的に解説。</p>
+          <ul class="chapter-topics">
+            <li>クラウドAI vs エッジAIの決定的なトレードオフ</li>
+            <li>瓦礫・暗闇での通信断絶と物理安全のためのミリ秒反射制御</li>
+            <li>マイコンの厳しいメモリ（SRAM）制約と計算リソースの現実</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">edgeai/01_why_edge_ai.md</span>
+          <button onclick="openChapter('edgeai/01_why_edge_ai.md')" class="btn" style="border-color: #10b981; color: #10b981;">読む →</button>
+        </div>
+      </div>
+
+      <!-- AI-02 -->
+      <div class="chapter-card" data-keywords="音の基礎 DSP入門 サンプリング定理 ナイキスト周波数 FFT 高速フーリエ変換 Hann窓 XVF3800 集音">
+        <div class="chapter-card-top">
+          <span class="chapter-tag" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4);">Edge AI 02 / 基礎</span>
+          <h4 class="chapter-title">第2章: 音の基礎とDSP入門</h4>
+          <p class="chapter-desc">空気の疎密波がマイクで電気信号になり、ADCとサンプリング定理を経てデジタル波形になる物理原理。時間領域から周波数領域（FFT）への変換の数学的基礎。</p>
+          <ul class="chapter-topics">
+            <li>16kHz / 16-bit PCMサンプリングとナイキスト定理の直感</li>
+            <li>短時間フーリエ変換（STFT）と窓関数（Hann窓）の役割</li>
+            <li>XVF3800専用DSPによる4chビームフォーミング・ノイズ抑制</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">edgeai/02_audio_dsp_basics.md</span>
+          <button onclick="openChapter('edgeai/02_audio_dsp_basics.md')" class="btn" style="border-color: #10b981; color: #10b981;">読む →</button>
+        </div>
+      </div>
+
+      <!-- AI-03 -->
+      <div class="chapter-card" data-keywords="Log-Mel 特徴量 人間の耳 聴覚特性 メル尺度 フィルタバンク 対数圧縮 32bin 100fps スペクトログラム">
+        <div class="chapter-card-top">
+          <span class="chapter-tag" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4);">Edge AI 03 / 基礎</span>
+          <h4 class="chapter-title">第3章: 人間の耳を模倣するLog-Mel特徴量</h4>
+          <p class="chapter-desc">音声認識・音響AIの世界的デファクト「Log-Melスペクトログラム」の仕組み。人間の耳の感度特性（メル尺度）に合わせ、32帯域×100fpsへ圧縮する変換アルゴリズム。</p>
+          <ul class="chapter-topics">
+            <li>「低音の違いには敏感、高音の違いには鈍感」な人間の耳の物理モデル</li>
+            <li>32ch三角フィルタバンクによる次元削減と対数振幅圧縮</li>
+            <li>ESP32-S3でのリアルタイムLog-Mel抽出パイプライン</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">edgeai/03_log_mel_spectrogram.md</span>
+          <button onclick="openChapter('edgeai/03_log_mel_spectrogram.md')" class="btn" style="border-color: #10b981; color: #10b981;">読む →</button>
+        </div>
+      </div>
+
+      <!-- AI-04 -->
+      <div class="chapter-card" data-keywords="int8 量子化 整数化 浮動小数点 float32 スケール ゼロ点 アフィン変換 メモリ削減 Helium 高速化">
+        <div class="chapter-card-top">
+          <span class="chapter-tag" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4);">Edge AI 04 / 中級</span>
+          <h4 class="chapter-title">第4章: なぜint8量子化なのか？</h4>
+          <p class="chapter-desc">32bit浮動小数点（float32）から8bit符号付き整数（int8）への量子化理論。メモリを75%削減し、マイコンのSIMD命令で4倍高速化するアフィン変換の数学。</p>
+          <ul class="chapter-topics">
+            <li>実数 q = S * (q - Z) のスケール S とゼロ点 Z</li>
+            <li>クリッピングと量子化誤差を最小限に抑えるキャリブレーション</li>
+            <li>Arm Cortex-M85 Helium(MVE)によるint8ベクトル並列積和演算</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">edgeai/04_int8_quantization.md</span>
+          <button onclick="openChapter('edgeai/04_int8_quantization.md')" class="btn" style="border-color: #10b981; color: #10b981;">読む →</button>
+        </div>
+      </div>
+
+      <!-- AI-05 -->
+      <div class="chapter-card" data-keywords="音のバトンパス ストリーム通信 I2S リングバッファ USB CDC 全二重 再組立 スレッドセーフ">
+        <div class="chapter-card-top">
+          <span class="chapter-tag" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4);">Edge AI 05 / 中級</span>
+          <h4 class="chapter-title">第5章: 音のバトンパス通信</h4>
+          <p class="chapter-desc">XVF3800からESP32-S3、そしてRA8P1 CPU0へと音響特徴量を淀みなく引き渡すストリーミング通信設計。800msリングバッファとUSB全二重プロトコル。</p>
+          <ul class="chapter-topics">
+            <li>I2S PCM入力 → ESP32-S3 Log-Mel算出 → 80フレーム蓄積</li>
+            <li>USB CDCによるバルク転送と Version 2U プロトコル（2048バイト推論パケット）</li>
+            <li>CPU0 task_acoustic_link によるアトミック再組立とスレッドセーフ</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">edgeai/05_stream_pipeline_and_comm.md</span>
+          <button onclick="openChapter('edgeai/05_stream_pipeline_and_comm.md')" class="btn" style="border-color: #10b981; color: #10b981;">読む →</button>
+        </div>
+      </div>
+
+      <!-- AI-06 -->
+      <div class="chapter-card" data-keywords="TFLM テンソルアリーナ メモリ管理 Helium 制御MLP 障害物回避 音響CNN 実機検証">
+        <div class="chapter-card-top">
+          <span class="chapter-tag" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4);">Edge AI 06 / 中級</span>
+          <h4 class="chapter-title">第6章: TFLMとCNN & 制御MLP</h4>
+          <p class="chapter-desc">動的メモリ確保（malloc）を一切排除したTFLM静的テンソルアリーナの仕組み。本番稼働する障害物回避制御MLPの実装と、音響CNN実機検証から得られた知見。</p>
+          <ul class="chapter-topics">
+            <li>96KiBアリーナで動作する完全int8障害物回避制御MLP（Policy Distillation）</li>
+            <li>128KiB音響CNNにおけるOp混入・Helium無効化・メモリ溢れの克服</li>
+            <li>優先度13・周期50ms・オプショナル起動によるタスク隔離設計（task_infer）</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">edgeai/06_tflm_runtime_and_model.md</span>
+          <button onclick="openChapter('edgeai/06_tflm_runtime_and_model.md')" class="btn" style="border-color: #10b981; color: #10b981;">読む →</button>
+        </div>
+      </div>
+
+      <!-- AI-07 -->
+      <div class="chapter-card" data-keywords="現場学習 Few-Shot プロトタイプ照合 192次元 DSP要約 3-of-5外れ値選別 実機ノイズ 走行音">
+        <div class="chapter-card-top">
+          <span class="chapter-tag" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4);">Edge AI 07 / 応用・実機</span>
+          <h4 class="chapter-title">第7章: 現場学習とプロトタイプ照合</h4>
+          <p class="chapter-desc">未知の目的音を現場で5回鳴らして即座に登録するFew-Shot学習。走行モータノイズ下でNN埋め込みが過適合した限界と、物理制約を持つ192次元DSP要約照合の圧倒的優位性。</p>
+          <ul class="chapter-topics">
+            <li>3-of-5 外れ値除去フィルタによる高品質見本ベクトル生成</li>
+            <li>Code MRAMへのプロトタイプ永続化と瞬時リセット</li>
+            <li>実機走行検証で証明された192D DSP要約の耐雑音性能と本番採用理由</li>
+          </ul>
+        </div>
+        <div class="chapter-footer">
+          <span class="file-ref">edgeai/07_few_shot_learning_and_prototype.md</span>
+          <button onclick="openChapter('edgeai/07_few_shot_learning_and_prototype.md')" class="btn" style="border-color: #10b981; color: #10b981;">読む →</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 用語集セクション -->
+    <div id="glossary" class="glossary-section">
+      <div class="section-title" style="padding:0;">
+        <h3>重要技術用語集（Glossary）</h3>
+      </div>
+      <div class="glossary-grid">
+        <div class="glossary-item">
+          <div class="glossary-term">DoA (Direction of Arrival)</div>
+          <div class="glossary-def">音源の到来方向推定。本システムでは4chマイクアレイの位相差から水平方位角（0〜359°）を推定し車体右正・左負へ較正。</div>
+        </div>
+        <div class="glossary-item">
+          <div class="glossary-term">VAD (Voice Activity Detection)</div>
+          <div class="glossary-def">音声区間検出。背景雑音の中から目的の音声・有意音が存在する区間を判定する技術。</div>
+        </div>
+        <div class="glossary-item">
+          <div class="glossary-term">μT-Kernel 3.0</div>
+          <div class="glossary-def">トロンフォーラムが策定したIoTエッジ向け高信頼リアルタイムOS標準仕様。本機ではRA8P1両コアで稼働。</div>
+        </div>
+        <div class="glossary-item">
+          <div class="glossary-term">ロッカーボギー機構</div>
+          <div class="glossary-def">バネを使わずにリンク機構の幾何学的連動で6輪を常時接地させ、車輪径を超える段差を踏破するサスペンション。</div>
+        </div>
+        <div class="glossary-item">
+          <div class="glossary-term">Log-Mel 特徴量</div>
+          <div class="glossary-def">音響波形をメル尺度三角フィルタバンクで圧縮し対数を取ったスペクトログラム。本機は32bin/100fps/int8仕様。</div>
+        </div>
+        <div class="glossary-item">
+          <div class="glossary-term">TFLM 制御MLP</div>
+          <div class="glossary-def">クリアランス重視エキスパート方策を蒸留した3層完全int8 MLP。ToF・IMU・DoAから操舵角と速度を1ms未満で推論。</div>
+        </div>
+        <div class="glossary-item">
+          <div class="glossary-term">192次元 DSP要約</div>
+          <div class="glossary-def">80フレームを前後2スロットに分け各32帯域の平均・最大・標準偏差を算出した統計特徴。実機走行ノイズ下で圧倒的な高精度を誇る。</div>
+        </div>
+        <div class="glossary-item">
+          <div class="glossary-term">bearing-only 音源位置推定</div>
+          <div class="glossary-def">複数地点のDoA方位線とオドメトリ姿勢から最小二乗交差測量により音源の世界座標(x,y)と直線距離を幾何学推定する技術。</div>
+        </div>
+        <div class="glossary-item">
+          <div class="glossary-term">多層防御安全アーキテクチャ</div>
+          <div class="glossary-def">Hardware Veto(即時停止)、ルールベースエスケープ、回避側ラッチ、制御MLP、スルーレート制限の5層で物理安全を保証する構造。</div>
+        </div>
+        <div class="glossary-item">
+          <div class="glossary-term">32-bit IPC FIFO</div>
+          <div class="glossary-def">RA8P1内蔵のハードウェア4段FIFO。上位8bitメッセージID＋下位24bitペイロードの固定語でコア間通信を実施。</div>
+        </div>
+        <div class="glossary-item">
+          <div class="glossary-term">アトミックコミット</div>
+          <div class="glossary-def">6出力（4サーボ＋左右モータ）の指示値をSEQUENCEマーカー受信時に一括確定し、同一ループ内で同時適用する仕組み。</div>
+        </div>
+        <div class="glossary-item">
+          <div class="glossary-term">702 counts/rev</div>
+          <div class="glossary-def">JGA25-370モータエンコーダの実機手押し実測統計から確定した1回転あたりのパルス積算値（カタログ値900を改定）。</div>
+        </div>
+      </div>
+    </div>
+
+  </div> <!-- /#portalView -->
+
+
+  <!-- ========================================================
+       統合リーダー画面 (#readerView)
+       ======================================================== -->
+  <div id="readerView">
+
+    <!-- サブヘッダー -->
+    <div class="reader-header">
+      <div class="reader-header-left">
+        <button onclick="showPortal()" class="btn">← ポータルに戻る</button>
+        <span id="readerTitle" class="reader-header-title">ドキュメントを読み込み中...</span>
+      </div>
+      <div class="reader-header-right">
+        <button id="prevChapterBtn" onclick="navigateChapter(-1)" class="btn" title="前の章へ">◀ 前の章</button>
+        <button id="nextChapterBtn" onclick="navigateChapter(1)" class="btn" title="次の章へ">次の章 ▶</button>
+        <button onclick="window.scrollTo({top: 0, behavior: 'smooth'})" class="btn" title="ページ先頭へ">▲ Top</button>
+      </div>
+    </div>
+
+    <div class="reader-layout">
+
+      <!-- 左サイドバー: 全章メニュー -->
+      <aside class="reader-sidebar">
+        <div class="sidebar-section-title">メイン教科書</div>
+        <ul class="sidebar-list" id="sidebarMainList">
+          <!-- JSで自動生成 -->
         </ul>
-      </div>
-      <div class="chapter-footer">
-        <span class="file-ref">07_sensor_and_autonomy.md</span>
-        <a href="07_sensor_and_autonomy.md" class="btn">読む →</a>
-      </div>
-    </div>
 
-    <!-- 第8章 -->
-    <div class="chapter-card" data-keywords="ソフトウェア検証 rover-monitor control-sim ASan UBSan acoustic-trainer ホストテスト">
-      <div class="chapter-card-top">
-        <span class="chapter-tag">Chapter 08 / 検証環境</span>
-        <h4 class="chapter-title">ソフトウェアエコシステムとシミュレーション</h4>
-        <p class="chapter-desc">FastAPIリアルタイムWebモニタ、CコードをネイティブClangで直ビルドするcontrol-sim、ASan/UBSanサニタイザ検証、AI学習環境の全貌。</p>
-        <ul class="chapter-topics">
-          <li>rover-monitor: オドメトリ・DoA方位・局所地図の描画</li>
-          <li>control-sim: Cコード再実装を排したネイティブ回帰テスト</li>
-          <li>acoustic-trainer: 演算順序まで揃えたビット完全一致テスト</li>
+        <div class="sidebar-section-title" style="color: #10b981;">🎧 エッジAI特化編</div>
+        <ul class="sidebar-list" id="sidebarAiList">
+          <!-- JSで自動生成 -->
         </ul>
-      </div>
-      <div class="chapter-footer">
-        <span class="file-ref">08_software_ecosystem_and_sim.md</span>
-        <a href="08_software_ecosystem_and_sim.md" class="btn">読む →</a>
-      </div>
-    </div>
 
-    <!-- 第9章 -->
-    <div class="chapter-card" data-keywords="開発ワークフロー ビルド e2studio VS Code macOS Equinox FSP 生成サイクル PlatformIO">
-      <div class="chapter-card-top">
-        <span class="chapter-tag">Chapter 09 / 開発・ビルド</span>
-        <h4 class="chapter-title">開発ワークフロー・ビルド・FSP生成手順</h4>
-        <p class="chapter-desc">macOSでのヘッドレスSIGABRTクラッシュを防ぐInvoke-RaBuild.shの仕組み、FSP設定変更の黄金7ステップ、ESP32のROMモード移行。</p>
-        <ul class="chapter-topics">
-          <li>macOSでe2studioバイナリ直叩きがSIGABRTする理由</li>
-          <li>Invoke-RaBuild.sh によるEquinoxランチャ直接起動</li>
-          <li>FSP生成とMulticore Launch Groupによるペア書込み</li>
+        <div class="sidebar-section-title">リファレンス</div>
+        <ul class="sidebar-list" id="sidebarMetaList">
+          <!-- JSで自動生成 -->
         </ul>
-      </div>
-      <div class="chapter-footer">
-        <span class="file-ref">09_development_workflow_and_build.md</span>
-        <a href="09_development_workflow_and_build.md" class="btn">読む →</a>
-      </div>
-    </div>
+      </aside>
 
-    <!-- 第10章 -->
-    <div class="chapter-card" data-keywords="実機校正 キャリブレーション 702 counts/rev トレッド260mm Live Watch デバッグ トラブルシューティング">
-      <div class="chapter-card-top">
-        <span class="chapter-tag">Chapter 10 / 実機テスト</span>
-        <h4 class="chapter-title">実機キャリブレーション・テスト・トラブルシューティング</h4>
-        <p class="chapter-desc">手押し2000mm実測から導出した702 counts/rev、Live Watch必携監視変数、SW4スイッチ設定、モータ・I2C障害の即効処方箋。</p>
-        <ul class="chapter-topics">
-          <li>実測統計によるエンコーダ校正（702 counts/rev）</li>
-          <li>CPU0/CPU1 Live Watch 必須デバッグシンボル一覧</li>
-          <li>SW4・電源・通信リンク障害のトラブルシューティング集</li>
+      <!-- 中央: 本文 -->
+      <main class="reader-content-wrap">
+        <article class="markdown-body" id="markdownContainer">
+          <div class="loading-spinner">ドキュメントを読み込んでいます...</div>
+        </article>
+
+        <!-- 章下部ナビゲーション -->
+        <div class="reader-chapter-nav">
+          <button id="bottomPrevBtn" onclick="navigateChapter(-1)" class="btn">◀ 前の章へ</button>
+          <button onclick="showPortal()" class="btn">目次一覧に戻る</button>
+          <button id="bottomNextBtn" onclick="navigateChapter(1)" class="btn btn-primary">次の章へ ▶</button>
+        </div>
+      </main>
+
+      <!-- 右サイドバー: 見出しTOC -->
+      <aside class="reader-toc">
+        <div class="toc-title">この章の目次</div>
+        <ul class="toc-list" id="tocList">
+          <!-- JSで自動抽出 -->
         </ul>
-      </div>
-      <div class="chapter-footer">
-        <span class="file-ref">10_testing_tuning_and_troubleshooting.md</span>
-        <a href="10_testing_tuning_and_troubleshooting.md" class="btn">読む →</a>
-      </div>
-    </div>
+      </aside>
 
-  </div>
+    </div>
+  </div> <!-- /#readerView -->
 
-  <!-- 用語集セクション -->
-  <div id="glossary" class="glossary-section">
-    <div class="section-title" style="padding:0;">
-      <h3>重要技術用語集（Glossary）</h3>
-    </div>
-    <div class="glossary-grid">
-      <div class="glossary-item">
-        <div class="glossary-term">DoA (Direction of Arrival)</div>
-        <div class="glossary-def">音源の到来方向推定。本システムでは4chマイクアレイの位相差から水平方位角（0〜359°）を推定。</div>
-      </div>
-      <div class="glossary-item">
-        <div class="glossary-term">VAD (Voice Activity Detection)</div>
-        <div class="glossary-def">音声区間検出。背景雑音の中から目的の音声・有意音が存在する区間を判定する技術。</div>
-      </div>
-      <div class="glossary-item">
-        <div class="glossary-term">μT-Kernel 3.0</div>
-        <div class="glossary-def">トロンフォーラムが策定したIoTエッジ向け高信頼リアルタイムOS標準仕様。本機ではRA8P1両コアで稼働。</div>
-      </div>
-      <div class="glossary-item">
-        <div class="glossary-term">ロッカーボギー機構</div>
-        <div class="glossary-def">バネを使わずにリンク機構の幾何学的連動で6輪を常時接地させ、車輪径を超える段差を踏破するサスペンション。</div>
-      </div>
-      <div class="glossary-item">
-        <div class="glossary-term">Log-Mel 特徴量</div>
-        <div class="glossary-def">音響波形をメル尺度三角フィルタバンクで圧縮し対数を取ったスペクトログラム。本機は32bin/100fps/int8仕様。</div>
-      </div>
-      <div class="glossary-item">
-        <div class="glossary-term">TFLM</div>
-        <div class="glossary-def">TensorFlow Lite for Microcontrollers。動的メモリ割り当てを行わず、固定アリーナで動く組込み用深層学習ランタイム。</div>
-      </div>
-      <div class="glossary-item">
-        <div class="glossary-term">32-bit IPC FIFO</div>
-        <div class="glossary-def">RA8P1内蔵のハードウェア4段FIFO。上位8bitメッセージID＋下位24bitペイロードの固定語でコア間通信を実施。</div>
-      </div>
-      <div class="glossary-item">
-        <div class="glossary-term">アトミックコミット</div>
-        <div class="glossary-def">6出力（4サーボ＋左右モータ）の指示値をSEQUENCEマーカー受信時に一括確定し、同一ループ内で同時適用する仕組み。</div>
-      </div>
-      <div class="glossary-item">
-        <div class="glossary-term">ToF (Time of Flight)</div>
-        <div class="glossary-def">光の飛行時間から距離を測るセンサ。本機はVL53L1Xを前方3眼（左・中央・右）に配置し最大4m測距。</div>
-      </div>
-      <div class="glossary-item">
-        <div class="glossary-term">702 counts/rev</div>
-        <div class="glossary-def">JGA25-370モータエンコーダの実機手押し実測統計から確定した1回転あたりのパルス積算値（カタログ値900を改定）。</div>
-      </div>
-      <div class="glossary-item">
-        <div class="glossary-term">control-sim</div>
-        <div class="glossary-def">実ファームウェアのCコードをホストClangで直接ビルドし、ASan/UBSan下で検証するネイティブシミュレータ。</div>
-      </div>
-      <div class="glossary-item">
-        <div class="glossary-term">Invoke-RaBuild.sh</div>
-        <div class="glossary-def">macOS環境でのe² studioヘッドレスビルドクラッシュ（SIGABRT）を回避し、Equinoxランチャを直起動するスクリプト。</div>
-      </div>
-    </div>
-  </div>
 
   <!-- フッター -->
   <footer>
@@ -710,7 +1284,349 @@
   </footer>
 
   <script>
+    // ==========================================
+    // 全章マニフェスト定義
+    // ==========================================
+    const CHAPTERS = [
+      // メイン教科書 (10章)
+      { id: '01', path: '01_introduction_and_overview.md', title: '第1章: プロジェクト概要とミッション', group: 'main' },
+      { id: '02', path: '02_hardware_and_mechanics.md', title: '第2章: ハードウェア機構とメカニカル設計', group: 'main' },
+      { id: '03', path: '03_system_architecture.md', title: '第3章: 4プロセッサ協調アーキテクチャ', group: 'main' },
+      { id: '04', path: '04_rtos_and_multicore.md', title: '第4章: μT-Kernel 3.0とデュアルコア制御', group: 'main' },
+      { id: '05', path: '05_interprocessor_communication.md', title: '第5章: プロセッサ間通信プロトコル', group: 'main' },
+      { id: '06', path: '06_acoustic_dsp_and_edge_ai.md', title: '第6章: 音響信号処理・エッジAI・ナビ', group: 'main' },
+      { id: '07', path: '07_sensor_and_autonomy.md', title: '第7章: センサ統合・TFLM制御MLP・多層防御', group: 'main' },
+      { id: '08', path: '08_software_ecosystem_and_sim.md', title: '第8章: ソフトウェアエコシステム・検証', group: 'main' },
+      { id: '09', path: '09_development_workflow_and_build.md', title: '第9章: 開発ワークフロー・ビルド手順', group: 'main' },
+      { id: '10', path: '10_testing_tuning_and_troubleshooting.md', title: '第10章: 実機校正・テスト・障害対策', group: 'main' },
+
+      // エッジAI特化編 (7章)
+      { id: 'ai-0', path: 'edgeai/README.md', title: 'エッジAI編 ガイド & 全体鳥瞰図', group: 'ai' },
+      { id: 'ai-1', path: 'edgeai/01_why_edge_ai.md', title: 'AI第1章: なぜマイコンでAIなのか？', group: 'ai' },
+      { id: 'ai-2', path: 'edgeai/02_audio_dsp_basics.md', title: 'AI第2章: 音の基礎とDSP入門', group: 'ai' },
+      { id: 'ai-3', path: 'edgeai/03_log_mel_spectrogram.md', title: 'AI第3章: Log-Mel特徴量の仕組み', group: 'ai' },
+      { id: 'ai-4', path: 'edgeai/04_int8_quantization.md', title: 'AI第4章: なぜint8量子化なのか？', group: 'ai' },
+      { id: 'ai-5', path: 'edgeai/05_stream_pipeline_and_comm.md', title: 'AI第5章: 音のバトンパス通信', group: 'ai' },
+      { id: 'ai-6', path: 'edgeai/06_tflm_runtime_and_model.md', title: 'AI第6章: TFLMとCNN & 制御MLP', group: 'ai' },
+      { id: 'ai-7', path: 'edgeai/07_few_shot_learning_and_prototype.md', title: 'AI第7章: 現場学習とプロトタイプ照合', group: 'ai' },
+
+      // リファレンス
+      { id: 'ref-readme', path: 'README.md', title: '教科書全体ガイド (README)', group: 'meta' }
+    ];
+
+    let currentChapterIndex = 0;
+
+    // ==========================================
+    // Mermaid 初期化設定
+    // ==========================================
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: document.body.getAttribute('data-theme') === 'light' ? 'default' : 'dark',
+      securityLevel: 'loose',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    });
+
+    // ==========================================
+    // サイドバーメニュー初期化
+    // ==========================================
+    function initSidebar() {
+      const mainList = document.getElementById('sidebarMainList');
+      const aiList = document.getElementById('sidebarAiList');
+      const metaList = document.getElementById('sidebarMetaList');
+
+      mainList.innerHTML = '';
+      aiList.innerHTML = '';
+      metaList.innerHTML = '';
+
+      CHAPTERS.forEach((ch, idx) => {
+        const li = document.createElement('li');
+        li.className = 'sidebar-item';
+        li.dataset.index = idx;
+        li.textContent = ch.title;
+        li.onclick = () => openChapterByIndex(idx);
+
+        if (ch.group === 'main') mainList.appendChild(li);
+        else if (ch.group === 'ai') aiList.appendChild(li);
+        else metaList.appendChild(li);
+      });
+    }
+
+    // ==========================================
+    // 画面切り替え: ポータル
+    // ==========================================
+    function showPortal() {
+      document.getElementById('portalView').style.display = 'block';
+      document.getElementById('readerView').style.display = 'none';
+      history.pushState(null, '', window.location.pathname);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // ==========================================
+    // 画面切り替え: リーダー
+    // ==========================================
+    function showReader() {
+      document.getElementById('portalView').style.display = 'none';
+      document.getElementById('readerView').style.display = 'block';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    // ==========================================
+    // 章を開く (パス指定)
+    // ==========================================
+    function openChapter(path) {
+      const index = CHAPTERS.findIndex(c => c.path === path || c.path.endsWith(path));
+      if (index !== -1) {
+        openChapterByIndex(index);
+      } else {
+        fetchAndRenderMarkdown(path, path);
+        showReader();
+      }
+    }
+
+    // ==========================================
+    // 章を開く (インデックス指定)
+    // ==========================================
+    function openChapterByIndex(index) {
+      if (index < 0 || index >= CHAPTERS.length) return;
+      currentChapterIndex = index;
+      const chapter = CHAPTERS[index];
+
+      // サイドバーのハイライト
+      document.querySelectorAll('.sidebar-item').forEach(item => {
+        item.classList.toggle('active', Number(item.dataset.index) === index);
+      });
+
+      // ヘッダータイトル更新
+      document.getElementById('readerTitle').textContent = chapter.title;
+
+      // 前後ボタンの有効/無効
+      const prevBtn = document.getElementById('prevChapterBtn');
+      const nextBtn = document.getElementById('nextChapterBtn');
+      const bPrevBtn = document.getElementById('bottomPrevBtn');
+      const bNextBtn = document.getElementById('bottomNextBtn');
+
+      prevBtn.disabled = (index === 0);
+      bPrevBtn.disabled = (index === 0);
+      nextBtn.disabled = (index === CHAPTERS.length - 1);
+      bNextBtn.disabled = (index === CHAPTERS.length - 1);
+
+      showReader();
+      fetchAndRenderMarkdown(chapter.path, chapter.title);
+      history.pushState(null, '', `#chapter=${encodeURIComponent(chapter.path)}`);
+    }
+
+    // ==========================================
+    // 前の章 / 次の章
+    // ==========================================
+    function navigateChapter(delta) {
+      openChapterByIndex(currentChapterIndex + delta);
+    }
+
+    // ==========================================
+    // Markdownの取得とレンダリング
+    // ==========================================
+    async function fetchAndRenderMarkdown(filePath, displayTitle) {
+      const container = document.getElementById('markdownContainer');
+      container.innerHTML = '<div class="loading-spinner">📖 ' + displayTitle + ' を読み込んでいます...</div>';
+      document.getElementById('tocList').innerHTML = '';
+
+      try {
+        const response = await fetch(filePath);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        let markdownText = await response.text();
+
+        // 1. GitHub Alert 構文の変換 (>[!NOTE] 等)
+        markdownText = transformGitHubAlerts(markdownText);
+
+        // 2. Marked.js によるパース
+        const renderer = new marked.Renderer();
+
+        // コードブロック処理 (Mermaid or Highlight.js)
+        renderer.code = function(code, lang) {
+          if (lang === 'mermaid') {
+            return `<div class="mermaid-container"><pre class="mermaid">${escapeHtml(code)}</pre></div>`;
+          }
+          let highlighted = code;
+          if (lang && hljs.getLanguage(lang)) {
+            try {
+              highlighted = hljs.highlight(code, { language: lang, ignoreIllegals: true }).value;
+            } catch (e) {
+              highlighted = escapeHtml(code);
+            }
+          } else {
+            highlighted = escapeHtml(code);
+          }
+          return `<pre><code class="hljs ${lang || ''}">${highlighted}</code></pre>`;
+        };
+
+        // 内部リンク処理 (.md リンクをリーダーで開く)
+        renderer.link = function(href, title, text) {
+          if (href && (href.endsWith('.md') || href.includes('.md#'))) {
+            const parts = href.split('#');
+            const targetPath = parts[0];
+            return `<a href="javascript:void(0)" onclick="handleInternalMdLink('${targetPath}', '${parts[1] || ''}')" title="${title || ''}">${text}</a>`;
+          }
+          return `<a href="${href}" ${href && href.startsWith('http') ? 'target="_blank" rel="noopener"' : ''} title="${title || ''}">${text}</a>`;
+        };
+
+        marked.setOptions({
+          renderer: renderer,
+          gfm: true,
+          breaks: false
+        });
+
+        const rawHtml = marked.parse(markdownText);
+        container.innerHTML = rawHtml;
+
+        // 3. 見出しIDの付与とTOCの生成
+        generateTableOfContents();
+
+        // 4. Mermaidダイアグラムの描画
+        await renderMermaidDiagrams();
+
+        // ページ先頭へスクロール
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+
+      } catch (err) {
+        console.error('Markdown fetch error:', err);
+        container.innerHTML = `
+          <div class="error-box">
+            <h4>⚠️ ドキュメントの読み込みに失敗しました</h4>
+            <p>ファイルパス: <code>${escapeHtml(filePath)}</code></p>
+            <p>理由: ${escapeHtml(err.message)}</p>
+            <p style="margin-top: 1rem;">
+              <strong>ローカルファイル（file://）で直接開いている場合：</strong><br>
+              ブラウザのセキュリティ制限（CORS）により、直接ローカルの.mdファイルをfetchできません。<br>
+              以下のいずれかの方法でHTTPサーバーを起動してアクセスしてください。
+            </p>
+            <div class="error-code">
+              # Pythonがインストールされている場合 (リポジトリ直下で実行)<br>
+              python3 -m http.server 8000<br><br>
+              # ブラウザで以下を開く<br>
+              http://localhost:8000/docs/textbook/index.html
+            </div>
+            <p style="margin-top: 1rem;">
+              または、VS Codeの拡張機能 <strong>「Live Server」</strong> で <code>docs/textbook/index.html</code> を右クリックして開いてください。
+            </p>
+          </div>
+        `;
+      }
+    }
+
+    // ==========================================
+    // 内部Markdownリンクのハンドリング
+    // ==========================================
+    function handleInternalMdLink(targetPath, hash) {
+      // 相対パスの正規化
+      let resolvedPath = targetPath;
+      const currentPath = CHAPTERS[currentChapterIndex]?.path || '';
+
+      if (currentPath.startsWith('edgeai/') && !targetPath.startsWith('edgeai/')) {
+        if (targetPath.startsWith('../')) {
+          resolvedPath = targetPath.replace('../', '');
+        } else {
+          resolvedPath = 'edgeai/' + targetPath;
+        }
+      }
+
+      openChapter(resolvedPath);
+
+      if (hash) {
+        setTimeout(() => {
+          const el = document.getElementById(hash);
+          if (el) el.scrollIntoView({ behavior: 'smooth' });
+        }, 300);
+      }
+    }
+
+    // ==========================================
+    // GitHub Alerts 構文変換
+    // ==========================================
+    function transformGitHubAlerts(text) {
+      const alertMap = {
+        'NOTE': 'alert-note',
+        'TIP': 'alert-tip',
+        'IMPORTANT': 'alert-important',
+        'WARNING': 'alert-warning',
+        'CAUTION': 'alert-caution'
+      };
+
+      return text.replace(/^>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(.*)$/gim, (match, type, content) => {
+        const cls = alertMap[type.toUpperCase()] || 'alert-note';
+        return `> <strong class="${cls}">[${type}]</strong> ${content}`;
+      });
+    }
+
+    // ==========================================
+    // TOC（見出し目次）自動生成
+    // ==========================================
+    function generateTableOfContents() {
+      const container = document.getElementById('markdownContainer');
+      const tocList = document.getElementById('tocList');
+      tocList.innerHTML = '';
+
+      const headings = container.querySelectorAll('h2, h3');
+      if (headings.length === 0) {
+        tocList.innerHTML = '<li class="toc-item" style="color:var(--text-muted); font-size:0.75rem;">見出しはありません</li>';
+        return;
+      }
+
+      headings.forEach((h, i) => {
+        if (!h.id) {
+          h.id = 'heading-' + i;
+        }
+        const li = document.createElement('li');
+        li.className = 'toc-item';
+
+        const a = document.createElement('a');
+        a.className = 'toc-link ' + (h.tagName === 'H3' ? 'level-3' : 'level-2');
+        a.href = '#' + h.id;
+        a.textContent = h.textContent.replace(/^#+\s*/, '');
+        a.onclick = (e) => {
+          e.preventDefault();
+          h.scrollIntoView({ behavior: 'smooth' });
+        };
+
+        li.appendChild(a);
+        tocList.appendChild(li);
+      });
+    }
+
+    // ==========================================
+    // Mermaid 描画実行
+    // ==========================================
+    async function renderMermaidDiagrams() {
+      const diagrams = document.querySelectorAll('.mermaid');
+      if (diagrams.length > 0) {
+        try {
+          await mermaid.run({ nodes: diagrams });
+        } catch (e) {
+          console.warn('Mermaid rendering warning:', e);
+        }
+      }
+    }
+
+    // ==========================================
+    // ユーティリティ: HTMLエスケープ
+    // ==========================================
+    function escapeHtml(str) {
+      return str.replace(/[&<>"']/g, function(m) {
+        switch (m) {
+          case '&': return '&amp;';
+          case '<': return '&lt;';
+          case '>': return '&gt;';
+          case '"': return '&quot;';
+          case "'": return '&#039;';
+          default: return m;
+        }
+      });
+    }
+
+    // ==========================================
     // 検索フィルタ処理
+    // ==========================================
     const searchInput = document.getElementById('searchInput');
     const cards = document.querySelectorAll('.chapter-card');
 
@@ -727,11 +1643,56 @@
       });
     });
 
+    // ==========================================
     // テーマ切り替え
+    // ==========================================
     const themeBtn = document.getElementById('themeToggle');
+    const hljsDark = document.getElementById('hljsDarkTheme');
+    const hljsLight = document.getElementById('hljsLightTheme');
+
     themeBtn.addEventListener('click', () => {
       const isLight = document.body.getAttribute('data-theme') === 'light';
-      document.body.setAttribute('data-theme', isLight ? 'dark' : 'light');
+      const newTheme = isLight ? 'dark' : 'light';
+      document.body.setAttribute('data-theme', newTheme);
+
+      if (newTheme === 'light') {
+        hljsDark.disabled = true;
+        hljsLight.disabled = false;
+        mermaid.initialize({ theme: 'default' });
+      } else {
+        hljsDark.disabled = false;
+        hljsLight.disabled = true;
+        mermaid.initialize({ theme: 'dark' });
+      }
+
+      // 閲覧中なら再描画
+      if (document.getElementById('readerView').style.display === 'block') {
+        renderMermaidDiagrams();
+      }
+    });
+
+    // ==========================================
+    // URLハッシュ初期処理
+    // ==========================================
+    window.addEventListener('load', () => {
+      initSidebar();
+
+      const hash = window.location.hash;
+      if (hash && hash.startsWith('#chapter=')) {
+        const targetPath = decodeURIComponent(hash.replace('#chapter=', ''));
+        openChapter(targetPath);
+      }
+    });
+
+    // ブラウザの戻る・進む
+    window.addEventListener('popstate', () => {
+      const hash = window.location.hash;
+      if (hash && hash.startsWith('#chapter=')) {
+        const targetPath = decodeURIComponent(hash.replace('#chapter=', ''));
+        openChapter(targetPath);
+      } else {
+        showPortal();
+      }
     });
   </script>
 </body>

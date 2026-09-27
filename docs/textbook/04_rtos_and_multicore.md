@@ -1,6 +1,6 @@
 # 第4章: μT-Kernel 3.0とデュアルコアリアルタイム制御
 
-本章では、SEROVの制御中枢である「**μT-Kernel 3.0**」の基本概念、RA8P1の非対称デュアルコア（AMP: Asymmetric Multiprocessing）構成、メモリマップ、タスク優先度・周期設計、および周期ハンドラを用いた実時間化技術について解説します。
+本章では、SEROVの制御中枢である「**μT-Kernel 3.0**」の基本概念、RA8P1の非対称デュアルコア（AMP: Asymmetric Multiprocessing）構成、メモリマップ、タスク優先度・周期設計、非致命AIタスクの隔離アーキテクチャ、および周期ハンドラを用いた実時間化技術について解説します。
 
 ---
 
@@ -20,16 +20,16 @@ flowchart TD
     INT["割込みハンドラ (ISR)"] -->|"tk_set_flg() 等"| SYNC
     CYC["周期ハンドラ (CYC)"] -->|"tk_set_flg() 等"| SYNC
     SYNC --> SCHED
-    SCHED --> TSK1["高優先度タスク (優先度4)"]
-    SCHED --> TSK2["中優先度タスク (優先度8)"]
-    SCHED --> TSK3["低優先度タスク (優先度12)"]
+    SCHED --> TSK1["高優先度タスク (優先度4: 駆動)"]
+    SCHED --> TSK2["中優先度タスク (優先度6: 指令 / 8: 音響)"]
+    SCHED --> TSK3["低優先度タスク (優先度10: 思考 / 11: 推論)"]
 ```
 
 ### 主要なカーネルオブジェクトと本プロジェクトでの用途
 1. **タスク（Task）**: 独立した実行コンテキスト（スタックとプログラムカウンタ）。本機では全タスクを静的定義し、起動時に `tk_cre_tsk()` で生成。
-2. **イベントフラグ（Event Flag）**: 複数ビットの論理和（OR）や論理積（AND）でタスクを起床させる同期プリミティブ。周期通知や障害発生の即時通知に使用。
-3. **ミューテックス（Mutex）**: 共有リソース（最新センサ値、音響スナップショット）の排他制御。**優先度逆転現象（Priority Inversion）を防止するため、優先度継承プロトコル（`TA_INHERIT`）** を適用。
-4. **周期ハンドラ（Cyclic Handler）**: タイマ割り込みコンテキストで厳密に定周期実行されるハンドラ。タスクの起床トリガとして活用。
+2. **イベントフラグ（Event Flag）**: 複数ビットの論理和（OR）や論理積（AND）でタスクを起床させる同期プリミティブ。周期通知、障害発生通知、および音響特徴量完成通知（`CPU0_INFER_EVENT_FEATURE_READY`）に使用。
+3. **ミューテックス（Mutex）**: 共有リソース（最新センサ値、音響スナップショット、推論結果）の排他制御。**優先度逆転現象（Priority Inversion）を防止するため、優先度継承プロトコル（`TA_INHERIT`）** を適用。
+4. **周期ハンドラ（Cyclic Handler）**: タイマ割り込みコンテキストで厳密に定周期実行されるハンドラ。CPU1アクチュエータタスクの1ms起床トリガとして活用。
 
 ---
 
@@ -43,7 +43,7 @@ RA8P1マイコンは、アーキテクチャの異なる2つのArmプロセッ�
                |                                           |
                |  [CPU0] Cortex-M85 (Helium MVE搭載)       |
                |         動作クロック: 1 GHz (最大)        |
-               |         主用途: 高速演算、AI、通信        |
+               |         主用途: 高速演算、エッジAI、通信  |
                |                                           |
                |  [CPU1] Cortex-M33 (TrustZone対応)        |
                |         動作クロック: 250 MHz             |
@@ -73,10 +73,12 @@ sequenceDiagram
     C1_HAL->>C1_MAIN: CPU1 μT-Kernel初期タスク起動
 
     par CPU0 タスク初期化
-        C0_MAIN->>C0_MAIN: task_registry_init()（CPU0全タスク生成・開始）
+        Note over C0_MAIN: 非致命の推論タスクを起動
+        C0_MAIN->>C0_MAIN: task_infer_start_optional()
+        C0_MAIN->>C0_MAIN: task_registry_init()（CPU0安全・走行タスク群生成・開始）
         C0_MAIN->>C0_MAIN: tk_slp_tsk(TMO_FEVR) で初期タスク永久休止
     and CPU1 タスク初期化
-        C1_MAIN->>C1_MAIN: task_registry_init()（CPU1全タスク生成・開始）
+        C1_MAIN->>C1_MAIN: task_registry_init()（CPU1駆動タスク群生成・開始）
         C1_MAIN->>C1_MAIN: tk_slp_tsk(TMO_FEVR) で初期タスク永久休止
     end
 ```
@@ -92,7 +94,8 @@ RA8P1の内蔵SRAM領域（計1872 KiB）は、CPU0とCPU1が互いのメモリ�
             │ CPU0 専有領域 (936 KiB)                 │
             │ ・CPU0 μT-Kernel システム領域           │
             │ ・CPU0 タスクスタック群                 │
-            │ ・TFLM 静的テンソルアリーナ (96 KiB)    │
+            │ ・TFLM 静的テンソルアリーナ             │
+            │   (制御MLP: 96 KiB / 音響CNN: 128 KiB)  │
             │ ・USB HCDC 受信バッファ                 │
 0x220E_9FFF ├─────────────────────────────────────────┤
 0x220E_A000 │ CPU1 専有領域 (936 KiB)                 │
@@ -114,7 +117,7 @@ RA8P1の内蔵SRAM領域（計1872 KiB）は、CPU0とCPU1が互いのメモリ�
 
 ```text
 【CPU0 プロジェクトのInclude順】
-  1. common/mtkernel/          <-- config.h (CPU0/CPU1共通設定)
+  1. common/mtkernel/          <-- config.h (CPU0/CPU1共通設定: 1ms tick)
   2. common/mtk3_bsp2/config/  <-- BSP標準
   3. common/mtk3_bsp2/include/ <-- BSP標準
 
@@ -133,20 +136,46 @@ RA8P1の内蔵SRAM領域（計1872 KiB）は、CPU0とCPU1が互いのメモリ�
 
 ---
 
-## 4.5 CPU0 タスク設計（思考・統合）
+## 4.5 CPU0 タスク設計（思考・統合・推論）
 
-CPU0は、USB音響取得、I2Cセンサ統合、走行思考、およびIPC送信を担います。
+CPU0は、USB音響取得、I2Cセンサ統合、自律走行思考、および音響推論・IPC送信を担います。
 
 | タスク名 | エントリ関数 | 優先度 | スタック | 実行形態 | 主な責務 |
 |---|---|:---:|:---:|---|---|
-| `task_command` | `task_command_entry` | **6** | 1024 B | 50 ms 周期 | 思考結果の期限監視（500ms）、6出力の一括IPC送信 |
-| `task_sensor` | `task_sensor_entry` | **7** | 1024 B | 50 ms 周期 | TCA9548A/VL53L1X×3/BMI270のI2C取得、平滑化 |
-| `task_acoustic_link` | `task_acoustic_link_entry` | **8** | 2048 B | 1 ms ポーリング | USB HCDC受信、CRC検証、音響スナップショット更新 |
-| `task_think` | `task_think_entry` | **10** | 1024 B | 100 ms 周期 | 音源追従／障害物回避判断、LED状態表示、faultラッチ |
+| `task_command` | `task_command_entry` | **6** | 2048 B | 50 ms 周期 | 思考結果の期限監視（500ms）、6出力の一括IPC送信 |
+| `task_acoustic_link` | `task_acoustic_link_entry` | **8** | 4096 B | 1 ms ポーリング | USB HCDC受信、CRC検証、音響スナップショット・テレメトリ更新 |
+| `task_sensor` | `task_sensor_entry` | **9** | 2048 B | 50 ms 周期 | TCA9548A/VL53L1X×3/BMI270のI2C取得、平滑化 |
+| `task_think` | `task_think_entry` | **10** | 4096 B | **50 ms 周期** | 音源追従／障害物回避判断、TFLM制御MLP、オドメトリ、LED表示 |
+| `task_infer` | `task_infer_entry` | **11** | 4096 B | **イベント駆動** | 特徴量到着時の背景モデル更新、現場見本照合（DSP要約/NN埋め込み） |
 
 > [!NOTE]
 > μT-Kernelの優先度は **「数値が小さいほど高優先」** です。
-> 最も優先度が高い周期タスクは `task_command`（優先度6）です。これにより、通信処理（USB）や思考処理（AI）が一時的に重くなった場合でも、CPU1に対する50msキープアライブ指令の送信が遅延しないように保護されています。
+> 最も優先度が高い周期タスクは `task_command`（優先度6）です。これにより、通信処理（USB）や思考・推論処理（MLP/NN）が一時的に重くなった場合でも、CPU1に対する50msキープアライブ指令の送信が遅延しないように保護されています。
+> また、`task_think` は最新の実機検証において 100 ms から **50 ms 周期** へと短縮され、走行制御の応答性が倍増しています。
+
+### 非致命AIタスクの隔離設計（`task_infer_start_optional`）
+AIモデルの初期化失敗やテンソルアリーナ不足によってロボットの基本走行・安全停止が巻き添えを食うのを防ぐため、`task_infer` は **オプショナルタスク** として設計されています。
+
+```c
+/* firmware/ra8p1/SoundExplorationRover_CPU0/src/main.c */
+EXPORT INT usermain(void) {
+    R_BSP_SecondaryCoreStart();
+
+    /* 推論資源の不足で、既存の安全・走行タスク群を止めない。 */
+    task_infer_start_optional();
+
+    /* CPU0独立タスクの起動結果（Command, Think, Sensor, AcousticLink） */
+    app_fault_t const fault = task_registry_init();
+    if (APP_FAULT_NONE != fault) {
+        task_infer_stop();
+        task_think_halt(fault);
+    }
+    // ...
+}
+```
+
+- `task_infer` の生成・初期化でエラーが発生しても、`task_registry_init()` のクリティカルな走行タスク群（Command / Sensor / Think / Link）はそのまま安全に起動します。
+- `task_think` は `task_infer_result_get()` の戻り値を確認し、推論結果が得られない場合は直ちに安全側のベースライン照合（DSP要約）へフォールバックします。
 
 ---
 
@@ -203,5 +232,6 @@ sequenceDiagram
 - μT-Kernel 3.0のプリエンプティブ・スケジューリングにより、優先度に基づいた厳密なリアルタイム実行を保証。
 - RA8P1のCortex-M85（1GHz）とCortex-M33（250MHz）を非対称に使い分け、SRAM領域を完全に分離。
 - BSPソースを変更せず、Includeパスの探索順序でCPU1の依存定義をオーバーライド。
+- `task_infer` を非致命のオプショナルタスクとして切り離し、AI機能の障害が基本走行・安全停止を阻害しない多層防御を構築。
 - CPU1の駆動ループは「周期ハンドラ＋イベントフラグ＋実$\Delta t$」方式により、累積誤差ゼロの1ms制御を実現。
 次章では、この2つのコア、そして外部ESP32-S3をつなぐ「プロセッサ間通信プロトコル（IPC & USB CDC）」を学びます。

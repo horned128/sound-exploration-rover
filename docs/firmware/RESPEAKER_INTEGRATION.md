@@ -302,9 +302,11 @@ stateDiagram-v2
 
 | 設定 | 初期値 | 意味 |
 |---|---:|---|
-| trigger level | -45.00 dBFS | この値以上を反応候補とする |
-| release level | -48.00 dBFS | triggerより3 dB低いhysteresis |
-| VAD | イベント開始時に必須 | 取得開始後は連続VADを要求しない |
+| feature collection floor | -60.00 dBFS | ESP32S3が800 ms特徴量イベントをCPU0へ送る下限 |
+| motion trigger level | -45.00 dBFS | CPU0が音源追従動作を開始する音量下限 |
+| SW1 sample level | -35.00 dBFS peak | 有効な要約かつイベント全体の最大RMSがこの値以上なら見本登録。学習中のAE MSE異常判定は不要 |
+| release level | -48.00 dBFS | motion triggerより3 dB低いhysteresis |
+| VAD | 診断のみ | 特徴量イベント収集・見本登録・走行判定の条件に使用しない |
 | DoA update wait | 500 ms | イベント開始前から保持されたselected azimuthを捨て、XVF3800の更新を待つ |
 | DoA stability | 5 sample、相互差20度以内 | 瞬間的な方向変動を除外 |
 | DoA acquisition timeout | 2000 ms | 安定した5 sampleが得られなければイベントを破棄 |
@@ -315,12 +317,12 @@ stateDiagram-v2
 | steering | 20～45度 | 正面範囲外の方向を符号付きで制限 |
 | move step | 1000 ms | 1回の短距離前進 |
 | settle | 500 ms | 停止後にモーター音と車体振動を減らす時間 |
-| front tolerance | ±15度 | 直進とみなす車体相対角 |
+| front tolerance | ±30度 | 直進とみなす車体相対角 |
 | cooldown release | 200 ms | -48 dBFS以下のrelease条件を維持して次の音源イベントを再arm |
 
-1回のloudかつVAD有効な観測で音イベントを開始する。開始直後の500 msはDoAを採用せず、その後の最新5 sampleが相互差20度以内になった時点でDoAと操舵角を固定する。短い拍手ではVADが先に0へ戻るため、取得開始後はVADの継続を要求しない。開始から2000 ms以内に安定しなければイベントを破棄する。servo整定と1000 msの1 stepを完了した後は必ず`COOLDOWN`へ入り、走行後に混ざるモーター音・反射音のDoAを次の移動指令として使わない。
+1回の-45 dBFS以上の観測で音源追従イベントを開始する。VADは音声向け指標のため、非音声TARGETを含む走行判定には使用しない。開始直後の500 msはDoAを採用せず、その後の最新5 sampleが相互差20度以内になった時点でDoAと操舵角を固定する。開始から2000 ms以内に安定しなければイベントを破棄する。servo整定と1000 msの1 stepを完了した後は必ず`COOLDOWN`へ入り、走行後に混ざるモーター音・反射音のDoAを次の移動指令として使わない。
 
-DoAは車体正面を0度、右を正、左を負として変換する。2026-09-24の四方向実測に基づき、前方は`CPU0_SOUND_DOA_CLOCKWISE_POSITIVE=0`で符号反転し、後方は`CPU0_SOUND_DOA_REAR_LR_SWAP=1`で左右対応を入れ替える。前方は最大45度の操舵で追従し、後方はX字操舵・左右逆回転で向き直る。真後ろ±180度近辺だけは左右の旋回経路がほぼ等価なので、左右ToFに十分な差がある場合は空き側を選ぶ。`CPU0_SOUND_DOA_ZERO_OFFSET_DEG=0`、正のサーボ指令は物理的な左操舵のため`CPU0_STEERING_SERVO_OUTPUT_SIGN=-1`でサーボ出力だけを反転している。
+DoAは車体正面を0度、右を正、左を負として変換する。現在のマイク取付姿勢では`CPU0_SOUND_DOA_CLOCKWISE_POSITIVE=1`、`CPU0_SOUND_DOA_REAR_LR_SWAP=0`としてraw DoAの符号付き正規化値を使用する。正面±30度は直進扱いとし、その外側は最大45度で段階的に操舵する。後方ではX字操舵・左右逆回転で向き直し、真後ろ±180度近辺で左右ToFに十分な差がある場合は空き側を選ぶ。2026-09-27の右操舵指令で実機が左へ回頭したログに基づき、通常走行の`CPU0_STEERING_SERVO_OUTPUT_SIGN=1`に補正した。正しく右回頭していたスピンのX字操舵は`CPU0_SOUND_SPIN_SERVO_OUTPUT_SIGN=-1`を維持する。
 
 USB detach、観測timeout、CRC/version異常、XVF3800 I2C error、mute、I2S staleでは新しい移動を開始しない。CRC/version/format異常frameは破棄し、正常観測が600 ms途絶えると`WAIT_LINK`へ戻す。bit 0のI2S overrunは当該観測区間の一時的な欠落を示す診断値であり、単発ではlinkを切らない。移動中にtimeoutへ到達した場合もCPU0は停止目標をIPC送信する。さらにCPU0自体が停止してIPCが途絶えた場合は、CPU1の既存ローカルtimeoutがsafe stopを行う。
 

@@ -42,11 +42,13 @@ CRC-16/CCITT-FALSE 2 bytesです。フレーム分割・継続フラグはあり
 
 | type | 名称 | 方向 | ペイロード契約 |
 |---:|---|---|---|
-| `0x04` | `ACOUSTIC_FEATURE` | ESP32S3 → CPU0 | メタ8 bytes（event_id/frame_index/frame_count/n_bins/flags）＋int8 mel 32 bins×2 frames＝72 bytes |
+| `0x04` | `ACOUSTIC_FEATURE` | ESP32S3 → CPU0 | メタ8 bytes（event_id/frame_index/frame_count/n_bins/event peak level flags）＋int8 mel 32 bins×2 frames＝72 bytes |
 | `0x05` | `PROTOTYPE_DATA` | 双方向 | **予約・不使用**。背景モデルと見本はCPU0 Code MRAM内で完結する |
 | `0x10` | `SET_CONFIG` | CPU0 → ESP32S3 | 学習モード指令／プロトタイプ保存要求 |
 | `0x11` | `ACK` | ESP32S3 → CPU0 | 保存結果／設定反映結果 |
 | `0x22` | `POSE_TELEMETRY` | CPU0 → ESP32S3 | 姿勢・環境認識用データ |
+
+`ACOUSTIC_FEATURE.flags`のbit7はイベント内最大RMS dBFS metadataの有効bit、bit0..6は整数dBFS値+127を格納します。特徴量収集床は-60 dBFS、SW1の見本採用床はイベント全体peak -35 dBFSで、意味と役割を分けています。
 
 `0x20`は既存の96-byteペイロードで満杯のため、新しい姿勢データには
 `0x22`を使用します。`n_bins`、フレーム数、フレーム番号はメタデータに

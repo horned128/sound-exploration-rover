@@ -1,6 +1,6 @@
 # 第5章: プロセッサ間通信プロトコル（IPC & USB CDC）
 
-本章では、SEROVの神経系である「**CPU0–CPU1間 IPC FIFO**」、および「**ESP32-S3–CPU0間 USB CDCバイナリプロトコル**」の通信仕様、パケット構造、アトミックコミット機構、およびエラー処理について詳細に解説します。
+本章では、SEROVの神経系である「**CPU0–CPU1間 IPC FIFO**」、および「**ESP32-S3–CPU0間 USB CDCバイナリプロトコル**」の通信仕様、パケット構造、アトミックコミット機構、最新Wire Format（Version 2U）、およびエラー処理について詳細に解説します。
 
 ---
 
@@ -12,12 +12,12 @@ SEROV内部には、物理的・論理的に異なる3系統の通信路が存�
 flowchart LR
     ESP["XIAO ESP32-S3"] <-->|"① USB High Speed CDC<br/>（バイナリフレーム、CRC-16）"| C0["RA8P1 CPU0"]
     C0 <-->|"② 32-bit IPC FIFO<br/>（ハードウェア4段FIFO ch.0）"| C1["RA8P1 CPU1"]
-    ESP -.->|"③ Wi-Fi UDP (ポート5005)<br/>（JSON Lines 250ms周期）"| PC["監視PC"]
+    ESP -.->|"③ Wi-Fi UDP (ポート5005)<br/>（JSON Lines 250ms周期）"| PC["監視PC (Rover Monitor)"]
 ```
 
-1. **① USB CDC**: ESP32-S3（Device）とCPU0（Host）間のバルク転送。音響観測値および診断テレメトリの伝送。
+1. **① USB CDC**: ESP32-S3（Device）とCPU0（Host）間のバルク転送。音響観測値、完成特徴量、プロトタイプデータ、および診断テレメトリの伝送。
 2. **② IPC FIFO**: RA8P1の同一シリコン内部コア間通信。制御指令（CPU0→CPU1）および実機状態（CPU1→CPU0）。
-3. **③ Wi-Fi UDP**: ESP32-S3から外部監視PCへの非同期テレメトリ送信（制御ループから隔離）。
+3. **③ Wi-Fi UDP**: ESP32-S3から外部監視PCへの非同期テレメトリ送信（制御ループから完全隔離）。
 
 ---
 
@@ -108,11 +108,7 @@ CPU1からCPU0への状態返送も重要ですが、一度に7〜10ワードを
 
 ---
 
-## 5.4 ESP32-S3–CPU0間 USB CDCバイナリプロトコル
-
-### なぜテキスト（JSON/文字列）をUSBに流さないのか？
-マイコン間の高速リンクにおいて、`printf()` 形式のテキストログやJSONを混在させると、文字列パース負荷、メモリ断片化、および改行抜けによる同期崩れが発生します。
-本機では、**バイト境界が厳格に定義された固定長バイナリフレーム** を使用します。
+## 5.4 ESP32-S3–CPU0間 USB CDCバイナリプロトコル（Version 2U）
 
 ### フレームフォーマット（`firmware/common/acoustic_protocol.h`）
 
@@ -120,15 +116,15 @@ CPU1からCPU0への状態返送も重要ですが、一度に7〜10ワードを
  0      1  2      3      4        5  6        9  10      13  14          14+N  15+N
 +--------+------+------+----------+----------+-----------+------------+----------+
 | Magic  | Ver  | Type | Length N | Sequence | Uptime ms | Payload    | CRC-16   |
-| 'S''R' | 0x01 | 1byte| 2byte LE | 4byte LE | 4byte LE  | N bytes    | 2byte LE |
+| 'S''R' | 0x02 | 1byte| 2byte LE | 4byte LE | 4byte LE  | N bytes    | 2byte LE |
 +--------+------+------+----------+----------+-----------+------------+----------+
 ```
 
 | フィールド | バイト数 | 型 | 内容 |
 |---|:---:|---|---|
 | **Magic** | 2 | `uint8_t[2]` | 固定マジックコード `0x53, 0x52`（ASCIIの `'S'`, `'R'` = Sound Rover） |
-| **Version** | 1 | `uint8_t` | プロトコルバージョン（現行: `0x01`） |
-| **Type** | 1 | `uint8_t` | メッセージ種別（HELLO, OBSERVATION, HEALTH等） |
+| **Version** | 1 | `uint8_t` | プロトコルバージョン（現行: **`0x02`**） |
+| **Type** | 1 | `uint8_t` | メッセージ種別（HELLO, OBSERVATION, HEALTH, FEATURE, NAV等） |
 | **Length** | 2 | `uint16_t` | ペイロード長 $N$（リトルエンディアン、最大96バイト） |
 | **Sequence** | 4 | `uint32_t` | 送信フレームごとにインクリメントされる通し番号 |
 | **Uptime ms** | 4 | `uint32_t` | 送信側マイコンの起動後ミリ秒 |
@@ -140,19 +136,70 @@ CPU1からCPU0への状態返送も重要ですが、一度に7〜10ワードを
 - **多項式**: $x^{16} + x^{12} + x^5 + 1$ (`0x1021`)
 - **初期値**: `0xFFFF`、Refin: `false`、Refout: `false`、Xorout: `0x0000`
 
-### 主要メッセージタイプ
+### 最新メッセージタイプ一覧
 
 ```text
 0x01: HELLO                (ESP32-S3 -> CPU0, 起動時および1秒周期、バージョン/機能通知)
 0x02: ACOUSTIC_OBSERVATION (ESP32-S3 -> CPU0, 50ms周期、DoA, VAD, 音響レベルdBFS)
 0x03: HEALTH               (ESP32-S3 -> CPU0, 1秒周期、I2C/I2S/USBエラー統計)
 0x04: ACOUSTIC_FEATURE     (ESP32-S3 -> CPU0, 音響イベント検知時、Log-Mel特徴量パケット)
+0x05: PROTOTYPE_DATA       (雙方向, MRAM現場学習プロトタイプデータ同期)
 0x20: ROVER_TELEMETRY      (CPU0 -> ESP32-S3, 250ms周期、CPU0/CPU1診断スナップショット)
+0x21: ACTUATOR_TELEMETRY   (CPU0 -> ESP32-S3, 4輪サーボ実角・モータ実RPM)
+0x22: POSE_TELEMETRY       (CPU0 -> ESP32-S3, オドメトリ推定位置 (x, y) & 姿勢角)
+0x23: NAV_DIAGNOSTICS      (CPU0 -> ESP32-S3, 音源局在化・到着判定診断)
+0x30: AI_LAB_SNAPSHOT      (CPU0 -> PC, Acoustic AI Lab向け高解像度診断)
+0x31: AI_LAB_SUMMARY_CHUNK (CPU0 -> PC, 192次元特徴量要約ストリーム)
+0x32: AI_LAB_COMMAND       (PC -> CPU0, 外部からの学習開始/保存/キャンセル要求)
+0x33: AI_LAB_COMMAND_RESULT(CPU0 -> PC, 操作要求の実行結果応答)
+0x34: AI_LAB_PROFILE_CHUNK (CPU0 -> PC, MRAM保存見本プロファイルデータ)
 ```
 
 ---
 
-## 5.5 USBストリームパーサのステートマシン
+## 5.5 推論状態と分類器種別のビットパッキング
+
+システムがどのAIモデルで判断しているかを外部モニタが瞬時に把握できるよう、`acoustic_protocol.h` では認識状態とランタイム情報を1バイトにパッキングして送出します。
+
+```text
+ 7       6       5   4   3       0
++-------+-------+-------+---------+
+| RSVD  | TFLM  | CLASSIFIER | STATUS  |
+|       | AVAIL | (2 bit)    | (4 bit) |
++-------+-------+-------+---------+
+```
+
+- **STATUS (bit 0-3)**: 判定結果（0: INVALID, 1: BACKGROUND, 2: CANDIDATE, 3: NOT_TARGET, 4: TARGET）
+- **CLASSIFIER (bit 4-5)**:
+  - `0`: NONE（未判定）
+  - `1`: **`DSP_SUMMARY`（192次元要約・周波数ビン直接照合）**
+  - `2`: **`NN_EMBEDDING`（TFLM音響埋め込みCNN照合）**
+- **TFLM_AVAIL (bit 6)**: TFLMランタイムが正常に初期化され利用可能かを示すフラグ
+
+これにより、Rover MonitorやPCツールは「現在システムがDSP要約ベースラインで動いているか、TFLM埋め込みで動いているか」を完全に識別できます。
+
+---
+
+## 5.6 ナビゲーション診断（`NAV_DIAGNOSTICS`）
+
+自律音源探査の進行状況を把握するため、CPU0の `sound_source_localizer` は以下の情報を `0x23 NAV_DIAGNOSTICS` パケットとしてESP32-S3経由で監視PCへ配信します。
+
+| フィールド | 内容 |
+|---|---|
+| `flags` | raw DoA有効、平滑DoA有効、音源位置確定、到着候補、到着確認完了、スピンターン中 |
+| `raw_doa_deg` / `filtered_doa_deg` | XVF3800 生DoA vs 循環平滑化DoA [deg] |
+| `rover_x_mm` / `rover_y_mm` | オドメトリ推定車体現在位置 [mm] |
+| `rover_heading_mrad` | 車体方位角 [mrad] |
+| `source_x_mm` / `source_y_mm` | 推定音源位置世界座標 [mm] |
+| `source_bearing_deg` | 車体から見た音源相対方位（右正） [deg] |
+| `source_range_mm` | 推定音源までの直線距離 [mm] |
+| `residual_rms_mm` | 複数DoA観測線に対する最小二乗残差RMS [mm] |
+| `crossing_deg` | 観測方位線どうしの最大交差角 [deg] |
+| `baseline_mm` | 音源を挟むオドメトリ観測基線長 [mm] |
+
+---
+
+## 5.7 USBストリームパーサのステートマシン
 
 USB CDCのデータ受信では、1回のバルク転送でパケット全体が届くとは限らず、断片化（Fragment）や複数パケットの連結（Concatenation）が発生します。
 CPU0の `task_acoustic_link.c` は、堅牢なストリームパーサを実装しています。
@@ -178,9 +225,10 @@ stateDiagram-v2
 
 ---
 
-## 5.6 まとめ
+## 5.8 まとめ
 
 - コア間IPCはハードウェア4段FIFOを用い、固定長32-bitワードと `SEQUENCE` コミットマーカーによる6出力アトミック反映を実現。
 - 緊急停止はシーケンス番号を待たずに即時コミットされるフェイルセーフ設計。
-- USB通信はテキストログを排除したCRC-16付きバイナリフレームを採用し、ノイズやパケット断片化に対する高い耐性を確保。
+- USB通信はプロトコルVersion 2Uへ進化し、音源位置推定（`NAV_DIAGNOSTICS`）やAcoustic AI Lab連携を包含。
+- 1バイトパッキングにより、推論器種別とTFLM状態をリアルタイムに外部監視可能。
 次章では、この通信路を通じて送られる「音響信号処理・Log-Mel特徴量・エッジAI」の深層に踏み込みます。

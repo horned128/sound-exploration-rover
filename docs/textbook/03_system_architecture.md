@@ -1,6 +1,6 @@
 # 第3章: 4プロセッサ協調アーキテクチャとレイヤー設計
 
-本章では、SEROVを構成する4つのプロセッサの責務分離、RA8P1内部の5層ソフトウェアレイヤー構造、およびFSP（Flexible Software Package）におけるピン所有権モデルについて詳しく解説します。
+本章では、SEROVを構成する4つのプロセッサの責務分離、RA8P1内部の5層＋AIソフトウェアレイヤー構造、およびFSP（Flexible Software Package）におけるピン所有権モデルについて詳しく解説します。
 
 ---
 
@@ -15,7 +15,7 @@ flowchart LR
         ESP["② XIAO ESP32-S3<br/>（通信・前処理）"]
     end
 
-    subgraph BRAIN["思考・統合"]
+    subgraph BRAIN["思考・統合・エッジAI"]
         C0["③ RA8P1 CPU0<br/>Cortex-M85 @ 1GHz<br/>（μT-Kernel 3.0）"]
     end
 
@@ -28,14 +28,14 @@ flowchart LR
     ESP -->|"USB High Speed CDC"| C0
     C0 -->|"32-bit IPC FIFO"| C1
     C1 --> MOTORS["6モータ / 4サーボ"]
-    ESP -.->|"Wi-Fi UDP"| PC["監視PC"]
+    ESP -.->|"Wi-Fi UDP (ポート5005)"| PC["監視PC (Rover Monitor)"]
 ```
 
 | プロセッサ / コア | 実行基盤 | 所有する主責務 | 所有しない責務（隔離） |
 |---|---|---|---|
-| **① XVF3800** | 専用音響ファームウェア | 4chマイクDSP、音響エコーキャンセル（AEC）、ノイズ抑制、ビームフォーミング、DoA（到来方向）、VAD（音声区間検出） | 走行判断、通信制御、モータ制御 |
+| **① XVF3800** | 専用音響ファームウェア | 4chマイクDSP、音響エコーキャンセル（AEC）、ノイズ抑制、ビームフォーミング、DoA（到来方向: 0〜359°）、VAD（音声区間検出） | 走行判断、通信制御、モータ制御 |
 | **② XIAO ESP32-S3** | ESP-IDF / FreeRTOS | I2S音声取込、Log-Mel特徴量抽出（32bin/100fps）、int8量子化、USB CDCデバイス、Wi-Fi UDP診断ゲートウェイ | 最終的な走行判断、安全停止の最終判定 |
-| **③ RA8P1 CPU0**<br/>(Cortex-M85 @ 1GHz) | μT-Kernel 3.0 | USB HCDC Host、I2Cセンサ統合、音源追従・障害物回避思考、TFLMエッジAI、IPC送信、LED表示 | モータ・サーボのPWM生成、エンコーダ高速割込 |
+| **③ RA8P1 CPU0**<br/>(Cortex-M85 @ 1GHz) | μT-Kernel 3.0 | USB HCDC Host、I2Cセンサ統合、音源追従・障害物回避思考、**TFLM制御MLP & 音響推論**、オドメトリ・音源局在化、IPC送信、LED表示 | モータ・サーボのPWM生成、エンコーダ高速割込 |
 | **④ RA8P1 CPU1**<br/>(Cortex-M33 @ 250MHz) | μT-Kernel 3.0 | 1ms固定周期アクチュエータ制御、PWMランプ・リミット制限、4輪逆相操舵、エンコーダ積算、ハード安全停止 | USB通信、Wi-Fi、AI推論、自律走行判断 |
 
 ### なぜプロセッサを分けるのか？（責務分離の必然性）
@@ -45,16 +45,18 @@ flowchart LR
 
 ---
 
-## 3.2 RA8P1 ユーザーコードの5層レイヤー設計
+## 3.2 RA8P1 ユーザーコードのレイヤー設計
 
-RA8P1のCPU0およびCPU1のユーザーコードは、変更容易性と単体テスト性を最大化するため、明確な5つのレイヤーに分離されています。
+RA8P1のCPU0およびCPU1のユーザーコードは、変更容易性と単体テスト性を最大化するため、明確な責務分離に基づいたレイヤー構造を採用しています。CPU0には新たに機械学習・推論を司る `ai/` レイヤーが組み込まれています。
 
 ```text
   [L4 Tasks]     : μT-Kernelタスクの生成・周期実行・状態待機
       ↓
-  [L3 Control]   : センサ状態から走行目標（RPM・操舵角）を算出（アルゴリズム）
+  [L3 Control]   : センサ状態から走行目標（RPM・操舵角）を算出（アルゴリズム・安全調停）
       ↓
-  [L2 Services]  : 複数デバイスの統合・調停・安全状態管理・単位換算
+  [AI / ML]      : TFLMランタイム、制御MLPプランナ、音響推論器
+      ↓
+  [L2 Services]  : 複数デバイス統合・オドメトリ・音源位置推定・プロトタイプ保存
       ↓
   [L1 Drivers]   : 個別ペリフェラル・外部チップの直接制御（レジスタ・FSP呼び出し）
       ↓
@@ -67,32 +69,34 @@ RA8P1のCPU0およびCPU1のユーザーコードは、変更容易性と単体�
 
 | 層 | ディレクトリ | 責務 | CPU0での代表例 | CPU1での代表例 |
 |:---:|---|---|---|---|
-| **L4** | `tasks/` | μT-Kernel API呼び出し、タスクスケジューリング、優先度制御 | `task_think`, `task_command`, `task_sensor`, `task_acoustic_link` | `task_actuator`, `task_status` |
-| **L3** | `control/` | RTOS非依存の純粋な制御ロジック・ステートマシン | `sound_follow_controller`, `obstacle_avoidance_controller` | （CPU1は指令追従のためL3は持たない） |
-| **L2** | `services/` | 複数ドライバの統合、安全フィルタ、目標値ランプ | `sensor_hub`, `acoustic_identifier` | `actuator_service`, `drive_service` |
+| **L4** | `tasks/` | μT-Kernel API呼び出し、タスクスケジューリング、優先度制御 | `task_think`, `task_command`, `task_sensor`, `task_acoustic_link`, **`task_infer`** | `task_actuator`, `task_status` |
+| **L3** | `control/` | RTOS非依存の制御ロジック、状態機械、安全調停 | `sound_follow_controller`, `obstacle_avoidance_controller`, **`safety_arbiter`**, **`sensor_liveness`** | （CPU1は指令追従のためL3は持たない） |
+| **AI** | `ai/` | TFLM推論ランタイム、NNモデル、埋め込み照合 | **`tflm_runtime`**, **`control_mlp_planner`**, **`acoustic_tflm_runtime`**, **`acoustic_embedding_identifier`** | — |
+| **L2** | `services/` | 複数ドライバ統合、オドメトリ、位置推定、MRAM保存 | `sensor_hub`, **`odometry`**, **`sound_source_localizer`**, **`prototype_storage`**, **`background_model`** | `actuator_service`, `drive_service` |
 | **L1** | `drivers/` | 特定ハードウェアチップ・モジュールの制御 | `vl53l1x`, `bmi270`, `tca9548a` | `bts7960`, `servo`, `encoder` |
 | **L0** | `platform/` | マイコン抽象化、バスアクセスの排他・同期 | `i2c_bus` | — |
 
 ### レイヤー化がもたらす決定的なメリット
 - **単体テスト容易性**: L3（`control/`）やL2のロジックは、μT-KernelのタスクAPIやFSPのハードウェアレジスタに直接依存しません。そのため、ホストPC（macOSやLinux）上のClangでそのままコンパイルし、高速にシミュレーションや回帰テスト（`software/control-sim`）を実行できます。
 - **依存の一方向性**: 上位層が下位層を呼ぶことのみが許可され、下位層から上位層への逆方向の関数呼び出しは禁止されています。
+- **非致命タスクの隔離**: AI推論や背景学習を担う `task_infer` は、リソース不足や初期化失敗が発生しても自律走行タスク（`task_think`, `task_command`）を巻き込まず、システム全体を停止させない設計（`task_infer_start_optional`）が徹底されています。
 
 ---
 
 ## 3.3 横断的コンポーネント
 
-5層構造を横断して利用される共通機能として、以下の2つの独立ディレクトリが存在します。
+レイヤー構造を横断して利用される共通機能として、以下の2つの独立ディレクトリが存在します。
 
 1. **`ipc/` (Inter-Processor Communication)**:
    - CPU0とCPU1の境界を橋渡しするモジュール。
-   - CPU0側: `actuator_ipc_client.c`（指示構造体を32-bit FIFOワード列にシリアライズして送信）。
-   - CPU1側: `actuator_ipc_server.c`（受信割り込み内でステージングし、アトミックに確定）。
+   - CPU0側: `actuator_ipc_client.c`（指示構造体を32-bit FIFOワード列にシリアライズして送信、CPU1からの実測RPM・Duty・フォールト受信）。
+   - CPU1側: `actuator_ipc_server.c`（受信割り込み内でステージングし、アトミックに確定、CPU0へ実測状態を分散返送）。
 2. **`config/` (設定ヘッダ群)**:
    - マジックナンバーをコード中に散乱させず、用途ごとに独立したヘッダファイルで一元管理。
-   - `task_config.h`（周期、優先度、スタックサイズ）
-   - `control_config.h` / `sensor_config.h`（探索閾値、タイムアウト時間、距離リミット）
+   - `task_config.h`（タスク周期、優先度、スタックサイズ、推論機能有効化フラグ）
+   - `control_config.h` / `sensor_config.h`（MLP有効化フラグ、探索閾値、タイムアウト時間、距離リミット、不感帯）
    - `actuator_config.h` / `drive_config.h` / `servo_config.h`（PWM最大Duty、RPMスケール、サーボトリム値）
-   - `pin_config.h`（アプリケーション側から見た論理ピンの対応関係）
+   - `pin_config.h`（アプリケーション側から見た論理ピンの対応関係、LED割当）
 
 ---
 
@@ -136,19 +140,22 @@ flowchart TD
 
 ```text
 【制御経路（下り一方向）】
-  XVF3800 ──> ESP32-S3 ──> [USB CDC] ──> CPU0 (思考) ──> [IPC FIFO] ──> CPU1 (駆動) ──> モータ
+  XVF3800 ──> ESP32-S3 ──> [USB CDC] ──> CPU0 (思考・制御MLP) ──> [IPC FIFO] ──> CPU1 (駆動) ──> モータ
 
-【診断経路（上り・外部通知）】
+【診断・学習経路（上り・外部通知）】
   CPU1 (実績値) ──> [IPC FIFO] ──> CPU0 ──> [USB CDC] ──> ESP32-S3 ──> [Wi-Fi UDP] ──> 監視PC
+                                    │
+                                    └──> Acoustic AI Lab (USB直結 / 見本プロトタイプ同期)
 ```
 
 - **外部バイパスの禁止**: PCやESP32-S3から、CPU0の判断や安全機構を迂回してCPU1のモータ出力を直接叩く経路は一切存在しません。将来Wi-Fiによる手動遠隔操縦を実装する場合でも、指令は必ずCPU0に入力され、タイムアウト・障害物回避ルール・安全停止の監視を通過した上でCPU1に渡されます。
+- **診断情報の充実**: CPU0からはアクチュエータ実測値だけでなく、推定車体姿勢・オドメトリ、音源推定位置・方位、推論器種別（DSP要約 / NN埋め込み）、TFLM初期化状態、ナビゲーション診断フラグが常時PCへ配信されます。
 
 ---
 
 ## 3.6 まとめ
 
-- 4つのプロセッサを役割に応じて分離し、重い音響DSP、ネットワーク通信、自律思考、1msリアルタイム駆動が互いの足を引っ張らない構成を実現。
-- RA8P1内はL0〜L4の5層アーキテクチャに整理され、高い保守性とホスト単体テスト性を獲得。
+- 4つのプロセッサを役割に応じて分離し、重い音響DSP、ネットワーク通信、自律思考・エッジAI、1msリアルタイム駆動が互いの足を引っ張らない構成を実現。
+- RA8P1内はL0〜L4＋AIレイヤーに整理され、高い保守性とホスト単体テスト性を獲得。
 - 物理ピンの所有権はSolution経由でCPU0に集約し、デュアルコア特有のハードウェア設定衝突を回避。
 次章では、このアーキテクチャを動的に統括する「μT-Kernel 3.0とデュアルコア制御」の神髄に迫ります。

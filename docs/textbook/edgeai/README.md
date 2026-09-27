@@ -15,8 +15,9 @@
 - 「int8量子化？ なぜわざわざ小数を切り捨てて整数にするの？」
 - 「TensorFlow Lite for Microcontrollers（TFLM）？ なぜ普通のTensorFlowじゃ動かないの？」
 - 「現場学習（Few-shot learning）？ 64次元埋め込みベクトル？ プロトタイプ照合？」
+- 「実機の走行ノイズとオープンデータセットの壁（ドメインギャップ）とは？」
 
-本サブ教科書では、これらの疑問に対して **「日常の例え話 → 直感的な図解 → 物理と数学 → 実機のC/Pythonコード」** の4段階で、誰でも挫折せずに楽しく読み進められるように徹底解説します。
+本サブ教科書では、これらの疑問に対して **「日常の例え話 → 直感的な図解 → 物理と数学 → 実機のC/Pythonコード → 実機検証の真実」** の流れで、誰でも挫折せずに楽しく読み進められるように徹底解説します。
 
 ---
 
@@ -31,30 +32,49 @@
 【中級編: マイコンで高速に動かす魔術】
   ├─ 04_int8_quantization.md             : 第4章 なぜint8なのか？（浮動小数点から整数への量子化）
   ├─ 05_stream_pipeline_and_comm.md      : 第5章 音のバトンパス（I2S → 800msリング → USB → CPU0再組立）
-  └─ 06_tflm_runtime_and_model.md        : 第6章 マイコン上の深層学習（TFLMアリーナ・Helium・CNNモデル）
+  └─ 06_tflm_runtime_and_model.md        : 第6章 マイコン上の深層学習（TFLMアリーナ・Helium・CNN & 制御MLP）
 
-【応用編: 現場で賢くなるAI】
-  └─ 07_few_shot_learning_and_prototype.md : 第7章 その場で覚える「現場学習」とプロトタイプ最近傍照合
-
-【対話型Web教材】
-  └─ interactive_audio_pipeline.html     : 【Webシミュレータ】音波からAI識別までの対話型ビジュアライザ
+【応用編: 現場で賢くなるAIと実機知見】
+  └─ 07_few_shot_learning_and_prototype.md : 第7章 「現場学習」プロトタイプ照合と実機検証知見（DSP要約 vs NN埋め込み）
 ```
 
 ---
 
-## ⚡ 音響AIパイプラインの鳥瞰図
+## ⚡ SEROVにおけるエッジAIの2大柱
 
-ローバーの耳に入った音が、モータの回転指示になるまでの旅路：
+本プロジェクトでは、マイコン向け深層学習ランタイム **TFLM（TensorFlow Lite for Microcontrollers）** を駆使し、以下の2つの高度なAI機能を実装・検証しています。
 
 ```mermaid
-flowchart LR
-    A["① マイク 4基"] -->|"物理音波"| B["② XVF3800 DSP<br/>AEC・DoA推定"]
-    B -->|"16kHz PCM"| C["③ ESP32-S3<br/>Log-Mel抽出 & int8量子化"]
-    C -->|"USB 0x04パケット"| D["④ CPU0 (RA8P1)<br/>80フレーム再組立"]
-    D -->|"2560 bytes"| E["⑤ TFLM CNNモデル<br/>Helium MVE推論"]
-    E -->|"64次元ベクトル"| F["⑥ プロトタイプ照合<br/>二乗L2最近傍"]
-    F -->|"音種確定"| G["⑦ 停止聴取型走行<br/>音源方向へステップ移動"]
+flowchart TD
+    subgraph SENSING["① 音響DSP & 特徴量抽出"]
+        MIC["4ch マイク"] --> XVF["XVF3800 DSP<br/>DoA・ビームフォーミング"]
+        XVF --> ESP["ESP32-S3<br/>Log-Mel (32bin/100fps) & int8"]
+    end
+
+    subgraph AI_PILLARS["RA8P1 CPU0 上の2大AI機能"]
+        direction TB
+        subgraph PILLAR1["柱①: 制御エッジAI (実機本番稼働)"]
+            MLP["TFLM 障害物回避制御 MLP<br/>(Policy Distillation, int8, 96KiBアリーナ)"]
+            MLP --> MOVE["滑らかな自律走行 & 安全調停"]
+        end
+        
+        subgraph PILLAR2["柱②: 音響識別 (実証・知見集約)"]
+            CNN["TFLM 64D 埋め込みCNN<br/>(128KiBアリーナ, Metric Learning)"]
+            BASE["★ 192D DSP要約照合ベースライン<br/>(耐走行ノイズ実証方式・本番採用)"]
+            CNN -.-> IDENT["現場見本プロトタイプ照合"]
+            BASE --> IDENT
+        end
+    end
+
+    ESP --> PILLAR1
+    ESP --> PILLAR2
 ```
+
+1. **柱①：TFLM 障害物回避制御 MLP（実機本番で大活躍！）**:
+   - 3眼ToF測距、IMUヨーレート、目標音源方位を統合した10次元入力を完全int8で推論。
+   - 人間のエキスパート走行を模倣した滑らかな連続軌道計画をマイコン内で完結。
+2. **柱②：音響識別と現場学習（実機検証とベースライン本採用）**:
+   - 64次元TFLM音響埋め込みCNNの実機統合実証を実施。実機走行ノイズ環境下での比較検証を経て、極めて安定した **192次元DSP要約照合ベースライン** を本番採用。
 
 ---
 

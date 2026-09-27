@@ -596,13 +596,15 @@ CPU0側では`task_infer`の照合結果を`task_think`が監視し、`CPU0_SOUN
 `CPU0_SOUND_DOA_CLOCKWISE_POSITIVE=0U`は変更しない。極性校正は完了。
 採用DoAの詳細診断値追加は、必要なテレメトリ拡張として後続の診断整備へ回す。
 
-進捗（2026-09-21）: マイク音孔面を表（上向き）にするため基板を表裏反転。
-マイク配置の左右鏡像反転に伴い、`config/control_config.h` の `CPU0_SOUND_DOA_CLOCKWISE_POSITIVE=1U` に更新。
-合わせてWebUI（rover-monitor, acoustic-ai-lab）およびcontrol-simテストの左右極性を更新。
+進捗（2026-09-21、2026-09-27再確認）: マイク音孔面を表（上向き）にするため基板を表裏反転。
+現在はraw DoAを`[-180,180)`へ正規化した値をそのまま右正の車体角として使う。
+四方向は58°→+58°、303°→-57°、141°→+141°、237°→-123°。
+設定は`CPU0_SOUND_DOA_CLOCKWISE_POSITIVE=1U`、`CPU0_SOUND_DOA_REAR_LR_SWAP=0U`。
+WebUIとcontrol-simも同じ符号規約へ合わせる。
 
 | 作業                           | 変更対象                                                                                   | 完了条件                                                                                                                                           |
 | ------------------------------ | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 駆動停止で車体4方向のDoAを校正 | `config/control_config.h` の `CPU0_SOUND_DOA_CLOCKWISE_POSITIVE`（1U 設定済み）           | 右方向音源が論理`+θ`（右旋回）へ写る。**サーボ極性は独立に確認し、音源座標とサーボ極性を同時に反転させない**                              |
+| 駆動停止で車体4方向のDoAを校正 | `config/control_config.h` の `CPU0_SOUND_DOA_CLOCKWISE_POSITIVE=1U`、`CPU0_SOUND_DOA_REAR_LR_SWAP=0U` | raw DoAの符号付き正規化値が車体右正の角度と一致する。**サーボ極性は独立に確認し、音源座標とサーボ極性を同時に反転させない** |
 | 採用DoAの診断値追加            | `tasks/task_acoustic_link.c` / `control/sound_follow_controller.c` / テレメトリJSON    | 採用raw/relative DoA、採用観測sequence、検出開始からの経過時間、サンプル数、取得経路が記録される。右→左切替で旧方位が採用されないことをログで証明 |
 
 **次の実機手順（ユーザー作業）**:
@@ -619,7 +621,7 @@ CPU0側では`task_infer`の照合結果を`task_think`が監視し、`CPU0_SOUN
    左, ..., ..., ..., ...
    後, ..., ..., ..., ...
    ```
-5. 正面の操舵角が0付近で、右音源が正、左音源が負なら現在の`CPU0_SOUND_DOA_CLOCKWISE_POSITIVE=0`を維持する。符号が逆なら同定数だけを1へ変更し、`CPU0_STEERING_SERVO_OUTPUT_SIGN`は同時に変更しない。
+5. 現行DoA対応はraw 58°→+58°、303°→-57°、141°→+141°、237°→-123°。実機でこの符号と異なる位置があればDoA極性・取付方向を再校正し、`CPU0_STEERING_SERVO_OUTPUT_SIGN`は同時に変更しない。
 
 ### 0-D. 車体・センサ幾何 — 自己計測を最大化し、手作業を最小化する
 

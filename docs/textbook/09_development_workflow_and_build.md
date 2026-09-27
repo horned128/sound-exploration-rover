@@ -1,6 +1,6 @@
 # 第9章: 開発ワークフロー・ビルド・FSP生成手順
 
-本章では、SEROVプロジェクトの日常的な開発ワークフロー、VS Codeとe² studioの使い分け、macOS環境におけるRA8P1特有のヘッドレスビルド手順、およびFSP（Flexible Software Package）コード生成サイクルについて解説します。
+本章では、SEROVプロジェクトの日常的な開発ワークフロー、VS Codeとe² studioの使い分け、macOS環境におけるRA8P1特有のヘッドレスビルド手順、高速並列ビルド（Fast Build）、J-Link一括書き込み、およびFSP（Flexible Software Package）コード生成サイクルについて解説します。
 
 ---
 
@@ -10,7 +10,7 @@
 
 | 対象 | 開発環境 / ツール | バージョン | 用途 |
 |---|---|:---:|---|
-| **総合エディタ** | Visual Studio Code | 最新 | 日常のコード編集、Git操作、タスク実行 |
+| **総合エディタ** | Visual Studio Code | 最新 | 日常のコード編集、Git操作、ビルド・書き込みタスク実行 |
 | **RA8P1 IDE** | Renesas e² studio | 2025-12 (25.12.0) | FSP設定（ピン・クロック・スタック変更）、GUIデバッグ |
 | **RA8P1 FSP** | Flexible Software Package | 6.4.0 / 6.6.0 | ハードウェア抽象化レイヤ、HALドライバ、スタートアップ |
 | **Arm コンパイラ** | GNU Arm Embedded Toolchain | 13.2.rel1 (13.2.1) | Cortex-M85 (CPU0) および Cortex-M33 (CPU1) のビルド |
@@ -21,7 +21,7 @@
 
 ---
 
-## 9.2 macOS環境におけるRA8P1ビルド運用ルール（最重要）
+## 9.2 高速並列ビルドとmacOSヘッドレスビルド
 
 ### なぜ `e2studio` バイナリを直接叩いてはいけないのか？
 macOS版のe² studioにおいて、ターミナルやCIスクリプトから以下のようなヘッドレス（無画面）ビルドを実行しようとすると、**プロセスが `SIGABRT`（異常終了）で即座にクラッシュ** します。
@@ -33,25 +33,47 @@ macOS版のe² studioにおいて、ターミナルやCIスクリプトから以
 
 - **原因**: EclipseのmacOSラッパーバイナリ（`e2studio`）は、たとえ `-nosplash` や `-application headlessbuild` を指定されていても、内部でmacOSのGUIフレームワーク（AppKit / WindowServer）を初期化しようとします。サンドボックス環境やSSHセッション、CIコンテナなどWindowServerが存在しない環境では、`RegisterApplication` に失敗してmacOSのOSカーネルから強制終了（SIGABRT）させられます。
 
-### 解決策: `Invoke-RaBuild.sh` スクリプト
-この問題を回避するため、リポジトリ内に `.vscode/scripts/Invoke-RaBuild.sh` が用意されています。
-このスクリプトは、GUIラッパーを経由せず、**e² studio同梱のJava VMからEclipse Equinoxランチャ（`.jar`）を直接起動** します。これにより、macOS環境下でもGUI権限を一切要求されず、完全なヘッドレスビルド・コード再生成が100%確実に実行できます。
+### 解決策: `Invoke-RaBuild.sh` / `.ps1` スクリプト
+この問題を回避し、さらに高速なビルドを実現するため、`.vscode/scripts/Invoke-RaBuild.sh`（macOS/Linux用）および `Invoke-RaBuild.ps1`（Windows用）が用意されています。
+
+1. **Equinox直接起動**: e² studio同梱のJava VMからEclipse Equinoxランチャ（`.jar`）を直接起動するため、macOS環境下でもGUI権限を一切要求されず、100%確実にヘッドレスビルド・コード再生成が実行できます。
+2. **高速並列ビルド（Fast Build）**: 生成済みの makefile を利用し、CPUコア数に応じた並列コンパイル（`make -j`）を行うことで、わずか数秒で差分ビルドが完了します。
+3. **J-Link一括書き込み（`--flash`）**: J-Link Commanderスクリプトを自動生成し、CPU0とCPU1のELFバイナリを1回のコマンドで両コアへ一括書き込みできます。
 
 ```bash
-# ✅ 正しいビルドコマンド（VS Codeタスクまたはターミナルから実行）
 # CPU0 のコード生成 ＋ クリーンビルド
 .vscode/scripts/Invoke-RaBuild.sh --target CPU0 --regenerate --clean
 
 # CPU1 のコード生成 ＋ クリーンビルド
 .vscode/scripts/Invoke-RaBuild.sh --target CPU1 --regenerate --clean
 
-# 両コアの一括ビルド
-.vscode/scripts/Invoke-RaBuild.sh --target All --regenerate --clean
+# 両コアの高速差分ビルド
+.vscode/scripts/Invoke-RaBuild.sh --target All --fast
+
+# 両コアのビルド ＋ J-Link一括書き込み
+.vscode/scripts/Invoke-RaBuild.sh --target All --flash
 ```
 
 ---
 
-## 9.3 FSP設定変更とコード生成サイクル（7ステップ）
+## 9.3 VS Codeタスク一覧
+
+VS Codeのコマンドパレット（`Ctrl+Shift+P` / `Cmd+Shift+P`）から `Tasks: Run Task` を開くと、以下の定型タスクをワンクリックで実行できます。
+
+| タスク名 | 用途 |
+|---|---|
+| **`Firmware: Build All`** | CPU0、CPU1、ESP32を順番にビルド（`Ctrl+Shift+B` の既定） |
+| **`RA8P1: Fast Build All`** | makefileメタデータを用いたCPU0/CPU1の超高速並列差分ビルド |
+| **`RA8P1: Flash CPU0 & CPU1 (J-Link)`** | ビルド後、J-Link経由で両コアのFlashを一括プログラミング |
+| **`RA8P1: Generate + Clean Build All`** | FSPコード再生成を行い、CPU0→CPU1の順で完全リビルド |
+| **`RA8P1: Fast Build CPU0 / CPU1`** | 指定した片方のコアだけを高速差分ビルド |
+| **`ESP32: Build`** | PlatformIOでXIAO ESP32-S3用ファームウェアをビルド |
+| **`ESP32: Upload`** | XIAOのUSB-Cポートからバイナリを書き込み |
+| **`ESP32: Monitor`** | XIAOのシリアルモニタ（バイナリ通信専用） |
+
+---
+
+## 9.4 FSP設定変更とコード生成サイクル（黄金の7ステップ）
 
 RA8P1のピン多重化、クロック設定、タイマ（GPT）、通信機能（IPC, IIC, USB）を変更する際は、必ず以下の **「黄金の7ステップ」** を遵守してください。
 
@@ -74,7 +96,7 @@ sequenceDiagram
     IDE->>SRC: コード自動生成
     DEV->>SRC: ⑤ ピン所有権を確認！<br/>(CPU0 pin_data.cに全ピン、CPU1はnumber_of_pins=0)
     DEV->>IDE: ⑥ Clean Build (CPU0 & CPU1)
-    DEV->>FLASH: ⑦ Multicore Launch Group で書き込み！
+    DEV->>FLASH: ⑦ J-Link 一括Flash / Multicore Launch Group で書き込み！
 ```
 
 ### ステップごとの注意点
@@ -83,11 +105,11 @@ sequenceDiagram
 - **ステップ⑤（ピン所有権のチェック）**:
   - 生成後、`firmware/ra8p1/SoundExplorationRover_CPU1/ra_gen/pin_data.c` を開き、テーブル要素数が `0`（`number_of_pins = 0`）であることを必ず目視確認してください。
 - **ステップ⑦（書き込みはペアで行う）**:
-  - CPU0とCPU1はIPCプロトコルで緊密に結合しています。一方のELFだけをフラッシュに書き込むと、プロトコルの不整合でハングアップします。必ず `SoundExplorationRover Debug_Multicore Launch Group` を使用し、**同一ビルド世代のELFをペアで書き込みます**。
+  - CPU0とCPU1はIPCプロトコルで緊密に結合しています。一方のELFだけをフラッシュに書き込むと、プロトコルの不整合でハングアップします。必ず同一ビルド世代のELFをペアで書き込みます。
 
 ---
 
-## 9.4 XIAO ESP32-S3 のビルドと書き込み手順
+## 9.5 XIAO ESP32-S3 のビルドと書き込み手順
 
 XIAO ESP32-S3のファームウェアは、VS CodeのPlatformIO拡張機能、またはESP-IDFターミナルからビルド・書き込みを行います。
 
@@ -119,20 +141,10 @@ XIAO ESP32-S3は、実行時にオンボードUSB-CポートをTinyUSB CDCデバ
 
 ---
 
-## 9.5 Git運用ルールと生成物の扱い
-
-- **Git LFS（Large File Storage）**:
-  - `hardware/` 配下のSTEPファイル（CADデータ）およびSTLファイル（3Dメッシュ）はGit LFSで管理されています。初回クローン時は `git lfs pull` を必ず実行してください。
-- **Git Submodules**:
-  - `firmware/ra8p1/common/mtk3_bsp2`（μT-Kernel）および `hardware/papaya-pathfinder` はサブモジュールです。`git submodule update --init --recursive` で最新固定コミットを取得します。
-- **FSP再生成による改行・空白差分の整理**:
-  - FSP 6.4/6.6のバージョン差異やWindows/macOSの環境差により、`ra_cfg/` や `ra_gen/` に実質的な変更のないインデント差分が出ることがあります。Gitコミット時は `git diff` を確認し、意味のある変更（モジュール追加等）と形式的差分を区別して整理してください。
-
----
-
 ## 9.6 まとめ
 
 - macOS環境でのRA8P1ビルドは、GUIクラッシュを避けるため `Invoke-RaBuild.sh` によるEquinox直接起動を使用。
+- `Fast Build` と J-Link一括書き込みタスクにより、編集から実機テストまでのイテレーション時間を劇的に短縮。
 - FSPのピン多重化はSolutionを唯一の正とし、CPU0が全ピンを所有し、CPU1は0ピンを維持する。
 - デュアルコアのバイナリは常にペアでビルド・書き込みを行い、プロトコル世代の不一致を防ぐ。
 次章では、実機を動かした際の「実機キャリブレーション、Live Watchデバッグ、トラブルシューティング」を学びます。
