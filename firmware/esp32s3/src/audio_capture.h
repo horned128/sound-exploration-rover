@@ -27,22 +27,23 @@ typedef struct {
 
 typedef struct {
     uint16_t event_id;                                      /**< フロントエンドが付与するイベントID */
+    int16_t peak_level_dbfs_x100;                           /**< 800 msイベント全体のpeak level[dBFS x100] */
     int8_t frames[ACOUSTIC_FEATURE_EVENT_FRAME_COUNT][ACOUSTIC_FEATURE_BIN_COUNT];
                                                             /**< 300 ms前から500 ms後までのlog-mel */
 } audio_capture_feature_event_t;                            /**< 完成した特徴量イベント */
 
 #if APP_AUDIO_DATASET_STREAM_ENABLE
+/**< 評価用PCM送信キューに格納する単位ブロック */
 typedef struct {
-    uint32_t first_sample;                                   /**< 起動後mono PCM sample番号 */
-    uint32_t dropped_blocks;                                 /**< キュー溢れの累積数 */
-    uint16_t sample_count;
-    int16_t samples[APP_AUDIO_BLOCK_FRAMES];                 /**< mono PCM、16 kHz */
+    uint32_t first_sample;                                   /**< 起動後の先頭mono PCM sample番号 */
+    uint32_t dropped_blocks;                                 /**< キュー溢れで破棄したblockの累積数 */
+    uint16_t sample_count;                                   /**< このblockのsample数 */
+    int16_t samples[APP_AUDIO_BLOCK_FRAMES];                 /**< 16 kHz mono PCMデータ */
 #if APP_AUDIO_STEREO_DIAGNOSTIC_ENABLE
-    int16_t second_channel[APP_AUDIO_BLOCK_FRAMES];          /**< XVF I2S右slot、用途は実測で判定 */
+    int16_t second_channel[APP_AUDIO_BLOCK_FRAMES];          /**< XVF I2S右slot。用途は実測で判定する */
 #endif
 } audio_capture_pcm_block_t;
-/* 音声タスクを待たせず、古いブロックを破棄するbounded診断キュー。 */
-bool audio_capture_pcm_block_take(audio_capture_pcm_block_t * block);
+bool audio_capture_pcm_block_take(audio_capture_pcm_block_t * block); /* PCM診断blockを取得 */
 #endif
 
 esp_err_t audio_capture_start(void);                        /* 音声キャプチャタスク開始 */

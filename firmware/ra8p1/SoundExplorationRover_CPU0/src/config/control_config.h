@@ -10,13 +10,13 @@
 #define CPU0_SENSOR_EARLY_AVOID_DISTANCE_MM (800U)          /**< 片側が開いた正面障害物の先行回避距離[mm] */
 #define CPU0_SENSOR_EARLY_AVOID_SIDE_DELTA_MM (350U)        /**< 先行回避に必要な左右差[mm] */
 #define CPU0_SENSOR_AVOID_CLEAR_DISTANCE_MM (900U)          /**< 回避側を解除する正面距離[mm] */
-#define CPU0_SENSOR_AVOID_CLEAR_SIDE_MM    (600U)           /**< 回避側を解除する側方距離[mm] */
+#define CPU0_SENSOR_AVOID_CLEAR_SIDE_MM    (600U)           /**< 通常回避解除に必要な側方距離[mm] */
 #define CPU0_SENSOR_PIVOT_DISTANCE_MM      (500U)           /**< センサーピボットのdistance[mm] */
 #define CPU0_SENSOR_BACKUP_TRIGGER_DISTANCE_MM (300U)       /**< 壁面後退を始める正面距離[mm] */
 #define CPU0_SENSOR_COLLISION_CONFIRM_COUNT (2U)            /**< 後退を始める正面近接の連続確認回数 */
 #define CPU0_SENSOR_SIDE_CONTACT_DISTANCE_MM (380U)         /**< 前進中に側面接触とみなす斜めToF距離[mm] */
-/* 車体前端の突出と旋回掃引を見込み、500 mmで最小並進旋回を開始する。 */
-#define CPU0_SENSOR_ESCAPE_SIDE_MM         (380U)           /**< センサー脱出の側面[mm] */
+/* 音源スピン・側面脱出の距離下限。近接時は後退してクリアランスを確保する。 */
+#define CPU0_SENSOR_ESCAPE_SIDE_MM         (100U)           /**< 旋回・脱出に許容する最小側面距離[mm] */
 #define CPU0_SENSOR_ESCAPE_FRONT_MM        (550U)           /**< センサー脱出の正面[mm] */
 #define CPU0_SENSOR_SETTLE_MS              (400U)           /**< センサーの安定待ち[ms] */
 #define CPU0_SENSOR_PIVOT_MIN_MS           (600U)           /**< センサーピボットの最小[ms] */
@@ -71,24 +71,23 @@
 #define CPU0_SENSOR_SIDE_TOF_ANGLE_DEG     (13)             /**< 左右ToFセンサの外側傾斜角[deg] */
 
 #define CPU0_SOUND_DOA_ZERO_OFFSET_DEG     (0)              /**< 音響DoAゼロの補正[deg] */
-/* 2026-09-24四方試験: 右前のDoA303°→右+57°、左前58°→左-58°。
- * 前方はXVFの符号を反転して車体の「右正」へ合わせる。 */
-#define CPU0_SOUND_DOA_CLOCKWISE_POSITIVE  (0U)             /**< 音響DoA時計回りの正方向 */
-/* 同試験の後方: 右後のDoA141°→右+141°、左後237°→左-123°。
- * 後半面だけ前方と左右対応が逆。真横付近は未較正なので実機で再確認する。 */
-#define CPU0_SOUND_DOA_REAR_LR_SWAP        (1U)             /**< 後方DoAの左右を実測に合わせて反転 */
+/* 現行の四方対応はraw DoAを[-180,180)へ正規化した符号をそのまま使う:
+ * DoA 58°→+58°、303°→-57°、141°→+141°、237°→-123°。 */
+#define CPU0_SOUND_DOA_CLOCKWISE_POSITIVE  (1U)             /**< 音響DoA時計回りの正方向 */
+#define CPU0_SOUND_DOA_REAR_LR_SWAP        (0U)             /**< 後方DoAの左右交換を無効化 */
 #define CPU0_SOUND_TRACK_MIN_CONFIDENCE    (40U)            /**< 走行に採用する循環DoA品質下限[0..100] */
 /* 平滑化DoAが生DoAから大きく遅れた観測は、旋回中の前回方位を示すことがある。
  * 静止聴取・追従判定では、両者がこの差分内で一致する観測だけを走行に採用する。 */
 #define CPU0_SOUND_RAW_FILTER_MAX_DELTA_DEG (20)            /**< 生DoAと平滑DoAの許容差[deg] */
 #define CPU0_SOUND_TRIGGER_DBFS_X100       (-4500)          /**< 音響の開始[0.01dBFS] */
 #define CPU0_SOUND_RELEASE_DBFS_X100       (-4800)          /**< 音響の解除[0.01dBFS] */
+#define CPU0_LEARNING_SAMPLE_MIN_DBFS_X100 (-3500)          /**< SW1学習見本に採用するイベントpeak下限 */
 #define CPU0_SOUND_DOA_SETTLE_MS           (500U)           /**< 音響DoAの安定待ち[ms] */
 #define CPU0_SOUND_DOA_ACQUIRE_TIMEOUT_MS  (2000U)          /**< 音響DoA取得の期限[ms] */
 #define CPU0_SOUND_DOA_SAMPLE_COUNT        (5U)             /**< 音響DoAサンプルの個数 */
 #define CPU0_SOUND_DOA_STABLE_WIDTH_DEG    (20)             /**< 音響DoA安定の幅[deg] */
 #define CPU0_SOUND_MOVE_DOA_INNOVATION_DEG (35)             /**< 移動中DoAと姿勢予測の異常判定差[deg] */
-#define CPU0_SOUND_FRONT_TOLERANCE_DEG     (0)              /**< 音響正面の許容幅[deg] */
+#define CPU0_SOUND_FRONT_TOLERANCE_DEG     (30)             /**< 音源を直進扱いする正面方位幅（左右各30度）[deg] */
 #define CPU0_SOUND_STEERING_MIN_DEG        (1)              /**< 音響操舵の最小[deg] */
 #define CPU0_SOUND_STEERING_MAX_DEG        (45)             /**< 音響操舵の最大[deg] */
 #define CPU0_SOUND_SPIN_THRESHOLD_DEG      (90)             /**< その場旋回（スピンターン）DoA閾値[deg]（-90〜90度外側） */
@@ -129,14 +128,17 @@
 #define CPU0_SOUND_MOVE_LEFT_RPM           (120)            /**< 音響移動の左[RPM] */
 #define CPU0_SOUND_MOVE_RIGHT_RPM          (120)            /**< 音響移動の右[RPM] */
 #define CPU0_SOUND_TURN_INNER_RPM          (90)             /**< 音響旋回の内輪[RPM] */
-#define CPU0_STEERING_SERVO_OUTPUT_SIGN    (-1)             /**< 操舵サーボ出力の符号 */
+/* 2026-09-27実機ログ: 通常の右操舵+45度で左右実測73.5/74.3 RPMにもかかわらず
+ * ジャイロZは+33.4 dps（左旋回）。通常操舵だけ極性を反転し、右スピンは保持する。 */
+#define CPU0_STEERING_SERVO_OUTPUT_SIGN    (1)              /**< 通常走行で右正の操舵を実機の右旋回へ対応 */
+#define CPU0_SOUND_SPIN_SERVO_OUTPUT_SIGN  (-1)             /**< 検証済みX字操舵のサーボ出力極性 */
 
 /* 音源追従の既定動作: 位置推定を直接の操舵へ使わず、対象音が続く間はDoAへ連続追従する。
  * 回避後だけは停止・再聴取し、対象音を失ったときは安全に停止する。 */
-#define CPU0_SOUND_STOP_AND_LISTEN_ENABLE   (0U)             /**< ステップごとの停止聴取シーケンス有効化（0: 連続追従） */
+#define CPU0_SOUND_STOP_AND_LISTEN_ENABLE  (0U)             /**< ステップごとの停止聴取シーケンス有効化（0: 連続追従） */
 #define CPU0_SOUND_USE_LOCALIZATION_FOR_STEERING (0U)       /**< 位置推定bearingを操舵へ使うか */
 #define CPU0_SOUND_USE_LOCALIZATION_FOR_ARRIVAL (0U)        /**< 位置推定到着を停止理由へ使うか */
-#define CPU0_SOUND_ALLOW_CONTROL_MLP        (1U)            /**< 音源追従中にMLP操舵を採用するか */
+#define CPU0_SOUND_ALLOW_CONTROL_MLP       (1U)             /**< 音源追従中にMLP操舵を採用するか */
 /* 現場学習音響識別の走行反映: 0は従来互換（DoA+音量追従）、 */
 /* 1は学習見本一致時のみ追従する。 */
 #define CPU0_SOUND_REQUIRE_IDENTIFIER_MATCH (1U)            /**< 音響必須識別の一致 */
@@ -145,21 +147,21 @@
 #define CPU0_SOUND_IDENTIFIER_FORCE_REJECT_DISTANCE (0.35F) /**< ピーク帯域によらず一致保持を解除する距離 */
 
 /* bearing-only音源位置推定。単一DoAでは距離を確定せず、移動基線と交差角を必須とする。 */
-#define CPU0_SOUND_LOCALIZATION_MAX_OBSERVATIONS (12U)     /**< 位置推定へ保持する方位観測数 */
-#define CPU0_SOUND_LOCALIZATION_MIN_CONFIDENCE (60U)       /**< 採用するDoA品質下限[0..100] */
-#define CPU0_SOUND_LOCALIZATION_MIN_BASELINE_MM (150U)     /**< 推定に必要な最小移動基線[mm] */
-#define CPU0_SOUND_LOCALIZATION_MIN_CROSSING_DEG (12U)     /**< 推定に必要な最小交差角[deg] */
-#define CPU0_SOUND_LOCALIZATION_MAX_RESIDUAL_MM (250U)     /**< 方位線残差RMS上限[mm] */
-#define CPU0_SOUND_LOCALIZATION_MAX_RANGE_MM (10000U)      /**< 採用する音源距離上限[mm] */
-#define CPU0_SOUND_LOCALIZATION_MAX_JUMP_MM (1000U)        /**< 連続推定位置の最大変化[mm] */
+#define CPU0_SOUND_LOCALIZATION_MAX_OBSERVATIONS (12U)      /**< 位置推定へ保持する方位観測数 */
+#define CPU0_SOUND_LOCALIZATION_MIN_CONFIDENCE (60U)        /**< 採用するDoA品質下限[0..100] */
+#define CPU0_SOUND_LOCALIZATION_MIN_BASELINE_MM (150U)      /**< 推定に必要な最小移動基線[mm] */
+#define CPU0_SOUND_LOCALIZATION_MIN_CROSSING_DEG (12U)      /**< 推定に必要な最小交差角[deg] */
+#define CPU0_SOUND_LOCALIZATION_MAX_RESIDUAL_MM (250U)      /**< 方位線残差RMS上限[mm] */
+#define CPU0_SOUND_LOCALIZATION_MAX_RANGE_MM (10000U)       /**< 採用する音源距離上限[mm] */
+#define CPU0_SOUND_LOCALIZATION_MAX_JUMP_MM (1000U)         /**< 連続推定位置の最大変化[mm] */
 #define CPU0_SOUND_LOCALIZATION_OBSERVATION_MAX_AGE_MS (5000U) /**< 方位観測保持時間[ms] */
-#define CPU0_SOUND_LOCALIZATION_HOLD_MS     (3000U)         /**< 最終有効音から目標を保持する時間[ms] */
-#define CPU0_SOUND_ARRIVAL_RANGE_MM         (450U)          /**< 到着候補の音源距離[mm] */
-#define CPU0_SOUND_ARRIVAL_BEARING_DEG      (25U)           /**< 到着確認の正面方位幅[deg] */
-#define CPU0_SOUND_ARRIVAL_MIN_CONFIDENCE   (65U)           /**< 到着確認の位置品質下限[0..100] */
-#define CPU0_SOUND_ARRIVAL_STRONG_CONFIDENCE (80U)         /**< 正面外で許す強い位置品質[0..100] */
-#define CPU0_SOUND_ARRIVAL_CONFIRM_COUNT    (3U)            /**< 到着確定に必要な有効観測数 */
-#define CPU0_SOUND_ARRIVAL_VERIFY_MS        (250U)          /**< 到着候補を維持する時間[ms] */
+#define CPU0_SOUND_LOCALIZATION_HOLD_MS    (3000U)          /**< 最終有効音から目標を保持する時間[ms] */
+#define CPU0_SOUND_ARRIVAL_RANGE_MM        (450U)           /**< 到着候補の音源距離[mm] */
+#define CPU0_SOUND_ARRIVAL_BEARING_DEG     (25U)            /**< 到着確認の正面方位幅[deg] */
+#define CPU0_SOUND_ARRIVAL_MIN_CONFIDENCE  (65U)            /**< 到着確認の位置品質下限[0..100] */
+#define CPU0_SOUND_ARRIVAL_STRONG_CONFIDENCE (80U)          /**< 正面外で許す強い位置品質[0..100] */
+#define CPU0_SOUND_ARRIVAL_CONFIRM_COUNT   (3U)             /**< 到着確定に必要な有効観測数 */
+#define CPU0_SOUND_ARRIVAL_VERIFY_MS       (250U)           /**< 到着候補を維持する時間[ms] */
 
 /* TFLM完全int8障害物回避制御MLP（Policy Distillation）の有効化設定 */
 #ifndef CPU0_USE_CONTROL_MLP

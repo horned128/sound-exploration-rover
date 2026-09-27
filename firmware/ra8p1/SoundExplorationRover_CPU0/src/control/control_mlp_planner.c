@@ -10,10 +10,10 @@
 #include <string.h>                                         /* メモリ操作 */
 
 #ifndef M_PI
-#define M_PI                               (3.14159265358979323846f)
+#define M_PI                               (3.14159265358979323846f) /**< 三角関数の円周率 */
 #endif
 
-#define DEG_TO_RAD(d)                      ((d) * (float)(M_PI / 180.0f))
+#define DEG_TO_RAD(d)                      ((d) * (float)(M_PI / 180.0f)) /* 度からradへの換算 */
 
 LOCAL BOOL s_initialized = FALSE;                           /**< TFLM推論器準備完了フラグ */
 LOCAL tflm_runtime_info_t s_model_info;                     /**< モデル入出力量子化情報 */

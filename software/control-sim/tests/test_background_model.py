@@ -51,6 +51,27 @@ def test_background_rls_reduces_error_and_builds_mean_plus_three_sigma_threshold
     assert state.mse_count == 80
 
 
+def test_threshold_forgets_old_high_error_instead_of_accumulating_it_for_lifetime() -> None:
+    handle = library()
+    state = initialized_model()
+    state.mse_count = 10
+    state.mse_mean = 0.01
+    state.mse_variance = 100.0
+    threshold_before = ctypes.c_float()
+    assert handle.background_model_mse_threshold(ctypes.byref(state), ctypes.byref(threshold_before)) == 1
+
+    stable_background = frame([-64] * CPU0_BACKGROUND_MODEL_INPUT_DIMENSION)
+    observed = ctypes.c_float()
+    for _ in range(400):
+        assert handle.background_model_observe(
+            ctypes.byref(state), stable_background, BOOL(0), ctypes.byref(observed)
+        ) == 1
+
+    threshold_after = ctypes.c_float()
+    assert handle.background_model_mse_threshold(ctypes.byref(state), ctypes.byref(threshold_after)) == 1
+    assert threshold_after.value < threshold_before.value * 0.01
+
+
 def test_active_frame_is_scored_but_never_updates_decoder_or_inverse_correlation() -> None:
     handle = library()
     state = initialized_model()
@@ -60,11 +81,15 @@ def test_active_frame_is_scored_but_never_updates_decoder_or_inverse_correlation
         assert handle.background_model_observe(ctypes.byref(state), background, BOOL(0), ctypes.byref(mse)) == 1
     decoder_before = list(state.decoder)
     correlation_before = list(state.inverse_correlation)
+    mean_before = state.mse_mean
+    variance_before = state.mse_variance
     active = frame(list(range(-32, 32, 2)))
     assert handle.background_model_observe(ctypes.byref(state), active, BOOL(1), ctypes.byref(mse)) == 1
     assert list(state.decoder) == decoder_before
     assert list(state.inverse_correlation) == correlation_before
     assert state.mse_count == 10
+    assert state.mse_mean == mean_before
+    assert state.mse_variance == variance_before
 
 
 def test_invalid_arguments_and_restored_decoder_reset_path_fail_closed() -> None:

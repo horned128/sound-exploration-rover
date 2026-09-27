@@ -11,7 +11,7 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
-from diagnostics import is_private_diagnostic_record
+from diagnostics import background_autoencoder_update, is_private_diagnostic_record
 
 # ==========================================
 # 設定: データ転送先 (UDP)
@@ -76,6 +76,7 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
         self.last_message: str | None = None
+        self.last_background_ae_message: str | None = None
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -98,14 +99,19 @@ class ConnectionManager:
         )
         if self.last_message is not None:
             await websocket.send_text(self.last_message)
+        if self.last_background_ae_message is not None:
+            await websocket.send_text(self.last_background_ae_message)
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
 
-    async def broadcast(self, message: str):
+    async def broadcast(self, message: str, *, background_ae: bool = False):
         disconnected: list[WebSocket] = []
-        self.last_message = message
+        if background_ae:
+            self.last_background_ae_message = message
+        else:
+            self.last_message = message
 
         for connection in self.active_connections:
             try:
@@ -145,6 +151,14 @@ class UDPReceiverAndForwarder(asyncio.DatagramProtocol):
 
         # 走行中の特徴量・保存見本はJSONL専用で、通常状態WebSocketへ流さない。
         if is_private_diagnostic_record(parsed):
+            background_update = background_autoencoder_update(parsed)
+            if background_update is not None:
+                asyncio.create_task(
+                    manager.broadcast(
+                        json.dumps(background_update, separators=(",", ":")),
+                        background_ae=True,
+                    )
+                )
             return
 
         # 2. 指定された外部システムへデータをそのまま転送 (UDP Forwarding)

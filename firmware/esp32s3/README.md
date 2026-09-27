@@ -29,7 +29,7 @@ UDP JSONの`esp_audio`はCPU0接続状態に依存しないESP32S3ローカル�
 CPU0のAI Lab形式フレームはgeneration/sample単位で再組立し、`acoustic_diagnostic`と`acoustic_sample`の小さなUDP JSONとして通常250 ms状態JSONとは別に送ります。UDP診断queueは8イベント固定で、混雑時は欠落数を数えて破棄します。Rover MonitorはこれらをJSONLへ保存し、通常状態のWebSocket表示には配信しません。
 
 `ACOUSTIC_FEATURE` は、I2Sレベルが`APP_FEATURE_TRIGGER_LEVEL_DBFS_X100`以上になった
-立ち上がりで収集します。音が継続している間も`APP_FEATURE_RETRIGGER_PERIOD_MS`（現状1.5 s）ごとに
+立ち上がりで収集します。現在の収集床は-60 dBFSで、CPU0の走行開始しきい値-45 dBFSとは分離しています。音が継続している間も`APP_FEATURE_RETRIGGER_PERIOD_MS`（現状1.0 s）ごとに
 新しいイベントを収集するため、AI Labの照合結果と特徴量は連続音でも更新されます。拍手・打音など
 音声以外も学習対象にできるよう、XVF3800のVADはイベント収集の条件に使用しません。直近300 msを
 直ちに退避し、その後の500 msは音声キャプチャタスクが連続して収集するため、800 msリングの
@@ -37,6 +37,8 @@ CPU0のAI Lab形式フレームはgeneration/sample単位で再組立し、`acou
 （72 B payload）のパケットを20 ms間隔でUSB CDCへ送ります。送信失敗時はそのイベントの残りを
 送らず、次のイベントの`frame_index=0`でCPU0側の再組立を再同期させます。無音後は次の立ち上がりを
 待たず即時収集し、連続音中は上記周期より速くイベントを連発しません。
+このdBFS床は特徴量の**収集**だけを制御し、CPU0の走行開始しきい値とは独立です。イベントpeak dBFSはfeature flagsにイベント全体の最大RMS値として載せ、CPU0のSW1学習はAE異常かつ-35 dBFS以上の有効イベントだけを見本にします。
+feature flagsのbit7はイベントlevel有効、bit0..6はイベント最大RMS dBFSを1 dB単位で表し、CPU0は推論完了時の別タイミングのライブ音量ではなくイベント全体の値で見本床を判定します。
 
 音響特徴量のI2S slotは`APP_AUDIO_FEATURE_CHANNEL_INDEX`で指定する。右slotのファームはHELLOの
 `ACOUSTIC_CAPABILITY_FEATURE_SLOT1`を立て、CPU0は同capabilityがない旧ESP32-S3と走行を開始しない。

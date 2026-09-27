@@ -170,8 +170,8 @@ def run_test_map_simulation(
         # Rover coordinate: Right is positive (CW positive)
         rover_doa_deg = -math.degrees(rel_sound_angle)
 
-        # XVF raw DoA: 0..359 (XVF clockwise positive == 0 in config, so raw = -rover_doa % 360)
-        raw_xvf_doa = int(round(-rover_doa_deg)) % 360
+        # XVF raw DoA: 0..359 (現行の時計回り右正設定に合わせる)
+        raw_xvf_doa = int(round(rover_doa_deg)) % 360
 
         # Step controllers at 100ms
         if now_ms % 100 == 0:
@@ -227,8 +227,7 @@ def run_test_map_simulation(
             handle.sound_follow_controller_step(ctypes.byref(sf_input), 100, ctypes.byref(sf_output))
 
             # Target steering from sound
-            target_steer = sf_output.target_bearing_deg
-            target_steer = max(-45, min(45, target_steer))
+            target_steer = handle.sound_follow_steering_from_doa(sf_output.target_bearing_deg)
 
             handle.obstacle_avoidance_controller_step(
                 ctypes.byref(snapshot),

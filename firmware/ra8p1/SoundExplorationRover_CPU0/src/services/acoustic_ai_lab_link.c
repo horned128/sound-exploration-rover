@@ -18,10 +18,10 @@
 #define AI_LAB_SNAPSHOT_PERIOD_MS          (250U)           /**< snapshot送信周期[ms] */
 #define AI_LAB_SUMMARY_CHUNK_COUNT         (3U)             /**< 要約chunk数 */
 #define AI_LAB_PROFILE_CHUNK_COUNT         (3U)             /**< 保存見本chunk数 */
-#define AI_LAB_USB_VENDOR_ID              (0x0000U)         /**< 固有VIDを主張しない */
-#define AI_LAB_USB_PRODUCT_ID             (0x0001U)         /**< 固定PID */
-#define AI_LAB_USB_RELEASE                (0x0100U)         /**< USB release番号 */
-#define AI_LAB_USB_CONFIGURATION_SIZE     (67U)            /**< configuration descriptor長[byte] */
+#define AI_LAB_USB_VENDOR_ID               (0x0000U)        /**< 固有VIDを主張しない */
+#define AI_LAB_USB_PRODUCT_ID              (0x0001U)        /**< 固定PID */
+#define AI_LAB_USB_RELEASE                 (0x0100U)        /**< USB release番号 */
+#define AI_LAB_USB_CONFIGURATION_SIZE      (67U)            /**< configuration descriptor長[byte] */
 
 /* CDC ACM descriptor。J11をmacOS/Windows/Linux標準CDCとして列挙する。 */
 /**< J11 CDCデバイスdescriptor */
@@ -60,22 +60,26 @@ LOCAL UB ai_lab_other_speed_configuration_descriptor[] = {
     7U, USB_DT_ENDPOINT, (USB_EP_IN | USB_EP1), USB_EP_BULK, 64U, 0U, 0U,
     7U, USB_DT_ENDPOINT, (USB_EP_OUT | USB_EP2), USB_EP_BULK, 64U, 0U, 0U,
 };
-LOCAL UB ai_lab_string_language[] = {4U, USB_DT_STRING, 0x09U, 0x04U}; /**< USB言語ID */
+/**< USB言語ID descriptor */
+LOCAL UB ai_lab_string_language[] = {4U, USB_DT_STRING, 0x09U, 0x04U};
+/**< USBメーカー文字列 */
 LOCAL UB ai_lab_string_manufacturer[] = {
     24U, USB_DT_STRING, 'S', 0U, 'o', 0U, 'u', 0U, 'n', 0U, 'd', 0U, ' ', 0U,
     'R', 0U, 'o', 0U, 'v', 0U, 'e', 0U, 'r', 0U,
-}; /**< USBメーカー文字列 */
+};
+/**< USB製品文字列 */
 LOCAL UB ai_lab_string_product[] = {
     32U, USB_DT_STRING, 'A', 0U, 'c', 0U, 'o', 0U, 'u', 0U, 's', 0U, 't', 0U,
     'i', 0U, 'c', 0U, ' ', 0U, 'A', 0U, 'I', 0U, ' ', 0U, 'L', 0U, 'a', 0U, 'b', 0U,
-}; /**< USB製品文字列 */
+};
 /**< USBシリアル文字列 */
 LOCAL UB ai_lab_string_serial[] = {
     10U, USB_DT_STRING, '0', 0U, '0', 0U, '0', 0U, '1', 0U,
 };
+/**< USB文字列descriptor table */
 LOCAL UB * ai_lab_string_table[] = {
     ai_lab_string_language, ai_lab_string_manufacturer, ai_lab_string_product, ai_lab_string_serial,
-}; /**< USB文字列descriptor table */
+};
 /**< J11 CDC descriptor registration */
 EXPORT usb_descriptor_t g_acoustic_ai_lab_usb_descriptor = {
     .p_device = ai_lab_device_descriptor,
@@ -317,7 +321,8 @@ LOCAL void acoustic_ai_lab_snapshot_capture(const task_infer_result_t * p_infer,
             snapshot.flags |= ACOUSTIC_AI_LAB_FLAG_BACKGROUND_ANOMALY;
         }
         if (p_current_infer->identifier.minimum_cosine_distance >= 0.0F) {
-            snapshot.cosine_distance_x1000 = acoustic_ai_lab_float_x1000(p_current_infer->identifier.minimum_cosine_distance);
+            snapshot.cosine_distance_x1000 =
+                acoustic_ai_lab_float_x1000(p_current_infer->identifier.minimum_cosine_distance);
             snapshot.similarity_permille = (snapshot.cosine_distance_x1000 > 1000U) ? 0U :
                                          (UH) (1000U - snapshot.cosine_distance_x1000);
         }

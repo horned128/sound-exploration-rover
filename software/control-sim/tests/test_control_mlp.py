@@ -255,6 +255,44 @@ def test_control_mlp_follows_each_sound_side_in_clear_space() -> None:
     assert left_output.steering_deg <= -20.0, left_output.steering_deg
 
 
+def test_front_doa_jitter_stays_straight_with_mlp_but_obstacles_still_turn() -> None:
+    """走行時と同じDoA補正後の入力で、MLPが正面音の揺れを操舵へ戻さない。"""
+    handle = library()
+    handle.control_mlp_planner_reset()
+    assert handle.control_mlp_planner_init() == 1
+    clear = sensor_snapshot(left_mm=4000, center_mm=4000, right_mm=4000)
+
+    for bearing in (0, -30, 30, -20, 20, -29, 29):
+        target = handle.sound_follow_steering_from_doa(bearing)
+        assert target == 0
+        for _ in range(6):
+            output = control_mlp_plan_step(clear, float(target))
+            assert output.steering_deg == 0.0
+            assert not output.fallback_required
+
+    for bearing in (-35, 35):
+        handle.control_mlp_planner_reset()
+        assert handle.control_mlp_planner_init() == 1
+        target = handle.sound_follow_steering_from_doa(bearing)
+        for _ in range(12):
+            output = control_mlp_plan_step(clear, float(target))
+        assert abs(output.steering_deg) <= 15.0
+
+    handle.control_mlp_planner_reset()
+    assert handle.control_mlp_planner_init() == 1
+    # 直進扱いでも障害物には反応し、解消後は既存の9度/周期の制限で舵を戻す。
+    blocked = sensor_snapshot(left_mm=300, center_mm=500, right_mm=2000)
+    for _ in range(8):
+        output = control_mlp_plan_step(blocked, 0.0)
+    assert output.steering_deg >= 25.0
+    previous_steering = output.steering_deg
+    output = control_mlp_plan_step(clear, 0.0)
+    assert 0.0 <= output.steering_deg < previous_steering
+    for _ in range(8):
+        output = control_mlp_plan_step(clear, 0.0)
+    assert output.steering_deg == 0.0
+
+
 def test_control_mlp_holds_the_selected_clearance_side_through_wall_measurements() -> None:
     """The safety guard must not weaken or reverse a selected side merely because that side sees a wall."""
     handle = library()

@@ -5,7 +5,7 @@
 #ifndef SEROV_CPU0_SERVICE_SOUND_SOURCE_LOCALIZER_H
 #define SEROV_CPU0_SERVICE_SOUND_SOURCE_LOCALIZER_H
 
-#include "services/odometry.h"                             /* 車体位置姿勢 */
+#include "services/odometry.h"                              /* 車体位置姿勢 */
 #include <tk/tkernel.h>                                     /* μT-Kernel基本型 */
 
 /**< 音源到着判定の段階。障害物停止・非常停止とは独立する。 */
@@ -22,9 +22,9 @@ typedef struct st_sound_source_localizer_input {
     H relative_doa_deg;                                     /**< 車体正面基準DoA（右正）[deg] */
     UB doa_confidence;                                      /**< DoA品質[0..100] */
     BOOL new_observation;                                   /**< 未処理の新規観測 */
-    BOOL sound_valid;                                       /**< VAD・音量・識別を通過した対象音 */
+    BOOL sound_valid;                                       /**< 音量・識別条件を通過した対象音 */
     BOOL pose_valid;                                        /**< poseが同期済みかつfresh */
-    UW observation_sequence;                               /**< DoA観測専用sequence */
+    UW observation_sequence;                                /**< DoA観測専用sequence */
     UW now_ms;                                              /**< 単調時刻[ms] */
 } sound_source_localizer_input_t;
 
@@ -39,7 +39,7 @@ typedef struct st_sound_source_localizer_output {
     BOOL source_position_valid;                             /**< 幾何条件を満たす位置推定あり */
     BOOL localization_geometry_valid;                       /**< 今回の最小二乗幾何が有効 */
     BOOL navigation_target_valid;                           /**< 追従に使える保持期限内目標 */
-    BOOL arrival_candidate;                                /**< 距離・品質・音の到着候補 */
+    BOOL arrival_candidate;                                 /**< 距離・品質・音の到着候補 */
     UH localization_residual_mm;                            /**< 方位線残差RMS[mm] */
     UH bearing_crossing_angle_deg;                          /**< 最大方位交差角[deg] */
     UH baseline_mm;                                         /**< 最大観測基線[mm] */
@@ -52,4 +52,4 @@ EXPORT void sound_source_localizer_init(void);              /* 推定履歴初�
 EXPORT void sound_source_localizer_step(const sound_source_localizer_input_t * p_input,
                                         sound_source_localizer_output_t * p_output); /* 推定更新 */
 
-#endif /* SEROV_CPU0_SERVICE_SOUND_SOURCE_LOCALIZER_H */
+#endif                                                      /* SEROV_CPU0_SERVICE_SOUND_SOURCE_LOCALIZER_H */

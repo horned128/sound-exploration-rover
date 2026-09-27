@@ -20,7 +20,9 @@ typedef enum e_acoustic_feature_assembler_result {
 /**< 1音響イベント分の特徴量フレームを保持するパッチ */
 typedef struct st_acoustic_feature_patch {
     UH event_id;                                            /**< 再組立対象の音響イベントID */
-    /**< イベントを構成する特徴量フレーム列 */
+    H peak_level_dbfs_x100;                                 /**< イベント中の最大RMS音量 */
+    BOOL event_level_valid;                                 /**< ESP32イベント音量metadata有効 */
+                                                            /**< イベントを構成する特徴量フレーム列 */
     B frames[ACOUSTIC_FEATURE_EVENT_FRAME_COUNT][ACOUSTIC_FEATURE_BIN_COUNT];
 } acoustic_feature_patch_t;
 
@@ -28,6 +30,7 @@ typedef struct st_acoustic_feature_patch {
 typedef struct st_acoustic_feature_assembler {
     acoustic_feature_patch_t patch;                         /**< 再組立中の特徴量パッチ */
     UH next_frame_index;                                    /**< 次に受信するフレーム番号 */
+    UB event_flags;                                         /**< イベント内で不変のlevel metadata */
     BOOL active;                                            /**< 再組立中フラグ */
 } acoustic_feature_assembler_t;
 
@@ -35,4 +38,4 @@ EXPORT void acoustic_feature_assembler_init(acoustic_feature_assembler_t * p_ass
 EXPORT acoustic_feature_assembler_result_t acoustic_feature_assembler_push(
     acoustic_feature_assembler_t * p_assembler, const acoustic_feature_t * p_feature); /* 特徴量packet追加 */
 
-#endif /* SEROV_CPU0_ACOUSTIC_FEATURE_ASSEMBLER_H */
+#endif                                                      /* SEROV_CPU0_ACOUSTIC_FEATURE_ASSEMBLER_H */

@@ -187,10 +187,22 @@ EXPORT BOOL background_model_observe(background_model_state_t * p_state,
         }
     }
 
-    p_state->mse_count++;
+    if (0U == p_state->mse_count) {
+        p_state->mse_mean = *p_mse;
+        p_state->mse_variance = 0.0F;
+        p_state->mse_count = 1U;
+        return TRUE;
+    }
+
+    /* RLS decoderと同じ忘却係数で統計も更新する。生涯Welford統計では、
+     * 起動直後や環境切替時の大誤差が長時間Limitへ残ってしまう。 */
+    float const forgetting = CPU0_BACKGROUND_MODEL_FORGETTING_FACTOR;
+    float const adaptation = 1.0F - forgetting;
     float const delta = *p_mse - p_state->mse_mean;
-    p_state->mse_mean += delta / (float) p_state->mse_count;
-    p_state->mse_m2 += delta * (*p_mse - p_state->mse_mean);
+    p_state->mse_mean += adaptation * delta;
+    p_state->mse_variance = forgetting *
+        (p_state->mse_variance + (adaptation * delta * delta));
+    p_state->mse_count++;
     return TRUE;
 }
 
@@ -201,7 +213,7 @@ EXPORT BOOL background_model_mse_threshold(const background_model_state_t * p_st
     if ((NULL == p_state) || (NULL == p_threshold) || (p_state->mse_count < 2U)) {
         return FALSE;
     }
-    float const variance = p_state->mse_m2 / (float) p_state->mse_count;
+    float const variance = p_state->mse_variance;
     *p_threshold = p_state->mse_mean + (3.0F * sqrtf((variance > 0.0F) ? variance : 0.0F));
     return TRUE;
 }

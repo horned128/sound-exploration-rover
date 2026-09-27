@@ -44,6 +44,7 @@ typedef struct st_avoidance_controller {
 } avoidance_controller_t;
 
 LOCAL avoidance_controller_t avoidance;                     /**< 回避方向、回頭量、脱出履歴 */
+LOCAL void obstacle_avoidance_start_backup(obstacle_avoidance_output_t * p_output); /* 近接時の後退開始 */
 
 /** =================================================================*
  * @brief  Hの安全な絶対値
@@ -229,6 +230,16 @@ LOCAL B obstacle_avoidance_choose_escape_direction(UH left_mm, UH right_mm, H ta
  * ================================================================= */
 LOCAL void obstacle_avoidance_start_turn(UH left_mm, UH right_mm, H target_steering_deg,
                                          obstacle_avoidance_output_t * p_output) {
+    /* 音源へ向く側が側面接触距離未満なら、反対側へ旋回して音源を見失うより、
+     * 先に短距離後退して目標方向のクリアランスを作る。確保できなければ上限後停止する。 */
+    if (obstacle_avoidance_abs_i16(target_steering_deg) >= CPU0_SENSOR_ESCAPE_TARGET_DEADBAND_DEG) {
+        BOOL const target_on_left = target_steering_deg < 0;
+        UH const target_side_mm = target_on_left ? left_mm : right_mm;
+        if (target_side_mm < CPU0_SENSOR_ESCAPE_SIDE_MM) {
+            obstacle_avoidance_start_backup(p_output);
+            return;
+        }
+    }
     avoidance.direction = obstacle_avoidance_choose_escape_direction(left_mm, right_mm, target_steering_deg,
                                                                       avoidance.direction);
     avoidance.yaw_mdeg = 0;

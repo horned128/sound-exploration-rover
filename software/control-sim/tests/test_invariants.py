@@ -113,8 +113,8 @@ def test_sound_follow_ignores_navigation_bearing_while_moving() -> None:
     outputs = sound_follow_trace(trace)
     move_outputs = [output for output in outputs if output.state == 3]
     assert move_outputs
-    assert all(output.steering_deg == -45 for output in move_outputs)
-    assert all(output.target_bearing_deg == -90 for output in move_outputs)
+    assert all(output.steering_deg == 45 for output in move_outputs)
+    assert all(output.target_bearing_deg == 90 for output in move_outputs)
 
 
 def test_target_sound_loss_stops_motion_after_the_existing_timeout() -> None:

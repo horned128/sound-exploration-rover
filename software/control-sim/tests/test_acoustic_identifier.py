@@ -166,11 +166,23 @@ def test_classification_enforces_peak_band_and_runtime_threshold_cap() -> None:
     samples = (ctypes.c_int8 * (5 * CPU0_ACOUSTIC_SUMMARY_DIMENSION))(*list(reference) * 5)
     output = AcousticIdentifierSummaryOutput()
 
-    # 旧MRAMに保存された0.220のしきい値でも、実機識別の受理上限0.055で照合する。
+    # 旧MRAMに保存された広いしきい値も、現行受理上限0.08で照合する。
     handle.acoustic_identifier_summary_classify(candidate, 1, 80, samples, 5, None, 0.22, ctypes.byref(output))
-    assert abs(output.threshold - 0.055) < 1e-4
+    assert abs(output.threshold - 0.08) < 1e-4
     assert output.minimum_cosine_distance < 0.20
     assert output.status == SUMMARY_NOT_TARGET
+
+
+def test_legacy_saved_threshold_is_raised_to_the_current_acceptance_floor() -> None:
+    handle = library()
+    summary, active_count, valid = summary_from_patch(10)
+    samples = (ctypes.c_int8 * (5 * CPU0_ACOUSTIC_SUMMARY_DIMENSION))(*list(summary) * 5)
+    output = AcousticIdentifierSummaryOutput()
+
+    handle.acoustic_identifier_summary_classify(summary, valid, active_count, samples, 5, None, 0.055,
+                                                 ctypes.byref(output))
+    assert abs(output.threshold - 0.08) < 1e-4
+    assert output.status == SUMMARY_TARGET
 
 
 def test_classification_accepts_the_measured_six_bin_peak_drift() -> None:
@@ -190,7 +202,7 @@ def test_classification_accepts_the_measured_six_bin_peak_drift() -> None:
     output = AcousticIdentifierSummaryOutput()
 
     handle.acoustic_identifier_summary_classify(candidate, 1, 80, samples, 5, None, 0.20, ctypes.byref(output))
-    assert output.minimum_cosine_distance <= 0.055
+    assert output.minimum_cosine_distance <= 0.08
     assert output.status == SUMMARY_TARGET
 
 

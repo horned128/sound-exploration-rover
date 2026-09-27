@@ -7,8 +7,7 @@
 #include <new>                                              /* 配置new */
 #include "flatbuffers/verifier.h"                           /* FlatBuffers検証 */
 #include "tensorflow/lite/micro/micro_interpreter.h"        /* TFLMインタプリタ */
-/* 演算子リゾルバ */
-#include "tensorflow/lite/micro/micro_mutable_op_resolver.h"
+#include "tensorflow/lite/micro/micro_mutable_op_resolver.h" /* TFLM可変演算子リゾルバ */
 #include "tensorflow/lite/schema/schema_generated.h"        /* TFLiteスキーマ定義 */
 
 using AcousticResolver = tflite::MicroMutableOpResolver<20>;

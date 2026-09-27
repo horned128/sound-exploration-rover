@@ -23,10 +23,10 @@
 #define CPU0_AUDIO_GET_LINE_CODING         /**< USBデバイスから返すLine Coding要求値 */ \
     (USB_CDC_GET_LINE_CODING | USB_DEV_TO_HOST | USB_CLASS | USB_INTERFACE)
 #define CPU0_AUDIO_LINE_CODING_LENGTH      (7U)             /**< USB Line Codingデータ長[byte] */
-#define CPU0_AUDIO_DIAGNOSTIC_QUEUE_CAPACITY (2U)           /**< J7内部USB診断世代queue */
-#define CPU0_AUDIO_DIAGNOSTIC_CHUNK_COUNT (3U)              /**< 192次元要約chunk数 */
-#define CPU0_AUDIO_DIAGNOSTIC_KIND_SUMMARY (0U)
-#define CPU0_AUDIO_DIAGNOSTIC_KIND_PROFILE (1U)
+#define CPU0_AUDIO_DIAGNOSTIC_QUEUE_CAPACITY (2U)           /**< J7診断イベントの同時保持数 */
+#define CPU0_AUDIO_DIAGNOSTIC_CHUNK_COUNT  (3U)             /**< 192次元要約の分割数 */
+#define CPU0_AUDIO_DIAGNOSTIC_KIND_SUMMARY (0U)             /**< 完了対象が要約snapshot */
+#define CPU0_AUDIO_DIAGNOSTIC_KIND_PROFILE (1U)             /**< 完了対象が保存見本 */
 
 LOCAL void task_acoustic_link_entry(INT stacd, void * exinf); /* 音響リンクタスク本体 */
 LOCAL UW task_acoustic_link_monotonic_ms(void);             /* カーネル単調時刻取得 */
@@ -41,12 +41,12 @@ LOCAL fsp_err_t task_acoustic_link_actuator_telemetry_start(void); /* CPU1診断
 LOCAL fsp_err_t task_acoustic_link_pose_telemetry_start(void); /* オドメトリ診断Bulk OUT開始 */
 LOCAL fsp_err_t task_acoustic_link_nav_diagnostics_start(void); /* 音源ナビ診断Bulk OUT開始 */
 LOCAL fsp_err_t task_acoustic_link_telemetry_start(void);   /* USB Bulk OUT開始 */
-LOCAL void task_acoustic_link_diagnostic_queue_update(void); /* 新しい特徴量世代をqueueへ登録 */
-LOCAL void task_acoustic_link_profile_auto_queue(UW now_ms); /* 新しいprofileをqueueへ登録 */
+LOCAL void task_acoustic_link_diagnostic_queue_update(void);/* 新しい特徴量世代をqueueへ登録 */
+LOCAL void task_acoustic_link_profile_auto_queue(UW now_ms);/* 新しいprofileをqueueへ登録 */
 LOCAL fsp_err_t task_acoustic_link_diagnostic_send(void);   /* J7へ診断snapshot/chunk送信 */
-LOCAL fsp_err_t task_acoustic_link_profile_send(void);     /* J7へ保存見本chunk送信 */
+LOCAL fsp_err_t task_acoustic_link_profile_send(void);      /* J7へ保存見本chunk送信 */
 LOCAL void task_acoustic_link_diagnostic_write_complete(void); /* 診断frame完了処理 */
-LOCAL void task_acoustic_link_diagnostic_drop_current(void); /* USB timeout時の診断破棄 */
+LOCAL void task_acoustic_link_diagnostic_drop_current(void);/* USB timeout時の診断破棄 */
 LOCAL void task_acoustic_link_receive(UW length);           /* USB受信データ処理 */
 LOCAL void task_acoustic_link_frame_handle(const acoustic_frame_t * p_frame); /* 正常フレーム反映 */
 LOCAL BOOL task_acoustic_link_sequence_accept(UW sequence); /* sequence新旧判定 */
@@ -110,38 +110,40 @@ LOCAL UW audio_feature_first_rx_ms;                         /**< feature frame_i
 LOCAL BOOL audio_feature_ready;                             /**< 完成特徴量保持状態 */
 /**< CDC仮想UART設定 (115200bps, 1 stop bit, no parity, 8 data bits - 7 bytes packed) */
 LOCAL UB audio_cdc_line_coding[CPU0_AUDIO_LINE_CODING_LENGTH] = {
-    0x00, 0xC2, 0x01, 0x00, /* 115200 bps (little-endian) */
-    0x00,                   /* 1 stop bit */
-    0x00,                   /* no parity */
-    0x08                    /* 8 data bits */
+    0x00, 0xC2, 0x01, 0x00,                                 /* 115200 bps (little-endian) */
+    0x00,                                                   /* 1 stop bit */
+    0x00,                                                   /* no parity */
+    0x08                                                    /* 8 data bits */
 };
 LOCAL UB audio_control_dummy;                               /**< data無しcontrol転送用 */
 LOCAL UB audio_rx_buffer[CPU0_AUDIO_USB_RX_SIZE];           /**< USB Bulk INバッファ */
 /**< USB Bulk OUTバッファ */
 LOCAL UB audio_tx_buffer[ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE]; /**< USB送信用フレームバッファ */
 
+/**< 1特徴量世代の推論snapshotと要約送信状態 */
 typedef struct st_audio_diagnostic_event {
     acoustic_ai_lab_snapshot_t snapshot;                    /**< 当該特徴量世代のsnapshot */
-    B summary[CPU0_ACOUSTIC_SUMMARY_DIMENSION];              /**< 192次元要約 */
-    UW generation;                                           /**< 特徴量世代 */
-    UB chunk_index;                                          /**< 次の要約chunk */
-    BOOL snapshot_pending;                                   /**< snapshot未送信 */
+    B summary[CPU0_ACOUSTIC_SUMMARY_DIMENSION];             /**< 192次元要約 */
+    UW generation;                                          /**< 特徴量世代 */
+    UB chunk_index;                                         /**< 次の要約chunk */
+    BOOL snapshot_pending;                                  /**< snapshot未送信 */
 } audio_diagnostic_event_t;
-LOCAL audio_diagnostic_event_t audio_diagnostic_queue[CPU0_AUDIO_DIAGNOSTIC_QUEUE_CAPACITY]; /**< bounded queue */
-LOCAL UB audio_diagnostic_queue_head;
-LOCAL UB audio_diagnostic_queue_count;
-LOCAL UW audio_diagnostic_last_generation;
-LOCAL BOOL audio_diagnostic_generation_valid;
-LOCAL UW audio_diagnostic_drop_count;
-LOCAL prototype_storage_data_t audio_profile_data;
-LOCAL BOOL audio_profile_valid;
-LOCAL BOOL audio_profile_pending;
-LOCAL UB audio_profile_sample_index;
-LOCAL UB audio_profile_chunk_index;
-LOCAL UW audio_profile_last_sent_generation;
-LOCAL BOOL audio_profile_sent_generation_valid;
-LOCAL UW audio_profile_last_check_ms;
-LOCAL BOOL audio_profile_check_valid;
+/* 要約・snapshotの送信待ちイベントを保持するqueue。 */
+LOCAL audio_diagnostic_event_t audio_diagnostic_queue[CPU0_AUDIO_DIAGNOSTIC_QUEUE_CAPACITY];
+LOCAL UB audio_diagnostic_queue_head;                       /**< 先頭イベントのqueue index */
+LOCAL UB audio_diagnostic_queue_count;                      /**< queue内のイベント数 */
+LOCAL UW audio_diagnostic_last_generation;                  /**< 最後にqueueへ登録した世代 */
+LOCAL BOOL audio_diagnostic_generation_valid;               /**< 登録世代を取得済み */
+LOCAL UW audio_diagnostic_drop_count;                       /**< 破棄した診断世代の累積数 */
+LOCAL prototype_storage_data_t audio_profile_data;          /**< 送信対象の保存見本 */
+LOCAL BOOL audio_profile_valid;                             /**< 保存見本データの有効状態 */
+LOCAL BOOL audio_profile_pending;                           /**< 保存見本chunk送信待ち */
+LOCAL UB audio_profile_sample_index;                        /**< 次に送る保存見本番号 */
+LOCAL UB audio_profile_chunk_index;                         /**< 次に送る保存見本chunk */
+LOCAL UW audio_profile_last_sent_generation;                /**< 最後に送信した保存世代 */
+LOCAL BOOL audio_profile_sent_generation_valid;             /**< 送信済み世代を取得済み */
+LOCAL UW audio_profile_last_check_ms;                       /**< 保存見本の最終確認時刻[ms] */
+LOCAL BOOL audio_profile_check_valid;                       /**< 確認時刻を取得済み */
 
 EXPORT volatile BOOL g_task_acoustic_link_usb_configured;   /**< USB列挙状態 */
 /**< CDC初期化段階 */
@@ -411,7 +413,7 @@ LOCAL fsp_err_t task_acoustic_link_control_start(void) {
         p_data = audio_cdc_line_coding;
     } else if (CPU0_AUDIO_USB_STATE_SET_CONTROL_LINE_STATE == g_task_acoustic_link_usb_state) {
         setup.request_type = CPU0_AUDIO_SET_CONTROL_LINE_STATE;
-        /* CDCホストへDTR/RTSの両方を有効として通知する。 */
+                                                            /* CDCホストへDTR/RTSの両方を有効として通知する。 */
         setup.request_value = 0x0003U;
     } else if (CPU0_AUDIO_USB_STATE_GET_LINE_CODING == g_task_acoustic_link_usb_state) {
         setup.request_type = CPU0_AUDIO_GET_LINE_CODING;
@@ -443,7 +445,7 @@ LOCAL void task_acoustic_link_control_complete(const usb_event_info_t * p_event_
     audio_control_pending = FALSE;
     if (USB_SETUP_STATUS_ACK != p_event_info->status) {
         g_task_acoustic_link_last_error = FSP_ERR_USB_FAILED;
-        /* フォールバック: control requestがACK以外でもREADYへ進めてBulk通信を試みる */
+                                                            /* フォールバック: control requestがACK以外でもREADYへ進めてBulk通信を試みる */
         g_task_acoustic_link_usb_state = CPU0_AUDIO_USB_STATE_READY;
         return;
     }
@@ -800,7 +802,7 @@ LOCAL void task_acoustic_link_diagnostic_queue_update(void) {
         return;
     }
     if (infer.feature_generation != g_task_infer_feature_generation) {
-        /* 推論結果と公開generationが揃ったsnapshotと要約を一体でqueueする。 */
+                                                            /* 推論結果と公開generationが揃ったsnapshotと要約を一体でqueueする。 */
         return;
     }
     if (audio_diagnostic_generation_valid) {
@@ -843,7 +845,7 @@ LOCAL void task_acoustic_link_diagnostic_queue_update(void) {
  * ================================================================= */
 LOCAL void task_acoustic_link_profile_auto_queue(UW now_ms) {
     if (!g_task_think_storage_valid) {
-        /* 学習開始でMRAMを消した後、古い送信待ちprofileと世代記録を残さない。 */
+                                                            /* 学習開始でMRAMを消した後、古い送信待ちprofileと世代記録を残さない。 */
         audio_profile_pending = FALSE;
         audio_profile_valid = FALSE;
         audio_profile_sent_generation_valid = FALSE;
@@ -1052,7 +1054,7 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
         return FSP_SUCCESS;
     }
 
-    /* USBテレメトリの送信中も再利用する最新CPU0指令スナップショット。 */
+                                                            /* USBテレメトリの送信中も再利用する最新CPU0指令スナップショット。 */
     LOCAL task_command_snapshot_t s_command_snapshot;
     ER const snapshot_err = task_command_snapshot_get(&s_command_snapshot);
     if (E_OK != snapshot_err) {
@@ -1060,7 +1062,7 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
         return FSP_ERR_USB_BUSY;
     }
 
-    /* センサー取得失敗時も診断値を組み立てられる再利用バッファ。 */
+                                                            /* センサー取得失敗時も診断値を組み立てられる再利用バッファ。 */
     LOCAL sensor_snapshot_t s_sensor_snapshot;
     memset(&s_sensor_snapshot, 0, sizeof(s_sensor_snapshot));
     s_sensor_snapshot.age_ms = UINT32_MAX;
@@ -1098,7 +1100,7 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
         flags |= ACOUSTIC_TELEMETRY_FLAG_COMMAND_STALE;
     }
 
-    /* 推論結果をUSBテレメトリへ変換する再利用バッファ。 */
+                                                            /* 推論結果をUSBテレメトリへ変換する再利用バッファ。 */
     LOCAL task_infer_result_t s_infer_result;
     memset(&s_infer_result, 0, sizeof(s_infer_result));
     BOOL const infer_ready = (E_OK == task_infer_result_get(&s_infer_result));
@@ -1136,7 +1138,7 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
         threshold_x1000 = (UH) ((th > 2.0F) ? 2000U : (th < 0.0F) ? 0U : (UW) (th * 1000.0F + 0.5F));
     }
 
-    /* CPU0状態・センサー・推論結果を一つのwire形式へまとめる作業領域。 */
+                                                            /* CPU0状態・センサー・推論結果を一つのwire形式へまとめる作業領域。 */
     LOCAL acoustic_rover_telemetry_t s_telemetry;
     memset(&s_telemetry, 0, sizeof(s_telemetry));
     s_telemetry.schema_version = 2U;
@@ -1158,7 +1160,7 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
     s_telemetry.audio_crc_error_count = g_task_acoustic_link_crc_error_count;
     s_telemetry.fault_flags = g_task_think_fault_flags;
     s_telemetry.steering_deg = g_task_think_steering_deg;
-    /* 推論ステータス、分類器種別、TFLM状態を1byteへパック */
+                                                            /* 推論ステータス、分類器種別、TFLM状態を1byteへパック */
     UB const raw_infer_status = infer_ready ? (UB) s_infer_result.identifier.status : 0U;
     UB const classifier_kind = infer_ready ? s_infer_result.classifier_kind : (UB) CPU0_ACOUSTIC_CLASSIFIER_NONE;
     BOOL const tflm_available = g_task_infer_tflm_available ? TRUE : FALSE;
@@ -1174,7 +1176,7 @@ LOCAL fsp_err_t task_acoustic_link_telemetry_start(void) {
     s_telemetry.infer_target_peak_bin = target_peak_bin;
     s_telemetry.infer_current_peak_bin = current_peak_bin;
     s_telemetry.infer_similarity_permille = similarity_permille;
-    /* 音響リンクが合成した自律走行状態として通知する。 */
+                                                            /* 音響リンクが合成した自律走行状態として通知する。 */
     s_telemetry.autonomy_mode = (UB) 2;
     s_telemetry.sensor_rule = (UB) g_task_think_sensor_rule;
     s_telemetry.sensor_valid_flags = s_sensor_snapshot.valid_flags;
@@ -1398,7 +1400,7 @@ LOCAL void task_acoustic_link_entry(INT stacd, void * exinf) {
                 g_task_acoustic_link_event_count++;
             }
             if (0U == event_info.module_number) {
-                /* USB event queueは全IPで共通。J11イベントをJ7音響linkへ混ぜない。 */
+                                                            /* USB event queueは全IPで共通。J11イベントをJ7音響linkへ混ぜない。 */
                 acoustic_ai_lab_link_event(&event_info, event, audio_now_ms);
             } else if (audio_usb_open && (USB_STATUS_CONFIGURED == event)) {
                 ER const lock_err = tk_loc_mtx(acoustic_link_mutex_id, TMO_FEVR);
@@ -1449,8 +1451,8 @@ LOCAL void task_acoustic_link_entry(INT stacd, void * exinf) {
             g_task_acoustic_link_last_error = event_err;
         }
 
-        /* 通信途絶または連続転送失敗を検知した場合は、USBバスを */
-        /* リセットして再列挙する。 */
+                                                            /* 通信途絶または連続転送失敗を検知した場合は、USBバスを */
+                                                            /* リセットして再列挙する。 */
         if (g_task_acoustic_link_usb_configured && ((audio_now_ms - audio_last_recovery_ms) >= 3000U)) {
             BOOL trigger_recovery = FALSE;
             if (audio_continuous_error_count >= 5U) {
@@ -1491,7 +1493,7 @@ LOCAL void task_acoustic_link_entry(INT stacd, void * exinf) {
             }
         }
 
-        /* snapshot、現在特徴量、保存見本の送信はJ7制御を妨げない時だけ進める。 */
+                                                            /* snapshot、現在特徴量、保存見本の送信はJ7制御を妨げない時だけ進める。 */
         acoustic_ai_lab_link_poll(audio_now_ms);
 
         (void) tk_dly_tsk(CPU0_AUDIO_USB_POLL_MS);

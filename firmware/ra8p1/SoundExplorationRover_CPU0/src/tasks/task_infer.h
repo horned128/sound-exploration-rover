@@ -24,8 +24,10 @@ typedef struct st_task_infer_result {
     BOOL summary_valid;                                     /**< N_min以上で96次元要約が有効 */
     BOOL background_threshold_valid;                        /**< 背景MSEしきい値が学習済み */
     BOOL background_anomaly;                                /**< 背景候補として異常ならTRUE */
+    BOOL event_level_valid;                                 /**< 特徴量イベント最大levelが有効 */
     float event_mse;                                        /**< 能動フレームの最大再構成MSE */
     float background_threshold;                             /**< 背景MSE mean+3sigma */
+    H event_peak_level_dbfs_x100;                           /**< 80-frameイベント最大RMS[dBFS x100] */
     B summary[CPU0_ACOUSTIC_SUMMARY_DIMENSION];             /**< 2スロット分割mean/std/maxの192次元int8 */
     acoustic_identifier_summary_output_t identifier;        /**< 個別見本へのcosine照合結果 */
 } task_infer_result_t;

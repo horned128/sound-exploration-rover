@@ -1,3 +1,5 @@
+import pytest
+
 from controlsim.bindings import (
     ACOUSTIC_XVF_STATUS_READY,
     AcousticObservation,
@@ -15,9 +17,9 @@ STATE_SPIN_STEP = 18
 
 
 def loud_observation(relative_doa_deg: int) -> AcousticObservation:
-    """四方実測に基づき、右正の車体角をXVF3800のDoAへ変換する。"""
+    """右正の車体角をXVF3800の時計回りDoAへ変換する。"""
     relative_doa_deg = ((relative_doa_deg + 180) % 360) - 180
-    raw_doa_deg = (relative_doa_deg if abs(relative_doa_deg) > 90 else -relative_doa_deg) % 360
+    raw_doa_deg = relative_doa_deg % 360
     return AcousticObservation(
         doa_deg=raw_doa_deg,
         raw_doa_deg=raw_doa_deg,
@@ -32,8 +34,8 @@ def loud_observation(relative_doa_deg: int) -> AcousticObservation:
 def test_four_quadrant_doa_mapping_matches_open_space_trial() -> None:
     convert = library().sound_follow_doa_to_relative
     assert [(raw, convert(raw)) for raw in (303, 58, 141, 237)] == [
-        (303, 57),   # 右前
-        (58, -58),   # 左前
+        (303, -57),  # 符号付き正規化
+        (58, 58),    # 符号付き正規化
         (141, 141),  # 右後
         (237, -123), # 左後
     ]
@@ -183,6 +185,37 @@ def test_front_sound_keeps_the_existing_steer_then_move_sequence() -> None:
     assert any(output.state == STATE_STEER_PREP for output in outputs)
     assert any(output.state == STATE_MOVE_STEP for output in outputs)
     assert all(not output.is_spin_turn for output in outputs)
+
+
+@pytest.mark.parametrize("bearing, expected_steer", [
+    (-75, -45), (-60, -30), (-31, -1), (-30, 0), (-20, 0),
+    (0, 0), (20, 0), (30, 0), (31, 1), (60, 30), (75, 45),
+])
+def test_front_doa_deadband_and_gradual_steering(bearing: int, expected_steer: int) -> None:
+    outputs = sound_follow_trace(stable_trace(bearing, 17))
+    moving = [output for output in outputs if output.state == STATE_MOVE_STEP]
+    assert moving
+    assert moving[-1].target_bearing_deg == bearing
+    assert moving[-1].steering_deg == expected_steer
+    assert moving[-1].left_rpm > 0 and moving[-1].right_rpm > 0
+    if abs(bearing) <= 30:
+        assert moving[-1].left_rpm == moving[-1].right_rpm
+
+
+def test_moving_front_doa_crossing_zero_does_not_reverse_steering() -> None:
+    trace = [(SoundFollowInput(link_ready=1, motion_allowed=1), 500)]
+    for bearing in (0, -25, 0, 25, 0, -29, 0, 29):
+        observation = loud_observation(bearing)
+        trace.extend((SoundFollowInput(
+            link_ready=1, new_observation=1, motion_allowed=1,
+            observation=observation, pose_heading_valid=1,
+        ), 100) for _ in range(12))
+
+    moving = [output for output in sound_follow_trace(trace) if output.state == STATE_MOVE_STEP]
+    assert moving[-1].target_bearing_deg == 29
+    assert {output.target_bearing_deg for output in moving} >= {-25, 25, -29, 29}
+    assert all(output.steering_deg == 0 for output in moving)
+    assert all(output.left_rpm == output.right_rpm for output in moving)
 
 
 def test_rear_doa_appearing_during_motion_stops_for_relisten() -> None:

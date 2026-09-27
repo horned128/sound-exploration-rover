@@ -12,7 +12,7 @@ static void feature_fill(acoustic_feature_t * feature, uint16_t event_id, uint16
     feature->frame_index = frame_index;
     feature->frame_count = ACOUSTIC_FEATURE_EVENT_FRAME_COUNT;
     feature->n_bins = ACOUSTIC_FEATURE_BIN_COUNT;
-    feature->flags = (uint8_t) (frame_index == 0U ? 1U : 0U);
+    feature->flags = acoustic_feature_event_level_pack(-2000);
 
     for (uint16_t offset = 0U; offset < ACOUSTIC_FEATURE_FRAMES_PER_PACKET; offset++) {
         uint16_t const frame = (uint16_t) (frame_index + offset);
@@ -182,6 +182,16 @@ static void feature_channel_capability_test(void)
     assert(decoded.boot_id == hello.boot_id);
 }
 
+static void feature_event_level_metadata_test(void)
+{
+    int16_t level_dbfs_x100 = 0;
+    uint8_t const flags = acoustic_feature_event_level_pack(-3501);
+    assert(acoustic_feature_event_level_unpack(flags, &level_dbfs_x100));
+    assert(level_dbfs_x100 == -3600); /* floor to 1 dB to keep the sample gate conservative */
+    assert(0U == acoustic_feature_event_level_pack(INT16_MIN));
+    assert(!acoustic_feature_event_level_unpack(0U, &level_dbfs_x100));
+}
+
 static void ai_lab_diagnostic_protocol_test(void)
 {
     assert(ACOUSTIC_ROVER_TELEMETRY_PAYLOAD_SIZE == 96U);
@@ -285,6 +295,8 @@ static void assembler_complete_test(void)
 
     assert(!assembler.active);
     assert(assembler.patch.event_id == 77U);
+    assert(assembler.patch.event_level_valid);
+    assert(assembler.patch.peak_level_dbfs_x100 == -2000);
     for (uint16_t frame = 0U; frame < ACOUSTIC_FEATURE_EVENT_FRAME_COUNT; frame++) {
         for (uint16_t bin = 0U; bin < ACOUSTIC_FEATURE_BIN_COUNT; bin++) {
             int8_t const expected =
@@ -338,6 +350,7 @@ int main(void)
     protocol_round_trip_test();
     observation_round_trip_test();
     feature_channel_capability_test();
+    feature_event_level_metadata_test();
     navigation_diagnostics_round_trip_test();
     ai_lab_diagnostic_protocol_test();
     assembler_complete_test();

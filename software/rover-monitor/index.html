@@ -23,7 +23,7 @@
             background-color: var(--bg-dark);
             color: var(--text-main);
             margin: 0;
-            height: 100vh;
+            height: 100dvh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -33,55 +33,61 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 8px 16px;
+            gap: 12px;
+            padding: 6px 12px;
+            box-sizing: border-box;
             background-color: var(--panel-bg);
             border-bottom: 1px solid var(--border);
-            height: 40px;
+            height: 48px;
             flex-shrink: 0;
         }
         .header h1 { margin: 0; font-size: 18px; color: var(--accent); }
+        .header > div { min-width: 0; }
+        #logPath { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 55vw; }
         .status-badge { padding: 4px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; }
         .bg-ok { background-color: rgba(76, 175, 80, 0.2); color: var(--ok); }
         .bg-error { background-color: rgba(244, 67, 54, 0.2); color: var(--error); }
 
         .main-container {
-            display: flex;
+            display: grid;
+            grid-template-columns: minmax(400px, 36%) minmax(0, 1fr);
             flex: 1;
-            padding: 10px;
-            gap: 10px;
+            min-height: 0;
+            padding: 4px;
+            gap: 4px;
             overflow: hidden;
         }
 
         .sidebar {
-            width: 260px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            overflow-y: auto;
-            flex-shrink: 0;
+            min-width: 0;
+            min-height: 0;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            align-content: start;
+            gap: 3px;
+            overflow: hidden;
         }
-        .sidebar::-webkit-scrollbar { width: 6px; }
-        .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-        .panel { background-color: var(--panel-bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
-        .panel-title { margin: 0 0 8px 0; font-size: 12px; color: var(--text-muted); text-transform: uppercase; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
-        .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; font-size: 12px; }
-        .data-label { color: var(--text-muted); display: flex; align-items: center; gap: 4px; min-width: 0; }
-        .data-value { font-family: monospace; text-align: right; font-weight: bold; }
+        .panel { min-width: 0; background-color: var(--panel-bg); border: 1px solid var(--border); border-radius: 5px; padding: 4px; }
+        .panel-title { margin: 0 0 4px; font-size: 11px; line-height: 1.15; color: var(--text-muted); text-transform: uppercase; border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+        .data-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1px 3px; font-size: 12px; line-height: 1.15; }
+        .data-label { color: var(--text-muted); display: flex; align-items: center; gap: 3px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .data-value { min-width: 0; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; text-align: right; font-size: 12px; font-weight: bold; }
+        .data-value#val_background_ae { max-width: 220px; font-size: 10px; }
 
         .help-icon {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            width: 15px;
-            height: 15px;
-            flex: 0 0 15px;
+            width: 13px;
+            height: 13px;
+            flex: 0 0 13px;
             padding: 0;
             border: 1px solid #666;
             border-radius: 50%;
             background: transparent;
             color: #bdbdbd;
-            font: 700 10px/1 sans-serif;
+            font: 700 9px/1 sans-serif;
             cursor: help;
         }
         .help-icon:hover, .help-icon:focus-visible { color: #fff; border-color: var(--accent); outline: none; }
@@ -110,7 +116,8 @@
         .val-cyan { color: #4dd0e1; }
 
         .content-pane {
-            flex: 1;
+            min-width: 0;
+            min-height: 0;
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -120,32 +127,32 @@
         }
 
         .tabs-header { display: flex; background: var(--panel-bg); border-bottom: 1px solid var(--border); }
-        .tab-btn { background: none; border: none; color: var(--text-muted); padding: 10px 20px; cursor: pointer; font-size: 14px; transition: 0.2s; }
+        .tab-btn { background: none; border: none; color: var(--text-muted); padding: 8px 16px; cursor: pointer; font-size: 12px; transition: 0.2s; }
         .tab-btn.active { color: var(--accent); border-bottom: 2px solid var(--accent); font-weight: bold; }
         .tab-btn:hover:not(.active) { background: rgba(255,255,255,0.05); color: #fff; }
 
-        .tab-content { display: none; flex: 1; overflow: hidden; padding: 10px; }
+        .tab-content { display: none; flex: 1; min-height: 0; overflow: hidden; padding: 6px; }
         .tab-content.active { display: flex; flex-direction: column; }
 
         .charts-area {
             flex: 1;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            align-content: flex-start;
-            overflow-y: auto;
+            min-height: 0;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-rows: repeat(2, minmax(0, 1fr));
+            gap: 4px;
+            overflow: hidden;
         }
-        .charts-area::-webkit-scrollbar { width: 6px; }
-        .charts-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
         .chart-box {
-            width: calc(50% - 5px);
-            height: calc(50% - 5px);
-            min-height: 250px;
+            width: auto;
+            height: auto;
+            min-width: 0;
+            min-height: 0;
             background-color: var(--panel-bg);
             border: 1px solid var(--border);
             border-radius: 6px;
-            padding: 10px;
+            padding: 5px;
             box-sizing: border-box;
             position: relative;
             cursor: pointer;
@@ -159,7 +166,7 @@
             pointer-events: none;
         }
         .chart-box:hover::after { opacity: 1; }
-        .chart-container { flex: 1; position: relative; width: 100%; height: 100%; }
+        .chart-container { flex: 1; position: relative; width: 100%; height: 100%; min-height: 0; }
         .map-container { flex: 1; position: relative; min-height: 0; }
         .map-canvas { display: block; width: 100%; height: 100%; }
 
@@ -175,7 +182,7 @@
         .charts-area.focus-mode { overflow: hidden; }
         .charts-area.focus-mode .chart-box { display: none; }
         .charts-area.focus-mode .chart-box.focused {
-            display: flex; width: 100%; height: 100%; cursor: default; border-color: var(--accent);
+            display: flex; grid-column: 1 / -1; grid-row: 1 / -1; width: auto; height: auto; cursor: default; border-color: var(--accent);
         }
         .charts-area.focus-mode .chart-box.focused::after { content: ""; }
         .btn-close { display: none; position: absolute; top: 10px; right: 10px; background: var(--accent); color: white; border: none; padding: 5px 15px; border-radius: 4px; cursor: pointer; z-index: 20; font-weight: bold; }
@@ -191,11 +198,11 @@
             background: rgba(0, 0, 0, 0.4);
             border: 1px solid #333;
             border-radius: 6px;
-            padding: 8px 12px;
-            margin-bottom: 8px;
+            padding: 6px 8px;
+            margin-bottom: 4px;
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 4px;
         }
         .recog-header {
             display: flex;
@@ -203,12 +210,12 @@
             align-items: center;
         }
         .recog-title {
-            font-size: 12px;
+            font-size: 10px;
             font-weight: bold;
             color: #ddd;
         }
         .recog-badge {
-            font-size: 11px;
+            font-size: 9px;
             font-weight: bold;
             padding: 2px 8px;
             border-radius: 4px;
@@ -265,6 +272,37 @@
         .recog-meta span strong {
             color: #fff;
         }
+
+        @media (min-width: 1101px) and (max-height: 820px) {
+            .main-container { padding: 4px; gap: 4px; }
+            .sidebar, .charts-area { gap: 3px; }
+            .panel { padding: 3px; }
+            .panel-title { margin-bottom: 2px; font-size: 10.5px; }
+            .data-grid { gap: 1px 2px; font-size: 11px; line-height: 1.1; }
+            .data-value { max-width: 130px; font-size: 11px; }
+            .chart-box { padding: 3px; }
+            .recog-widget { padding: 4px 6px; gap: 3px; }
+            .recog-meter-container { height: 11px; }
+            .recog-meta { font-size: 9px; }
+        }
+
+        @media (max-width: 1100px) {
+            body { height: auto; min-height: 100vh; overflow: auto; }
+            .main-container { display: flex; flex-direction: column; overflow: visible; }
+            .sidebar { flex: none; overflow: visible; }
+            .content-pane { min-height: 760px; }
+            .charts-area { min-height: 700px; }
+        }
+
+        @media (max-width: 700px) {
+            .header { height: auto; min-height: 48px; }
+            .header h1 { font-size: 16px; }
+            .header > div { flex-wrap: wrap; gap: 4px !important; }
+            #logPath { max-width: 65vw; }
+            .sidebar { grid-template-columns: 1fr; }
+            .charts-area { grid-template-columns: 1fr; grid-template-rows: repeat(4, minmax(230px, auto)); }
+            .content-pane { min-height: 1100px; }
+        }
     </style>
 </head>
 <body>
@@ -316,12 +354,13 @@
                 <div class="data-grid">
                     <span class="data-label" data-help="音響照合を実行した推論器モデルです。TFLM NN (64D)は学習済みCNNによる埋め込みベクトル照合、DSP SUMMARY (192D)は旧来の周波数ビン要約照合です。">Classifier</span><span class="data-value" id="val_recog_model">-</span>
                     <span class="data-label" data-help="TFLM音響モデルランタイムの初期化状態です。READYは実機初期化完了、NOT READYは初期化失敗または未有効化を示します。">TFLM Runtime</span><span class="data-value" id="val_tflm_runtime">-</span>
-                    <span class="data-label" data-help="音響認識の判定状態です。TARGETには、距離しきい値と主ピーク周波数帯（±3 bin）の両方が必要です。">Match Status</span><span class="data-value" id="val_recog_status">-</span>
-                    <span class="data-label" data-help="現在の音が学習したターゲット音とどれくらい似ているかを示す指標（0〜100%）です。高くても主ピーク周波数帯が異なればTARGETにはなりません。">Similarity</span><span class="data-value" id="val_recog_similarity">-</span>
-                    <span class="data-label" data-help="学習音の最近傍見本との重み付きコサイン距離（0.0〜2.0）です。192次元（時間2スロット）およびピーク周波数重視で計算され、値が小さいほど酷似しています。">Cosine Dist</span><span class="data-value" id="val_recog_distance">-</span>
-                    <span class="data-label" data-help="ターゲット音と判定するためのコサイン距離の実効しきい値です。実機の口笛変動を許容しつつ、最大0.200に制限されます。">Threshold</span><span class="data-value" id="val_recog_threshold">-</span>
-                    <span class="data-label" data-help="学習した音の代表ピーク周波数帯域です。この帯域の±3 bin外の音は、類似度にかかわらず拒否します。">Target Peak</span><span class="data-value" id="val_recog_target_peak">-</span>
-                    <span class="data-label" data-help="現在マイクロホンが捉えている音の主ピーク周波数帯域です。Target Peakから±3 bin外ならNOT_TARGETです。">Current Peak</span><span class="data-value" id="val_recog_current_peak">-</span>
+                    <span class="data-label" data-help="音響認識の判定状態です。DSP SUMMARYは距離しきい値と代表ピーク±6 bin、TFLM NNは埋め込み距離しきい値で判定します。">Match Status</span><span class="data-value" id="val_recog_status">-</span>
+                    <span class="data-label" data-help="同一feature generationの最大再構成MSE / 通常音しきい値と、そのgenerationの見本照合状態を表示します。MSEがしきい値を超えた場合だけ背景音異常です。通常テレメトリーのMatch Statusとは別generationの場合があります。">AE MSE / Limit</span><span class="data-value" id="val_background_ae">WAIT DIAG</span>
+                    <span class="data-label" data-help="現在音と登録見本の類似度（0〜100%）です。DSP SUMMARYでは代表ピーク帯域も照合し、TFLM NNでは埋め込み距離で判定します。">Similarity</span><span class="data-value" id="val_recog_similarity">-</span>
+                    <span class="data-label" data-help="選択中の推論器が出力した最近傍見本とのコサイン距離（0.0〜2.0）です。DSP SUMMARYは重み付き192D要約、TFLM NNは64D埋め込みで計算します。">Cosine Dist</span><span class="data-value" id="val_recog_distance">-</span>
+                    <span class="data-label" data-help="現在のモデルが使用する照合距離しきい値です。DSP SUMMARYは最大0.08（Similarity換算で最低92%）、TFLM NNはモデル設定値（現在0.35）を使用します。">Threshold</span><span class="data-value" id="val_recog_threshold">-</span>
+                    <span class="data-label" data-help="登録見本の代表ピーク周波数binです。DSP SUMMARYは現在音のピークが±6 bin以内であることもTARGET条件にします。">Target Peak</span><span class="data-value" id="val_recog_target_peak">-</span>
+                    <span class="data-label" data-help="現在音の代表ピーク周波数binです。DSP SUMMARYではTarget Peakから±6 binを超えるとNOT_TARGETです。">Current Peak</span><span class="data-value" id="val_recog_current_peak">-</span>
                     <span class="data-label" data-help="現場音の見本を収集する学習モードです。ACTIVE中は安全のため非常停止が有効になります。">Learning Mode</span><span class="data-value" id="val_learning_active">-</span>
                     <span class="data-label" data-help="MRAMに、有効な背景モデルと音の見本が保存されているかを示します。VALIDなら次回起動後にも利用できます。">Stored Data</span><span class="data-value" id="val_storage_valid">-</span>
                     <span class="data-label" data-help="MRAMに保存されている学習サンプルの件数です（最大5件）。">Samples</span><span class="data-value" id="val_learning_samples">-</span>
@@ -371,7 +410,7 @@
                     <span class="data-label" data-help="CPU0オドメトリによる車体推定位置(X, Y)です。原点は起動またはリセット位置です。">Pose (X, Y)</span><span class="data-value" id="val_odom_pos">-</span>
                     <span class="data-label" data-help="オドメトリ相補フィルタによる車体推定方位角です。反時計回りが正です。">Heading (θ)</span><span class="data-value" id="val_odom_heading">-</span>
                     <span class="data-label" data-help="車体の並進速度[mm/s]と旋回角速度[°/s]です。">Speed (V, ω)</span><span class="data-value" id="val_odom_speed">-</span>
-                    <span class="data-label" data-help="左右駆動輪エンコーダの24-bit累積カウントです。">Encoders (L, R)</span><span class="data-value" id="val_odom_encoders">-</span>
+                    <span class="data-label" data-help="左右駆動輪オートエンコーダの24-bit累積カウントです。実測RPMはMotor RPMグラフで確認できます。">Encoder Count (L/R)</span><span class="data-value" id="val_odom_encoders">-</span>
                     <span class="data-label" data-help="静止時に自動校正されたジャイロZ軸バイアス値です。">Gyro Bias</span><span class="data-value" id="val_odom_bias">-</span>
                     <span class="data-label" data-help="オドメトリの健全性状態（CALIBRATED/STATIONARY）です。">Odom State</span><span class="data-value" id="val_odom_state">-</span>
                 </div>
@@ -386,7 +425,7 @@
 
             <div class="tab-content active" id="tab-dashboard">
                 <div class="charts-area">
-                    <div class="chart-box" id="box-trajectory" style="width: 100%;">
+                    <div class="chart-box" id="box-trajectory">
                         <button class="btn-close">Close</button>
                         <div class="chart-controls" style="right: 15px; left: auto;">
                             <button class="chart-btn" id="btn-reset-odom">Reset Map</button>
@@ -396,7 +435,10 @@
                             <div style="position: absolute; top: 10px; left: 10px; font-size: 11px; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 5px 8px; border-radius: 4px; border: 1px solid #444;">
                                 <div style="color: #4caf50; font-weight: bold; margin-bottom: 3px;">累積相対マップ (Relative Odometry Map)</div>
                                 <div style="color: #ff9800; font-size: 10px; margin-bottom: 2px;">⚠️ 相対マップ・累積誤差あり (Drift Accumulation)</div>
+                                <div style="color: #2196f3; font-size: 10px; margin-bottom: 2px;">— Rover走行軌跡</div>
+                                <div style="color: #ff9800; font-size: 10px; margin-bottom: 2px;">—● TARGET判定DoA履歴</div>
                                 <div style="color: #03a9f4; font-size: 10px; margin-bottom: 2px;">● SOURCE 音源推定位置 (bearing-only)</div>
+                                <div style="color: #4caf50; font-size: 10px;">▲ Rover現在位置・方位</div>
                                 <div style="color: #aaa; font-size: 10px;" id="trajectorySourceLabel">Source: CPU0 Odometry (24-bit Diff + Gyro Comp)</div>
                             </div>
                         </div>
@@ -408,10 +450,10 @@
                             <canvas id="radarCanvas" class="map-canvas"></canvas>
                             <div style="position: absolute; top: 10px; left: 10px; font-size: 11px; z-index: 10; pointer-events: none; background: rgba(0,0,0,0.6); padding: 5px 8px; border-radius: 4px; border: 1px solid #444;">
                                 <div style="color: #e0e0e0; font-weight: bold; margin-bottom: 3px;">ローバー中心ビュー (Rover-Centric View)</div>
-                                <div style="color: #4caf50; font-size: 10px;">■ Steering 操舵目標 (実線)</div>
+                                <div style="color: #4caf50; font-size: 10px;" id="radarSteeringLabel">■ Steering 0° (直進・右が正)</div>
                                 <div style="color: #ff9800; font-size: 10px;">■ Audio DoA 車体座標へ変換した音源方位 (点線)</div>
                                 <div style="color: #03a9f4; font-size: 10px;" id="radarBearingLabel">■ CPU0 target 方位 (走行・回避中のみ)</div>
-                                <div style="color: #2196f3; font-size: 10px;">● Obstacles (ToF L/C/R 平行ビーム)</div>
+                                <div style="color: #2196f3; font-size: 10px;">● ToF hit (L/C/R: 青=検出, 橙=表示範囲外, 赤=250mm以下)</div>
                                 <div style="color: #f44336; font-size: 10px;">-- 250mm 停止 / 234mm 交差ライン</div>
                             </div>
                         </div>
@@ -448,13 +490,7 @@
                                 <span>Now: <strong id="recogCurrentPeakVal">-</strong></span>
                             </div>
                         </div>
-                        <div class="chart-container" style="flex: 1; min-height: 120px;"><canvas id="audioChart"></canvas></div>
-                    </div>
-                    
-                    <!-- 追加: ToF距離とGyro Zの時系列グラフ -->
-                    <div class="chart-box" id="box-sensor">
-                        <button class="btn-close">Close</button>
-                        <div class="chart-container"><canvas id="sensorChart"></canvas></div>
+                        <div class="chart-container"><canvas id="audioChart"></canvas></div>
                     </div>
                 </div>
             </div>
@@ -608,12 +644,12 @@
             type: 'line',
             data: { labels: Array(MAX_POINTS).fill(''),
                 datasets: [
-                    { label: 'Left Target', yAxisID: 'y', borderColor: '#f44336', data: Array(MAX_POINTS).fill(0), borderDash: [5, 5] },
-                    { label: 'Right Target', yAxisID: 'y', borderColor: '#2196f3', data: Array(MAX_POINTS).fill(0), borderDash: [5, 5] },
-                    { label: 'Left Encoder', yAxisID: 'y', borderColor: '#ff9800', data: Array(MAX_POINTS).fill(0) },
-                    { label: 'Right Encoder', yAxisID: 'y', borderColor: '#00bcd4', data: Array(MAX_POINTS).fill(0) },
-                    { label: 'Left Duty', yAxisID: 'yDuty', borderColor: '#e91e63', data: Array(MAX_POINTS).fill(0) },
-                    { label: 'Right Duty', yAxisID: 'yDuty', borderColor: '#4caf50', data: Array(MAX_POINTS).fill(0) }
+                    { label: 'Left Target RPM', yAxisID: 'y', borderColor: '#f44336', data: Array(MAX_POINTS).fill(0), borderDash: [5, 5] },
+                    { label: 'Right Target RPM', yAxisID: 'y', borderColor: '#2196f3', data: Array(MAX_POINTS).fill(0), borderDash: [5, 5] },
+                    { label: 'Left Encoder RPM', yAxisID: 'y', borderColor: '#ff9800', data: Array(MAX_POINTS).fill(0) },
+                    { label: 'Right Encoder RPM', yAxisID: 'y', borderColor: '#00bcd4', data: Array(MAX_POINTS).fill(0) },
+                    { label: 'Left Duty (%)', yAxisID: 'yDuty', borderColor: '#e91e63', data: Array(MAX_POINTS).fill(0) },
+                    { label: 'Right Duty (%)', yAxisID: 'yDuty', borderColor: '#4caf50', data: Array(MAX_POINTS).fill(0) }
                 ]
             },
             options: {
@@ -632,29 +668,6 @@
             { label: 'Level', borderColor: '#9c27b0', data: Array(MAX_POINTS).fill(-100) },
             { label: 'Peak', borderColor: '#e91e63', data: Array(MAX_POINTS).fill(-100) }
         ]);
-
-        // 追加: 障害物回避と旋回の相関を可視化するToF & Gyroグラフ
-        const sensorChart = new Chart(document.getElementById('sensorChart').getContext('2d'), {
-            type: 'line',
-            data: { labels: Array(MAX_POINTS).fill(''),
-                datasets: [
-                    { label: 'ToF L', yAxisID: 'yTof', borderColor: '#ff9800', data: Array(MAX_POINTS).fill(0) },
-                    { label: 'ToF C', yAxisID: 'yTof', borderColor: '#4caf50', data: Array(MAX_POINTS).fill(0) },
-                    { label: 'ToF R', yAxisID: 'yTof', borderColor: '#2196f3', data: Array(MAX_POINTS).fill(0) },
-                    { label: 'Gyro Z', yAxisID: 'yGyro', borderColor: '#9c27b0', borderDash: [5, 5], data: Array(MAX_POINTS).fill(0) }
-                ]
-            },
-            options: {
-                responsive: true, maintainAspectRatio: false, animation: false,
-                plugins: { title: { display: true, text: 'ToF Distance & Gyro Z', color: '#e0e0e0', font: { size: 14 } }, legend: { labels: { color: '#e0e0e0', boxWidth: 12 } } },
-                scales: {
-                    x: { display: false },
-                    yTof: { type: 'linear', display: true, position: 'left', grid: { color: '#333' }, title: { display: true, text: 'Distance (mm)', color: '#888' }, min: 0, max: 2000 },
-                    yGyro: { type: 'linear', display: true, position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Gyro Z (dps)', color: '#888' } }
-                },
-                elements: { point: { radius: 0 }, line: { tension: 0.2, borderWidth: 2 } }
-            }
-        });
 
         // 2026-09-15実機確認: 3台とも前向き。位置は中央ToFを原点とする。
         const TOF_POSES = [
@@ -675,14 +688,19 @@
 
         function sensorValue(values, index) { return Number.isFinite(values?.[index]) ? values[index] : null; }
         function isSensorValid(sensors, index) { return ((Number(sensors?.valid_flags) || 0) & (1 << index)) !== 0; }
-        // CPU0と同じ車体方位: 前0°・右正。2026-09-24四方試験で
-        // 前方はXVFの符号反転、後方は生DoAと同符号で整合した。
+        const RECOGNITION_STATUS_NAMES = ['INVALID', 'INDETERMINATE', 'NOT_READY', 'NOT_TARGET', 'TARGET'];
+        function recognitionStatusName(recognition) {
+            const reportedName = recognition?.status_name;
+            if (typeof reportedName === 'string' && reportedName.trim()) return reportedName.trim().toUpperCase();
+            const status = Number(recognition?.status);
+            return Number.isInteger(status) ? (RECOGNITION_STATUS_NAMES[status] || 'UNKNOWN') : 'UNKNOWN';
+        }
+        // CPU0と同じ車体方位: raw DoAを[-180°,180°)へ正規化し、時計回りを右正とする。
         function doaToRoverBearing(doa) {
             if (!Number.isFinite(doa) || doa < 0 || doa >= 360) return null;
             let bearing = doa;
             while (bearing >= 180) bearing -= 360;
             while (bearing < -180) bearing += 360;
-            if (Math.abs(bearing) <= 90) bearing = -bearing;
             return bearing;
         }
 
@@ -860,7 +878,14 @@
             document.getElementById('radarBearingLabel').textContent = targetVisible
                 ? `■ CPU0 target ${targetBearing > 0 ? '+' : ''}${targetBearing}° (右が正)`
                 : '■ CPU0 target 方位 (走行・回避中のみ)';
-            drawArrow(latestSteer, '#4caf50', false, 1.0);
+            // CPU0の論理操舵は右正。通常走行のサーボ極性補正はCPU0側で行う。
+            const steering = Number(latestSteer);
+            if (Number.isFinite(steering)) {
+                drawArrow(steering, '#4caf50', false, 1.0);
+                const direction = steering > 0 ? '右操舵' : (steering < 0 ? '左操舵' : '直進');
+                document.getElementById('radarSteeringLabel').textContent =
+                    `■ Steering ${steering > 0 ? '+' : ''}${steering}° (${direction}・右が正)`;
+            }
             
             // ローバー原点マーク
             ctx.fillStyle = '#4caf50'; ctx.beginPath(); ctx.arc(ox, oy, 4, 0, 2 * Math.PI); ctx.fill();
@@ -874,10 +899,8 @@
         let lastEspMs = null;
         let hasPoseBaseline = false;
         const pathHistory = [];
-        const obstaclePoints = [];
         const audioEvents = [];
         const MAX_PATH = 2000;
-        const MAX_OBSTACLES = 600;
         const MAX_AUDIO_EVENTS = 50;
 
         document.getElementById('btn-reset-odom').addEventListener('click', (e) => {
@@ -890,7 +913,7 @@
                 resetOffsetX = 0; resetOffsetY = 0; resetOffsetTheta = 0;
             }
             odomX = 0; odomY = 0; odomTheta = Math.PI / 2;
-            pathHistory.length = 0; obstaclePoints.length = 0; audioEvents.length = 0;
+            pathHistory.length = 0; audioEvents.length = 0;
             drawTrajectoryMap();
         });
 
@@ -934,7 +957,8 @@
                 if ((validFlags & 0x08) && d.sensors.gyro_dps_x10) {
                     const gyroYawRateDps = d.sensors.gyro_dps_x10[2] / 10.0;
                     const gyroYawRateRad = gyroYawRateDps * (Math.PI / 180.0);
-                    odomTheta -= gyroYawRateRad * dt;
+                    // BMI270のZ正方向は左回頭（世界座標CCW）。車体相対の右正操舵とは符号が逆。
+                    odomTheta += gyroYawRateRad * dt;
                 } else {
                     odomTheta += ((vR - vL) / TRACK_WIDTH_MM) * dt;
                 }
@@ -950,46 +974,23 @@
                 if (pathHistory.length > MAX_PATH) pathHistory.shift();
             }
 
-            // ToF障害物ポイントのグローバルプロット
-            if (d.sensors && Number(d.sensors.valid_flags) > 0) {
-                TOF_POSES.forEach((pose, index) => {
-                    if (!isSensorValid(d.sensors, index)) return;
-                    const distance = sensorValue(d.sensors.tof_mm, index);
+            // 現行protocolのstatus enumはTARGET=4。文字列があれば名称を優先する。
+            const targetRecognized = recognitionStatusName(d.recognition) === 'TARGET';
 
-                    if (distance !== null && distance > 50 && distance < 2000) {
-                        const forward = pose.forwardMm + distance;
-                        const targetX = odomX + forward * Math.cos(odomTheta) + pose.rightMm * Math.sin(odomTheta);
-                        const targetY = odomY + forward * Math.sin(odomTheta) - pose.rightMm * Math.cos(odomTheta);
-
-                        let isDuplicate = false;
-                        for (let i = 0; i < obstaclePoints.length; i++) {
-                            if (Math.hypot(obstaclePoints[i].x - targetX, obstaclePoints[i].y - targetY) < 80) {
-                                isDuplicate = true;
-                                break;
-                            }
-                        }
-
-                        if (!isDuplicate) {
-                            obstaclePoints.push({x: targetX, y: targetY});
-                            if (obstaclePoints.length > MAX_OBSTACLES) obstaclePoints.shift();
-                        }
-                    }
-                });
-            }
-
-            // ③ 音響イベントの重畳記録 (VAD検出時)
+            // ③ TARGET判定時のDoAだけを累積記録する。非TARGET時は過去のTARGET履歴を保つ。
             const audioBearing = doaToRoverBearing(Number(d.audio?.doa_deg ?? 65535));
-            if (d.audio?.vad && audioBearing !== null) {
+            const telemetryTime = Number(d.esp_ms);
+            if (targetRecognized && audioBearing !== null && Number.isFinite(telemetryTime) &&
+                Number(d.audio?.age_ms ?? 0) <= 1000) {
                 // 地図方位は反時計回りが正。右正の車体相対DoAを引く。
                 const soundTheta = odomTheta - (audioBearing * Math.PI / 180.0);
                 const lastEvt = audioEvents[audioEvents.length - 1];
-                if (!lastEvt || (d.esp_ms - lastEvt.ms) > 400) {
+                if (!lastEvt || telemetryTime < lastEvt.ms || (telemetryTime - lastEvt.ms) >= 400) {
                     audioEvents.push({
                         x: odomX,
                         y: odomY,
                         theta: soundTheta,
-                        level: latestAudioLevel,
-                        ms: d.esp_ms
+                        ms: telemetryTime
                     });
                     if (audioEvents.length > MAX_AUDIO_EVENTS) audioEvents.shift();
                 }
@@ -1009,7 +1010,7 @@
             ctx.fillStyle = '#1a1a1a'; ctx.fillRect(0, 0, w, h);
 
             let minX = odomX, maxX = odomX, minY = odomY, maxY = odomY;
-            const allPts = pathHistory.concat(obstaclePoints);
+            const allPts = pathHistory.slice();
             const navigationFresh = latestNavigation?.valid && Number(latestNavigation.age_ms) <= 1000;
             if (navigationFresh && latestNavigation.source_valid && latestNavigation.source_x_mm !== undefined && latestNavigation.source_y_mm !== undefined) {
                 allPts.push({
@@ -1034,13 +1035,12 @@
 
             // ③ 音響イベント重畳レイの描画 (オレンジ色)
             audioEvents.forEach(evt => {
-                const age = (latestSensors?.age_ms || 0);
-                const rayLen = 300 * drawScale;
+                const rayLen = 450 * drawScale;
                 const ex = toCanvasX(evt.x) + Math.cos(evt.theta) * rayLen;
                 const ey = toCanvasY(evt.y) - Math.sin(evt.theta) * rayLen;
-                ctx.strokeStyle = 'rgba(255, 152, 0, 0.4)';
-                ctx.lineWidth = 1.5;
-                ctx.setLineDash([2, 3]);
+                ctx.strokeStyle = 'rgba(255, 152, 0, 0.8)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([5, 3]);
                 ctx.beginPath();
                 ctx.moveTo(toCanvasX(evt.x), toCanvasY(evt.y));
                 ctx.lineTo(ex, ey);
@@ -1048,7 +1048,7 @@
                 ctx.setLineDash([]);
                 ctx.fillStyle = '#ff9800';
                 ctx.beginPath();
-                ctx.arc(toCanvasX(evt.x), toCanvasY(evt.y), 2.5, 0, 2 * Math.PI);
+                ctx.arc(toCanvasX(evt.x), toCanvasY(evt.y), 3.5, 0, 2 * Math.PI);
                 ctx.fill();
             });
 
@@ -1059,10 +1059,6 @@
                 for (let i = 1; i < pathHistory.length; i++) ctx.lineTo(toCanvasX(pathHistory[i].x), toCanvasY(pathHistory[i].y));
                 ctx.stroke();
             }
-
-            // 障害物プロット
-            ctx.fillStyle = '#f44336';
-            obstaclePoints.forEach(p => { ctx.beginPath(); ctx.arc(toCanvasX(p.x), toCanvasY(p.y), 2.5, 0, 2 * Math.PI); ctx.fill(); });
 
             if (navigationFresh && latestNavigation.target_valid) {
                 const sourceX = -(latestNavigation.source_y_mm - resetOffsetY);
@@ -1220,6 +1216,35 @@
                 if (el && d.log_path) el.textContent = `JSON Lines: ${d.log_path}`;
                 return;
             }
+            if (d._type === 'background_ae') {
+                const context = [d.match_status, d.feature_generation != null && Number.isInteger(Number(d.feature_generation))
+                    ? `#${Number(d.feature_generation)}` : null].filter(Boolean).join(' ');
+                if (!d.valid) {
+                    const mse = Number(d.mse);
+                    const threshold = Number(d.threshold);
+                    let state = 'NO BASELINE';
+                    if (d.state === 'not_reported' || d.state === 'no_mse_data') state = 'NO MSE DATA';
+                    else if (d.state === 'limit_out_of_range') {
+                        state = `${Number.isFinite(mse) ? mse.toFixed(3) : '-'} / ≥65.535`;
+                    } else if (d.state === 'mse_out_of_range') {
+                        state = `≥65.535 / ${Number.isFinite(threshold) ? threshold.toFixed(3) : '-'}`;
+                    } else if (d.state === 'mse_and_limit_out_of_range') {
+                        state = '≥65.535 / ≥65.535';
+                    }
+                    const value = d.anomaly ? `${state} · ANOMALY` : state;
+                    setVal('val_background_ae', [value, context].filter(Boolean).join(' · '),
+                        d.anomaly ? 'val-error' : 'val-warn');
+                } else {
+                    const mse = Number(d.mse);
+                    const threshold = Number(d.threshold);
+                    const anomaly = d.anomaly === true;
+                    const value = anomaly
+                        ? `${mse.toFixed(3)} > ${threshold.toFixed(3)}`
+                        : `${mse.toFixed(3)} / ${threshold.toFixed(3)}`;
+                    setVal('val_background_ae', [value, context].filter(Boolean).join(' · '), anomaly ? 'val-error' : 'val-ok');
+                }
+                return;
+            }
 
             addTableRow(d);
 
@@ -1235,13 +1260,6 @@
             latestAudioLevel = (d.audio?.level_dbfs_x100 || -10000) / 100;
             updateChartData(audioChart, [latestAudioLevel, (d.audio?.peak_dbfs_x100||0)/100]);
             
-            // 追加: ToFとGyroの時系列データを更新
-            const tofL = sensorValue(d.sensors?.tof_mm, 0) || 0;
-            const tofC = sensorValue(d.sensors?.tof_mm, 1) || 0;
-            const tofR = sensorValue(d.sensors?.tof_mm, 2) || 0;
-            const gyroZ = d.sensors?.gyro_dps_x10 ? (d.sensors.gyro_dps_x10[2] / 10.0) : 0;
-            updateChartData(sensorChart, [tofL, tofC, tofR, gyroZ]);
-
             setVal('val_esp_ms', `${d.esp_ms} ms`);
             setVal('val_cpu_valid', d.cpu_valid ? 'TRUE' : 'FALSE', d.cpu_valid ? 'val-ok' : 'val-error');
             setVal('val_cpu_age', `${d.cpu_age_ms} ms`);
@@ -1307,11 +1325,11 @@
 
             const recogAvailable = d.recognition !== undefined;
             const recog = d.recognition || {};
-            const recogStatus = recog.status_name || (recog.status === 1 ? 'TARGET' : recog.status === 2 ? 'NOT_TARGET' : 'INDETERMINATE');
+            const recogStatus = recognitionStatusName(recog);
             let recogClass = '';
-            if (recog.status === 1) recogClass = 'val-ok';
-            else if (recog.status === 2) recogClass = 'val-warn';
-            else if (recog.status === 3) recogClass = 'val-blue';
+            if (recogStatus === 'TARGET') recogClass = 'val-ok';
+            else if (recogStatus === 'NOT_TARGET') recogClass = 'val-warn';
+            else if (recogStatus === 'INDETERMINATE' || recogStatus === 'NOT_READY') recogClass = 'val-blue';
 
             // 推論器モデル・TFLMランタイム状態
             const classifier = recog.classifier || (recog.classifier_kind === 2 ? 'TFLM' : recog.classifier_kind === 1 ? 'DSP' : 'NONE');
@@ -1372,13 +1390,13 @@
             }
 
             if (badgeEl) {
-                if (recog.status === 1) {
+                if (recogStatus === 'TARGET') {
                     badgeEl.textContent = 'TARGET MATCH';
                     badgeEl.className = 'recog-badge target';
-                } else if (recog.status === 2) {
+                } else if (recogStatus === 'NOT_TARGET') {
                     badgeEl.textContent = 'NON-TARGET';
                     badgeEl.className = 'recog-badge not-target';
-                } else if (recog.status === 3) {
+                } else if (recogStatus === 'INDETERMINATE' || recogStatus === 'NOT_READY') {
                     badgeEl.textContent = 'LISTENING';
                     badgeEl.className = 'recog-badge listening';
                 } else {
@@ -1395,7 +1413,7 @@
             if (fillEl) {
                 const fillPct = Math.max(0, Math.min(100, simVal || 0));
                 fillEl.style.width = `${fillPct}%`;
-                if (recog.status === 1) {
+                if (recogStatus === 'TARGET') {
                     fillEl.classList.add('match');
                 } else {
                     fillEl.classList.remove('match');
@@ -1463,7 +1481,6 @@
             setVal('val_act_valid', d.actuator?.valid ? 'VALID' : 'NO DATA', d.actuator?.valid ? 'val-ok' : 'val-error');
             setVal('val_act_age', d.actuator?.valid ? `${d.actuator?.age_ms} ms` : '-');
             setVal('val_act_faults', d.actuator?.faults ?? '-', d.actuator?.faults ? 'val-error' : 'val-ok');
-
             if (d.pose && d.pose.valid) {
                 setVal('val_odom_pos', `${d.pose.x_mm}, ${d.pose.y_mm} mm`, 'val-ok');
                 const headingDeg = (d.pose.theta_mrad * 180.0 / Math.PI / 1000.0).toFixed(1);

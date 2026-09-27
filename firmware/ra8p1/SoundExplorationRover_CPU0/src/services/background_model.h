@@ -21,8 +21,8 @@ typedef struct st_background_model_state {
     float inverse_correlation[CPU0_BACKGROUND_MODEL_HIDDEN_DIMENSION][CPU0_BACKGROUND_MODEL_HIDDEN_DIMENSION];
     UW encoder_seed;                                        /**< 固定乱数エンコーダのseed */
     UW mse_count;                                           /**< 背景MSEの有効サンプル数 */
-    float mse_mean;                                         /**< 背景MSEの平均値 */
-    float mse_m2;                                           /**< 背景MSEの分散計算用二次モーメント */
+    float mse_mean;                                         /**< 忘却係数付き背景MSE平均 */
+    float mse_variance;                                     /**< 忘却係数付き背景MSE分散 */
 } background_model_state_t;
 
 /* decoder=0、P=I/0.01、固定乱数seedで背景モデルを初期化する。 */

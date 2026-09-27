@@ -73,6 +73,7 @@ typedef struct st_sound_follow_output {
 
 EXPORT void sound_follow_controller_init(void);             /* 追従状態初期化 */
 EXPORT H sound_follow_doa_to_relative(UH doa_deg);          /* XVF DoAから車体相対角への変換 */
+EXPORT H sound_follow_steering_from_doa(H doa_deg);         /* 正面不感帯付きDoA操舵角変換 */
 EXPORT void sound_follow_controller_step(const sound_follow_input_t * p_input,
                                   UW elapsed_ms,
                                   sound_follow_output_t * p_output); /* 追従状態更新 */

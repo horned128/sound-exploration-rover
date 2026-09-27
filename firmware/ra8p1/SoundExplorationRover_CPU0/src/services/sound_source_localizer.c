@@ -6,37 +6,45 @@
 #include "config/control_config.h"                          /* 幾何・到着判定値 */
 #include <math.h>                                           /* 三角関数、有限値判定 */
 
-#define SOUND_LOCALIZER_PI                 (3.14159265358979323846F)
-#define SOUND_LOCALIZER_RAD_TO_DEG(rad)    ((rad) * (180.0F / SOUND_LOCALIZER_PI))
-#define SOUND_LOCALIZER_DEG_TO_RAD(deg)    ((deg) * (SOUND_LOCALIZER_PI / 180.0F))
-#define SOUND_LOCALIZER_EPSILON            (1.0e-6F)
+#define SOUND_LOCALIZER_PI                 (3.14159265358979323846F) /**< 角度計算に使う円周率 */
+#define SOUND_LOCALIZER_RAD_TO_DEG(rad)    ((rad) * (180.0F / SOUND_LOCALIZER_PI)) /* radからdegへの換算 */
+#define SOUND_LOCALIZER_DEG_TO_RAD(deg)    ((deg) * (SOUND_LOCALIZER_PI / 180.0F)) /* degからradへの換算 */
+#define SOUND_LOCALIZER_EPSILON            (1.0e-6F)        /**< 幾何計算のゼロ判定許容値 */
 
+/**< 1回の音源方位・車体姿勢観測 */
 typedef struct st_sound_bearing_observation {
-    float x_mm;
-    float y_mm;
-    float bearing_rad;
-    float weight;
-    UW timestamp_ms;
-    UW sequence;
+    float x_mm;                                             /**< 観測時の車体X座標[mm] */
+    float y_mm;                                             /**< 観測時の車体Y座標[mm] */
+    float bearing_rad;                                      /**< 世界座標系の音源方位[rad] */
+    float weight;                                           /**< DoA品質から求めた重み */
+    UW timestamp_ms;                                        /**< 観測時刻[ms] */
+    UW sequence;                                            /**< DoA観測sequence */
 } sound_bearing_observation_t;
 
+/**< 音源位置推定器が保持する観測・到着判定状態 */
 typedef struct st_sound_source_localizer_context {
+                                                            /**< 保存するDoA・姿勢観測履歴 */
     sound_bearing_observation_t observations[CPU0_SOUND_LOCALIZATION_MAX_OBSERVATIONS];
-    UB observation_count;
-    BOOL sequence_valid;
-    UW last_sequence;
-    BOOL source_valid;
-    float source_x_mm;
-    float source_y_mm;
-    UB source_confidence;
-    UW last_sound_ms;
-    sound_arrival_state_t arrival_state;
-    UW arrival_started_ms;
-    UB arrival_confirm_count;
+    UB observation_count;                                   /**< 有効な観測履歴数 */
+    BOOL sequence_valid;                                    /**< 最終sequenceを取得済み */
+    UW last_sequence;                                       /**< 最後に採用したDoA sequence */
+    BOOL source_valid;                                      /**< 有効な位置推定を保持中 */
+    float source_x_mm;                                      /**< 保持中の音源X座標[mm] */
+    float source_y_mm;                                      /**< 保持中の音源Y座標[mm] */
+    UB source_confidence;                                   /**< 保持中の位置品質[0..100] */
+    UW last_sound_ms;                                       /**< 対象音の最終観測時刻[ms] */
+    sound_arrival_state_t arrival_state;                    /**< 音源到着判定段階 */
+    UW arrival_started_ms;                                  /**< 到着確認開始時刻[ms] */
+    UB arrival_confirm_count;                               /**< 到着確認済み観測数 */
 } sound_source_localizer_context_t;
 
-LOCAL sound_source_localizer_context_t localizer;
+LOCAL sound_source_localizer_context_t localizer;           /**< 推定履歴と到着判定状態 */
 
+/** =================================================================*
+ * @brief 角度を[-π, π]の範囲へ正規化
+ * @param[in] angle_rad 入力角度[rad]
+ * @return 正規化した角度[rad]
+ * ================================================================= */
 LOCAL float sound_source_angle_normalize(float angle_rad) {
     while (angle_rad > SOUND_LOCALIZER_PI) {
         angle_rad -= 2.0F * SOUND_LOCALIZER_PI;
@@ -47,6 +55,11 @@ LOCAL float sound_source_angle_normalize(float angle_rad) {
     return angle_rad;
 }
 
+/** =================================================================*
+ * @brief 浮動小数点値を符号なし16 bit範囲へ丸める
+ * @param[in] value 丸める値
+ * @return 0～65535の範囲へ丸めた値
+ * ================================================================= */
 LOCAL UH sound_source_u16_round_clamp(float value) {
     if (!(value > 0.0F)) {
         return 0U;
@@ -57,6 +70,11 @@ LOCAL UH sound_source_u16_round_clamp(float value) {
     return (UH) roundf(value);
 }
 
+/** =================================================================*
+ * @brief 浮動小数点値を品質値の範囲へ丸める
+ * @param[in] value 丸める品質値
+ * @return 0～100の範囲へ丸めた値
+ * ================================================================= */
 LOCAL UB sound_source_u8_round_clamp(float value) {
     if (!(value > 0.0F)) {
         return 0U;
@@ -67,6 +85,10 @@ LOCAL UB sound_source_u8_round_clamp(float value) {
     return (UB) roundf(value);
 }
 
+/** =================================================================*
+ * @brief 有効期限を過ぎた方位観測を履歴から除去
+ * @param[in] now_ms 現在時刻[ms]
+ * ================================================================= */
 LOCAL void sound_source_observations_expire(UW now_ms) {
     UB destination = 0U;
     for (UB source = 0U; source < localizer.observation_count; source++) {
@@ -81,6 +103,10 @@ LOCAL void sound_source_observations_expire(UW now_ms) {
     localizer.observation_count = destination;
 }
 
+/** =================================================================*
+ * @brief 条件を満たす新しい方位観測を履歴へ追加
+ * @param[in] p_input 周期入力とDoA・姿勢情報
+ * ================================================================= */
 LOCAL void sound_source_observation_push(const sound_source_localizer_input_t * p_input) {
     if (!p_input->new_observation || !p_input->sound_valid || !p_input->pose_valid ||
         (p_input->doa_confidence < CPU0_SOUND_LOCALIZATION_MIN_CONFIDENCE)) {
@@ -112,6 +138,16 @@ LOCAL void sound_source_observation_push(const sound_source_localizer_input_t * 
     p_observation->sequence = p_input->observation_sequence;
 }
 
+/** =================================================================*
+ * @brief 方位線の重み付き最小二乗交点と品質を算出
+ * @param[out] p_x_mm 推定音源X座標[mm]
+ * @param[out] p_y_mm 推定音源Y座標[mm]
+ * @param[out] p_residual_mm 方位線残差RMS[mm]
+ * @param[out] p_baseline_mm 観測履歴の最大基線[mm]
+ * @param[out] p_crossing_deg 最大方位交差角[deg]
+ * @param[out] p_confidence 推定位置品質[0..100]
+ * @return 幾何・残差条件を満たす推定結果が得られた場合TRUE
+ * ================================================================= */
 LOCAL BOOL sound_source_estimate(float * p_x_mm, float * p_y_mm, float * p_residual_mm,
                                  float * p_baseline_mm, float * p_crossing_deg,
                                  UB * p_confidence) {
@@ -213,12 +249,20 @@ LOCAL BOOL sound_source_estimate(float * p_x_mm, float * p_y_mm, float * p_resid
     return TRUE;
 }
 
+/** =================================================================*
+ * @brief 音源位置推定器の履歴と到着状態を初期化
+ * ================================================================= */
 EXPORT void sound_source_localizer_init(void) {
     localizer = (sound_source_localizer_context_t){
         .arrival_state = CPU0_SOUND_ARRIVAL_SEARCH,
     };
 }
 
+/** =================================================================*
+ * @brief 方位観測から音源位置と到着状態を更新
+ * @param[in] p_input 周期入力とDoA・姿勢情報
+ * @param[out] p_output 推定位置・品質・到着判定結果
+ * ================================================================= */
 EXPORT void sound_source_localizer_step(const sound_source_localizer_input_t * p_input,
                                         sound_source_localizer_output_t * p_output) {
     if ((NULL == p_input) || (NULL == p_output)) {

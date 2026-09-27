@@ -22,11 +22,11 @@
 #include <string.h>                                         /* 特徴量パケットへのコピー */
 
 #define FRONTEND_FIRMWARE_MAJOR            (1U)
-#define FRONTEND_FIRMWARE_MINOR            (1U)
+#define FRONTEND_FIRMWARE_MINOR            (1U)             /**< ファームウェアminor版数 */
 #define FRONTEND_FIRMWARE_PATCH            (0U)
-#define FRONTEND_PI                        (3.14159265358979323846F)
-#define FRONTEND_DEG_TO_RAD(deg)           ((deg) * (FRONTEND_PI / 180.0F))
-#define FRONTEND_RAD_TO_DEG(rad)           ((rad) * (180.0F / FRONTEND_PI))
+#define FRONTEND_PI                        (3.14159265358979323846F) /**< 角度換算に使う円周率 */
+#define FRONTEND_DEG_TO_RAD(deg)           ((deg) * (FRONTEND_PI / 180.0F)) /* degからradへの換算 */
+#define FRONTEND_RAD_TO_DEG(rad)           ((rad) * (180.0F / FRONTEND_PI)) /* radからdegへの換算 */
 
 static uint32_t s_sequence;                                 /**< USB送信フレーム連番 */
 static uint32_t s_observation_sequence;                     /**< DoA観測専用連番 */
@@ -53,6 +53,7 @@ volatile uint16_t g_acoustic_frontend_raw_doa_deg;          /**< 直近XVF3800 D
 volatile uint16_t g_acoustic_frontend_filtered_doa_deg;     /**< 循環平均DoA[deg] */
 volatile uint8_t g_acoustic_frontend_doa_confidence;        /**< DoA品質[0..100] */
 
+/**< 循環DoA平均を保持する履歴状態 */
 typedef struct {
     uint16_t samples_deg[APP_DOA_FILTER_WINDOW];            /**< 新しい順に上書きするDoA履歴 */
     uint8_t count;                                          /**< 有効履歴数 */
@@ -61,6 +62,7 @@ typedef struct {
 
 static frontend_doa_filter_t s_doa_filter;                  /**< ESP32S3側の循環DoAフィルタ */
 
+/**< 連続音のlog-melイベント送信状態 */
 typedef struct {
     audio_capture_feature_event_t event;                    /**< 送信中イベントの固定80フレーム */
     uint16_t next_frame_index;                              /**< 次に送るイベント内フレーム位置 */
@@ -89,7 +91,7 @@ static void acoustic_frontend_task(void * context);         /* 音響観測・�
 
 /** =================================================================*
  * @brief  DoA循環平均と品質算出
- * @details 集中度へ履歴充足率を掛け、fallbackは上限70、VADなしは上限40とする。
+ * @details 集中度へ履歴充足率を掛け、fallback経由のDoAだけ品質上限を70とする。
  * @param[in] doa XVF3800直近読出し
  * @param[out] filtered_deg 循環平均DoA[deg]
  * @param[out] confidence DoA品質[0..100]
@@ -132,9 +134,6 @@ static void frontend_doa_filter_update(xvf3800_doa_result_t const * doa, uint16_
     float quality = concentration * 100.0F * (float) s_doa_filter.count / (float) APP_DOA_FILTER_WINDOW;
     if (doa->used_aec_fallback && (quality > 70.0F)) {
         quality = 70.0F;
-    }
-    if ((0U == doa->speech_detected_raw) && (quality > 40.0F)) {
-        quality = 40.0F;
     }
     *confidence = (uint8_t) ((quality < 0.0F) ? 0U : (quality > 100.0F) ? 100U : (uint8_t) (quality + 0.5F));
 }
@@ -297,7 +296,7 @@ static bool frontend_feature_trigger_active(bool i2s_stale, audio_capture_snapsh
  * @brief  特徴量イベントの2フレームをUSBへ送信
  * @param[in] burst 送信中イベント
  * @return USB CDC送信結果
- * @details flagsは凍結済みプロトコルで将来用に予約されているため、現時点では0を送る。
+ * @details flagsにはイベント窓全体で計測した最大RMS dBFSを量子化して格納する。
  * ================================================================= */
 static esp_err_t frontend_send_feature_packet(frontend_feature_burst_t const * burst) {
     if ((burst == NULL) || !burst->active ||
@@ -311,7 +310,7 @@ static esp_err_t frontend_send_feature_packet(frontend_feature_burst_t const * b
         .frame_index = burst->next_frame_index,
         .frame_count = ACOUSTIC_FEATURE_EVENT_FRAME_COUNT,
         .n_bins = ACOUSTIC_FEATURE_BIN_COUNT,
-        .flags = 0U,
+        .flags = acoustic_feature_event_level_pack(burst->event.peak_level_dbfs_x100),
     };
     memcpy(feature.mel, burst->event.frames[burst->next_frame_index], sizeof(feature.mel));
 

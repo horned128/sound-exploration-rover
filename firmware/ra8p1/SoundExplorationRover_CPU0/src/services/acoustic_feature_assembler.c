@@ -44,10 +44,15 @@ EXPORT acoustic_feature_assembler_result_t acoustic_feature_assembler_push(
             result = CPU0_ACOUSTIC_FEATURE_RESTARTED;
         }
         p_assembler->patch.event_id = p_feature->event_id;
+        p_assembler->event_flags = p_feature->flags;
+        p_assembler->patch.peak_level_dbfs_x100 = INT16_MIN;
+        p_assembler->patch.event_level_valid = acoustic_feature_event_level_unpack(
+            p_feature->flags, &p_assembler->patch.peak_level_dbfs_x100);
         p_assembler->next_frame_index = 0U;
         p_assembler->active = TRUE;
     } else if (!p_assembler->active || (p_assembler->patch.event_id != p_feature->event_id) ||
-               (p_assembler->next_frame_index != p_feature->frame_index)) {
+               (p_assembler->next_frame_index != p_feature->frame_index) ||
+               (p_assembler->event_flags != p_feature->flags)) {
         p_assembler->active = FALSE;
         p_assembler->next_frame_index = 0U;
         return CPU0_ACOUSTIC_FEATURE_SEQUENCE_ERROR;

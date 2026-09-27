@@ -72,11 +72,14 @@ ER task_acoustic_link_feature_get(acoustic_feature_patch_t *patch,UW *generation
 ER task_infer_result_get(task_infer_result_t *result) {
     if(mode<3 && loops>=12) {
         *result=(task_infer_result_t){.feature_generation=loops+1,.summary_valid=TRUE,
+            .background_threshold_valid=TRUE,.background_anomaly=TRUE,
             .identifier={.status=CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_TARGET}};
         return E_OK;
     }
     if(mode==3 && loops>=12) {
-        *result=(task_infer_result_t){.feature_generation=loops+1,.summary_valid=TRUE};
+        *result=(task_infer_result_t){.feature_generation=loops+1,.summary_valid=TRUE,
+            .background_threshold_valid=(loops>=18),.background_anomaly=FALSE,
+            .event_level_valid=(loops>=15),.event_peak_level_dbfs_x100=(loops>=14 ? -2000 : -4000)};
         return E_OK;
     }
     return E_NOEXS;
@@ -225,7 +228,16 @@ ER tk_dly_tsk(INT delay) {
         if(mode==3 && loops==11) {
             assert(g_task_think_learning_samples==0 && green_level==BSP_IO_LEVEL_LOW);
         }
+        if(mode==3 && loops==14) {
+            assert(g_task_think_learning_samples==0);
+        }
+        if(mode==3 && loops==15) {
+            assert(g_task_think_learning_samples==0);
+        }
         if(mode==3 && loops==19) {
+            assert(g_task_think_learning_samples==4);
+        }
+        if(mode==3 && loops==20) {
             assert(g_task_think_learning_samples==5 && green_level==BSP_IO_LEVEL_LOW);
         }
         if(mode==3 && loops==21) {

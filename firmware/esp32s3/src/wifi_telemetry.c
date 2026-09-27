@@ -23,42 +23,46 @@
 #include <stdio.h>                                          /* JSON整形API */
 #include <string.h>                                         /* 文字列・メモリー操作API */
 
-#define WIFI_TELEMETRY_CONNECTED_BIT       (1U << 0)
-#define WIFI_TELEMETRY_JSON_CAPACITY       (3072U)
-#define WIFI_DIAGNOSTIC_QUEUE_CAPACITY      (8U)
-#define WIFI_DIAGNOSTIC_JSON_CAPACITY       (2048U)
+#define WIFI_TELEMETRY_CONNECTED_BIT       (1U << 0)        /**< Wi-Fi接続イベントbit */
+#define WIFI_TELEMETRY_JSON_CAPACITY       (3072U)          /**< 通常状態JSONの最大長[byte] */
+#define WIFI_DIAGNOSTIC_QUEUE_CAPACITY     (8U)             /**< UDP診断イベントの最大保持数 */
+#define WIFI_DIAGNOSTIC_JSON_CAPACITY      (2048U)          /**< 診断JSONの最大長[byte] */
 
+/**< UDP送信する診断イベントの種類 */
 typedef enum {
-    WIFI_DIAGNOSTIC_SUMMARY = 0,
-    WIFI_DIAGNOSTIC_SAMPLE,
+    WIFI_DIAGNOSTIC_SUMMARY = 0,                             /**< 音響特徴量要約 */
+    WIFI_DIAGNOSTIC_SAMPLE,                                  /**< 保存済み音響見本 */
 } wifi_diagnostic_kind_t;
 
+/**< 送信待ちの要約または保存見本イベント */
 typedef struct {
-    wifi_diagnostic_kind_t kind;
-    uint32_t generation;
-    uint8_t sample_index;
-    uint8_t sample_count;
-    uint8_t cpu_drop_count;
-    bool snapshot_valid;
-    acoustic_ai_lab_snapshot_t snapshot;
-    int8_t vector[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE * 3U];
+    wifi_diagnostic_kind_t kind;                             /**< 診断イベント種別 */
+    uint32_t generation;                                     /**< 特徴量または保存見本generation */
+    uint8_t sample_index;                                    /**< 保存見本番号 */
+    uint8_t sample_count;                                    /**< 保存見本数 */
+    uint8_t cpu_drop_count;                                  /**< CPU0側診断破棄数 */
+    bool snapshot_valid;                                     /**< 対応snapshotを取得済み */
+    acoustic_ai_lab_snapshot_t snapshot;                     /**< 同じ世代の推論snapshot */
+    int8_t vector[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE * 3U];     /**< 192次元要約または見本 */
 } wifi_diagnostic_event_t;
 
+/**< 3つのchunkから復元中の特徴量要約 */
 typedef struct {
-    bool active;
-    uint32_t generation;
-    uint8_t received_mask;
-    uint8_t cpu_drop_count;
-    int8_t vector[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE * 3U];
+    bool active;                                             /**< chunk受信中 */
+    uint32_t generation;                                     /**< 再構成対象generation */
+    uint8_t received_mask;                                   /**< 受信済みchunk bit mask */
+    uint8_t cpu_drop_count;                                  /**< CPU0側診断破棄数 */
+    int8_t vector[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE * 3U];     /**< 復元中の192次元要約 */
 } wifi_summary_assembly_t;
 
+/**< 3つのchunkから復元中の保存見本 */
 typedef struct {
-    bool active;
-    uint32_t generation;
-    uint8_t sample_index;
-    uint8_t sample_count;
-    uint8_t received_mask;
-    int8_t vector[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE * 3U];
+    bool active;                                             /**< chunk受信中 */
+    uint32_t generation;                                     /**< 再構成対象generation */
+    uint8_t sample_index;                                    /**< 再構成対象見本番号 */
+    uint8_t sample_count;                                    /**< generation内の見本数 */
+    uint8_t received_mask;                                   /**< 受信済みchunk bit mask */
+    int8_t vector[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE * 3U];     /**< 復元中の64次元見本 */
 } wifi_profile_assembly_t;
 
 static EventGroupHandle_t s_wifi_event_group;               /**< Wi-Fi接続状態イベント */
@@ -66,17 +70,23 @@ static struct sockaddr_in s_destination;                    /**< UDP送信先IPv
 static uint32_t s_wifi_reconnect_count;                     /**< Wi-Fi再接続回数 */
 static uint32_t s_udp_send_count;                           /**< UDP送信成功回数 */
 static uint32_t s_udp_error_count;                          /**< UDP送信失敗回数 */
-static wifi_diagnostic_event_t s_diagnostic_queue[WIFI_DIAGNOSTIC_QUEUE_CAPACITY]; /**< bounded event queue */
-static uint8_t s_diagnostic_queue_head;
-static uint8_t s_diagnostic_queue_count;
-static uint32_t s_diagnostic_drop_count;
-static wifi_summary_assembly_t s_summary_assembly;
-static uint32_t s_summary_seen_generation;
-static bool s_summary_seen_generation_valid;
-static wifi_profile_assembly_t s_profile_assembly;
-static uint32_t s_profile_seen_generation;
-static uint8_t s_profile_seen_mask;
-static bool s_profile_seen_generation_valid;
+/* 通常テレメトリー処理を待たせずに送る有限診断queue。 */
+static wifi_diagnostic_event_t s_diagnostic_queue[WIFI_DIAGNOSTIC_QUEUE_CAPACITY];
+static uint8_t s_diagnostic_queue_head;                     /**< 次に送信するqueue位置 */
+static uint8_t s_diagnostic_queue_count;                    /**< queue内のイベント数 */
+static uint32_t s_diagnostic_drop_count;                    /**< UDP診断破棄の累積数 */
+static wifi_summary_assembly_t s_summary_assembly;           /**< 特徴量要約の再構成状態 */
+static uint32_t s_summary_seen_generation;                  /**< 最後に完成した要約generation */
+static bool s_summary_seen_generation_valid;                /**< 完成generationを取得済み */
+static wifi_profile_assembly_t s_profile_assembly;          /**< 保存見本の再構成状態 */
+static uint32_t s_profile_seen_generation;                  /**< 最後に受けた保存generation */
+static uint8_t s_profile_seen_mask;                          /**< 送信済み保存見本bit mask */
+static bool s_profile_seen_generation_valid;                /**< 保存generationを取得済み */
+
+#if APP_AUDIO_DATASET_STREAM_ENABLE
+/**< PCM16 JSON Linesで使うBase64文字集合 */
+static char const s_pcm_base64_alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+#endif
 
 static uint32_t wifi_telemetry_uptime_ms(void);             /* 起動からの経過時刻取得 */
 static int wifi_telemetry_flag(uint8_t flags, uint8_t mask);/* フラグをJSON真偽値へ変換 */
@@ -88,7 +98,6 @@ static char const * wifi_telemetry_infer_status(uint8_t status); /* 音響認識
 static void wifi_telemetry_event_handler(void * argument, esp_event_base_t event_base, int32_t event_id,
                                          void * event_data);
 static esp_err_t wifi_telemetry_station_start(void);        /* Wi-Fiステーション開始 */
-/* CPU0テレメトリーのJSON整形 */
 static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rover_telemetry_t const * telemetry,
                                       acoustic_frame_t const * frame,
                                       acoustic_actuator_telemetry_t const * actuator_telemetry,
@@ -99,17 +108,17 @@ static int wifi_telemetry_format_json(char * json, size_t capacity, acoustic_rov
                                       acoustic_nav_diagnostics_t const * nav_diagnostics,
                                       bool nav_frame_valid, uint32_t nav_received_at_ms,
                                       int rssi_dbm, audio_capture_snapshot_t const * esp_audio,
-                                      uint32_t feature_fps_x100);
+                                      uint32_t feature_fps_x100); /* テレメトリーJSON生成 */
 /* 接続状態JSON整形 */
 static int wifi_telemetry_format_heartbeat(char * json, size_t capacity, int rssi_dbm,
                                            audio_capture_snapshot_t const * esp_audio,
                                            uint32_t feature_fps_x100);
 static bool wifi_telemetry_summary_chunk_accept(acoustic_ai_lab_summary_chunk_t const * chunk,
                                                 acoustic_ai_lab_snapshot_t const * snapshot,
-                                                bool snapshot_valid);
-static bool wifi_telemetry_profile_chunk_accept(acoustic_ai_lab_profile_chunk_t const * chunk);
-static bool wifi_telemetry_diagnostic_enqueue(wifi_diagnostic_event_t const * event);
-static bool wifi_telemetry_diagnostic_send(int socket_fd);
+                                                bool snapshot_valid); /* 要約chunkを世代単位で復元 */
+static bool wifi_telemetry_profile_chunk_accept(acoustic_ai_lab_profile_chunk_t const * chunk); /* 保存見本chunk復元 */
+static bool wifi_telemetry_diagnostic_enqueue(wifi_diagnostic_event_t const * event); /* 診断queue登録 */
+static bool wifi_telemetry_diagnostic_send(int socket_fd);    /* 診断イベントをUDP送信 */
 static void wifi_telemetry_task(void * argument);           /* USB受信・UDP送信タスク */
 
 /** =================================================================*
@@ -121,11 +130,16 @@ static uint32_t wifi_telemetry_uptime_ms(void) {
 }
 
 #if APP_AUDIO_DATASET_STREAM_ENABLE
-/* 256 sample PCM16を1チャネルずつ送る。既存ch0 JSONとの互換性を保つ。 */
+/** =================================================================*
+ * @brief PCM16 blockをBase64 JSON Lines datagramで送信
+ * @param[in] socket_fd 送信先UDP socket
+ * @param[in] block 送信対象PCM block
+ * @param[in] channel 物理I2S slot番号
+ * @details 既存channel 0のJSON形式を維持し、診断channelを別datagramにする。
+ * ================================================================= */
 static void wifi_telemetry_pcm_channel_send(int socket_fd, audio_capture_pcm_block_t const * block,
                                             unsigned int channel) {
     static char json[1024];
-    static char const alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     int length = snprintf(json, sizeof(json),
                           "{\"record_type\":\"%s\",\"schema\":1,\"channel\":%u,\"esp_ms\":%lu,"
                           "\"first_sample\":%lu,\"sample_count\":%u,\"dropped_blocks\":%lu,\"pcm16le_b64\":\"",
@@ -157,10 +171,10 @@ static void wifi_telemetry_pcm_channel_send(int socket_fd, audio_capture_pcm_blo
             length = -1;
             break;
         }
-        json[length++] = alphabet[(bits >> 18U) & 63U];
-        json[length++] = alphabet[(bits >> 12U) & 63U];
-        json[length++] = ((offset + 1U) < byte_count) ? alphabet[(bits >> 6U) & 63U] : '=';
-        json[length++] = ((offset + 2U) < byte_count) ? alphabet[bits & 63U] : '=';
+        json[length++] = s_pcm_base64_alphabet[(bits >> 18U) & 63U];
+        json[length++] = s_pcm_base64_alphabet[(bits >> 12U) & 63U];
+        json[length++] = ((offset + 1U) < byte_count) ? s_pcm_base64_alphabet[(bits >> 6U) & 63U] : '=';
+        json[length++] = ((offset + 2U) < byte_count) ? s_pcm_base64_alphabet[bits & 63U] : '=';
     }
     if (length < 0) {
         s_udp_error_count++;
@@ -177,7 +191,11 @@ static void wifi_telemetry_pcm_channel_send(int socket_fd, audio_capture_pcm_blo
     }
 }
 
-/* PCMブロック256 sample = 16 ms。最大2件/20 ms poll。 */
+/** =================================================================*
+ * @brief PCM診断queueから最大2 block分を送信
+ * @param[in] socket_fd 送信先UDP socket
+ * @details 256 sampleは16 ms。20 ms周期内の送信量を2 blockに制限する。
+ * ================================================================= */
 static void wifi_telemetry_pcm_send(int socket_fd) {
     for (unsigned int packet = 0U; packet < 2U; packet++) {
         audio_capture_pcm_block_t block;
@@ -455,12 +473,33 @@ static bool wifi_telemetry_diagnostic_send(int socket_fd) {
         float const distance = (valid && (snapshot->cosine_distance_x1000 != UINT16_MAX)) ?
                                ((float) snapshot->cosine_distance_x1000 / 1000.0f) : -1.0f;
         float const threshold = valid ? ((float) snapshot->identifier_threshold_x1000 / 1000.0f) : 0.0f;
+        bool const background_summary_valid = valid &&
+            ((snapshot->flags & ACOUSTIC_AI_LAB_FLAG_SUMMARY_VALID) != 0U);
+        bool const background_limit_overflow = background_summary_valid &&
+            (snapshot->background_threshold_x1000 == UINT16_MAX);
+        bool const background_mse_overflow = background_summary_valid &&
+            (snapshot->background_mse_x1000 == UINT16_MAX);
+        char const * background_status = !valid ? "no_mse_data" :
+            !background_summary_valid ? "no_mse_data" :
+            (background_limit_overflow && background_mse_overflow) ? "mse_and_limit_out_of_range" :
+            background_limit_overflow ? "limit_out_of_range" :
+            background_mse_overflow ? "mse_out_of_range" :
+            (0U == snapshot->background_threshold_x1000) ? "no_baseline" : "valid";
+        float const background_mse = background_summary_valid && !background_mse_overflow ?
+            ((float) snapshot->background_mse_x1000 / 1000.0f) : -1.0f;
+        float const background_threshold = background_summary_valid &&
+            (snapshot->background_threshold_x1000 > 0U) && !background_limit_overflow ?
+            ((float) snapshot->background_threshold_x1000 / 1000.0f) : -1.0f;
+        bool const background_anomaly = background_summary_valid &&
+            ((snapshot->flags & ACOUSTIC_AI_LAB_FLAG_BACKGROUND_ANOMALY) != 0U);
         length = snprintf(json, sizeof(json),
             "{\"record_type\":\"acoustic_diagnostic\",\"schema\":1,\"esp_ms\":%lu,"
             "\"feature_generation\":%lu,\"summary_valid\":%s,\"identifier_status\":%u,"
             "\"identifier_status_name\":\"%s\",\"reason\":\"%s\",\"distance\":%.3f,"
             "\"threshold\":%.3f,\"target_peak_bin\":%d,\"current_peak_bin\":%d,"
             "\"match_state\":\"%s\",\"strong_mismatch_count\":%u,\"last_target_age_ms\":%ld,"
+            "\"background_mse\":%.3f,\"background_threshold\":%.3f,\"background_anomaly\":%s,"
+            "\"background_status\":\"%s\","
             "\"cpu_diagnostic_drops\":%u,\"udp_diagnostic_drops\":%lu,\"summary\":[",
             (unsigned long) wifi_telemetry_uptime_ms(), (unsigned long) event->generation,
             (valid && ((snapshot->flags & ACOUSTIC_AI_LAB_FLAG_SUMMARY_VALID) != 0U)) ? "true" : "false",
@@ -470,7 +509,11 @@ static bool wifi_telemetry_diagnostic_send(int socket_fd) {
             (valid && snapshot->target_peak_bin != 255U) ? (int) snapshot->target_peak_bin : -1,
             (valid && snapshot->current_peak_bin != 255U) ? (int) snapshot->current_peak_bin : -1,
             match_name, (unsigned int) strong_count,
-            (long) ((age_ms == UINT32_MAX) ? -1 : (int32_t) age_ms), (unsigned int) event->cpu_drop_count,
+            (long) ((age_ms == UINT32_MAX) ? -1 : (int32_t) age_ms),
+            (double) background_mse, (double) background_threshold,
+            background_anomaly ? "true" : "false",
+            background_status,
+            (unsigned int) event->cpu_drop_count,
             (unsigned long) s_diagnostic_drop_count);
         if ((length > 0) && ((size_t) length < sizeof(json))) {
             for (size_t index = 0U; ((size_t) length < sizeof(json)) && (index < sizeof(event->vector)); index++) {

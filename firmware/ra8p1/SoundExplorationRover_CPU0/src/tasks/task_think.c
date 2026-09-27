@@ -437,7 +437,7 @@ LOCAL void task_think_learning_command_apply(void) {
 
 /** =================================================================*
  * @brief  最新の192次元要約を1回だけ現場見本として取り込む
- * @details 能動フレーム不足は判定不能なので、零ベクトルを見本として保存しない。
+ * @details 有効要約と-35 dBFS以上のイベント音量で採用する。学習中はAE MSE判定を要求しない。
  * @param[in] p_snapshot 最新の音響リンク状態
  * @param[in] observation_usable 音響観測の有効状態
  * ================================================================= */
@@ -451,16 +451,14 @@ LOCAL void task_think_learning_capture(const task_acoustic_link_snapshot_t * p_s
         return;
     }
 
-    /* 特徴量パッチはESP32S3側で音量トリガ済み。
-     * 推論完了時点のVAD/音量は収録時点と異なるため、ここでは再判定しない。 */
-
     /* 同じfeature_generationを二重保存しないための推論結果保持領域。 */
     LOCAL task_infer_result_t result;
     if ((E_OK != task_infer_result_get(&result)) || (result.feature_generation == learning_last_feature_generation)) {
         return;
     }
     learning_last_feature_generation = result.feature_generation;
-    if (!result.summary_valid) {
+    if (!result.summary_valid || !result.event_level_valid ||
+        (result.event_peak_level_dbfs_x100 < CPU0_LEARNING_SAMPLE_MIN_DBFS_X100)) {
         return;
     }
     memcpy(storage_data.samples[g_task_think_learning_samples], result.summary,
@@ -606,7 +604,7 @@ LOCAL ER task_think_publish_motion(H steering_deg, BOOL is_spin_turn, H left_rpm
          * 6輪ロッカーボギーサスペンションのX字操舵による超信地旋回。
          * 前後4輪をX字（35°）に配向し、探索・調停済みRPMで左右逆回転を行う。
          */
-        H const spin_servo_deg = (H) (CPU0_STEERING_SERVO_OUTPUT_SIGN * CPU0_SOUND_SPIN_SERVO_DEG);
+        H const spin_servo_deg = (H) (CPU0_SOUND_SPIN_SERVO_OUTPUT_SIGN * CPU0_SOUND_SPIN_SERVO_DEG);
         target.servo_target_deg[0] = spin_servo_deg;
         target.servo_target_deg[1] = (H) -spin_servo_deg;
         target.servo_target_deg[2] = (H) -spin_servo_deg;
@@ -888,8 +886,13 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         if (E_OK == task_infer_result_get(&infer_result)) {
             if (infer_result.feature_generation != last_infer_generation) {
                 last_infer_generation = infer_result.feature_generation;
-                if (CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_TARGET == infer_result.identifier.status) {
-                    /* ピーク帯域と距離の判定を通過したTARGETは、直ちにDoA取得へ渡す。 */
+                if (!infer_result.background_threshold_valid || !infer_result.background_anomaly) {
+                    /* AEが通常音と判定した世代では、見本距離が近くても走行候補にしない。 */
+                    target_sound_matched = FALSE;
+                    target_sound_direction_valid = FALSE;
+                    target_sound_match_timer_ms = 0U;
+                } else if (CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_TARGET == infer_result.identifier.status) {
+                    /* 背景AE異常と見本一致の両方を通過したTARGETだけをDoA取得へ渡す。 */
                     target_sound_matched = TRUE;
                     target_sound_direction_valid = TRUE;
                     target_sound_match_timer_ms = CPU0_SOUND_IDENTIFIER_TIMEOUT_MS;
@@ -926,13 +929,12 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         }
 
         /* --- S3: 音源追従コントローラを先に実行し、目標操舵角を取得 --- */
-        /* slot変更で旧見本が無効になった場合も、未学習のDoA/VADだけで発進しない。 */
+        /* slot変更で旧見本が無効になった場合も、未学習DoAだけで発進しない。 */
         BOOL const match_required = (0U != CPU0_SOUND_REQUIRE_IDENTIFIER_MATCH);
         /* 見本一致の保持は走行継続用とし、別音のDoAを位置推定へ混ぜない。 */
         BOOL const target_sound_valid = link_ready &&
             (!match_required || (target_sound_matched && target_sound_direction_valid)) &&
             (snapshot.observation.doa_confidence >= CPU0_SOUND_LOCALIZATION_MIN_CONFIDENCE) &&
-            (0U != snapshot.observation.vad) &&
             (snapshot.observation.level_dbfs_x100 >= CPU0_SOUND_TRIGGER_DBFS_X100);
 
         odometry_pose_t pose;
@@ -1038,15 +1040,9 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         /* ToF回避コントローラの判断結果を安全調停へ渡す領域。 */
         LOCAL obstacle_avoidance_output_t oa_output;
         memset(&oa_output, 0, sizeof(oa_output));
-        /* 回避がMOVE_STEPを越えて続く間も、直前の停止聴取で確定した音源側を
-         * 脱出方向の同点判定に使う。SETTLE/LISTEN中のsteering_degは0へ戻るため、
-         * ここでそれを渡すとピボットが音源方位を失う。 */
-        H obstacle_target_steering_deg = sf_output.target_bearing_deg;
-        if (obstacle_target_steering_deg > CPU0_SOUND_STEERING_MAX_DEG) {
-            obstacle_target_steering_deg = CPU0_SOUND_STEERING_MAX_DEG;
-        } else if (obstacle_target_steering_deg < -CPU0_SOUND_STEERING_MAX_DEG) {
-            obstacle_target_steering_deg = -CPU0_SOUND_STEERING_MAX_DEG;
-        }
+        /* 回避がMOVE_STEPを越えて続く間も静止聴取で確定した方位を保持する。
+         * 正面付近は左右の同点判定やMLP入力でも直進扱いにし、方位揺れを増幅しない。 */
+        H const obstacle_target_steering_deg = sound_follow_steering_from_doa(sf_output.target_bearing_deg);
         BOOL const spin_space_available = spin_requested && sensor_fresh &&
             (APP_FAULT_NONE == g_task_think_fault_flags) && !g_task_think_learning_mode &&
             obstacle_avoidance_spin_space_available(&sensor_snapshot);
@@ -1089,7 +1085,7 @@ LOCAL void task_think_entry(INT stacd, void * exinf) {
         LOCAL control_mlp_output_t mlp_output;
         memset(&mlp_output, 0, sizeof(mlp_output));
         control_mlp_planner_step(sensor_fresh ? &sensor_snapshot : NULL,
-                                 (float) sf_output.target_bearing_deg,
+                                 (float) obstacle_target_steering_deg,
                                  &mlp_output);
 #endif
 

@@ -24,6 +24,8 @@ static i2s_chan_handle_t s_rx_channel;                      /**< XVF3800音声�
 static log_mel_extractor_t s_log_mel_extractor;             /**< log-mel係数、繰越し、作業領域 */
 /**< 新しい順に上書きする800 ms特徴量リング */
 static int8_t s_feature_ring[ACOUSTIC_FEATURE_EVENT_FRAME_COUNT][ACOUSTIC_FEATURE_BIN_COUNT];
+static int16_t s_feature_level_ring[ACOUSTIC_FEATURE_EVENT_FRAME_COUNT]; /**< 各特徴量frameの同時刻level */
+static int16_t s_feature_input_level_dbfs_x100 = INT16_MIN; /**< 現在生成中の特徴量frame level */
 static size_t s_feature_write_index;                        /**< 次回特徴量書込位置 */
 static uint32_t s_generated_feature_frame_count;            /**< 累積特徴量フレーム数 */
 static audio_capture_feature_event_t s_feature_event;       /**< 送信待ちまたは収集中の特徴量イベント */
@@ -31,12 +33,13 @@ static uint16_t s_feature_event_frame_count;                /**< イベントに
 static bool s_feature_event_active;                         /**< 後続500 msを収集中 */
 static bool s_feature_event_ready;                          /**< 80フレーム揃い、送信側が取得可能 */
 #if APP_AUDIO_DATASET_STREAM_ENABLE
-#define AUDIO_CAPTURE_PCM_QUEUE_CAPACITY (16U)
+#define AUDIO_CAPTURE_PCM_QUEUE_CAPACITY   (16U)            /**< 音声タスクから退避するPCM block数 */
+/* ネットワーク処理を音声タスクから分離する有限PCMキュー。 */
 static audio_capture_pcm_block_t s_pcm_queue[AUDIO_CAPTURE_PCM_QUEUE_CAPACITY];
-static uint8_t s_pcm_head;
-static uint8_t s_pcm_count;
-static uint32_t s_pcm_drops;
-static uint32_t s_pcm_sample_index;
+static uint8_t s_pcm_head;                                  /**< 次に取り出すPCM block位置 */
+static uint8_t s_pcm_count;                                 /**< キュー内PCM block数 */
+static uint32_t s_pcm_drops;                                /**< キュー溢れによる破棄数 */
+static uint32_t s_pcm_sample_index;                         /**< 次に収集する起動後sample番号 */
 #endif
 /**< 音声状態を保護する排他ロック */
 static portMUX_TYPE s_snapshot_lock = portMUX_INITIALIZER_UNLOCKED;
@@ -84,11 +87,16 @@ static void audio_capture_feature_callback(int8_t const frame[LOG_MEL_BIN_COUNT]
     (void) context;
 
     portENTER_CRITICAL(&s_snapshot_lock);
-    memcpy(s_feature_ring[s_feature_write_index], frame, sizeof(s_feature_ring[0]));
+        size_t const write_index = s_feature_write_index;
+        memcpy(s_feature_ring[write_index], frame, sizeof(s_feature_ring[0]));
+        s_feature_level_ring[write_index] = s_feature_input_level_dbfs_x100;
     s_feature_write_index = (s_feature_write_index + 1U) % ACOUSTIC_FEATURE_EVENT_FRAME_COUNT;
     s_generated_feature_frame_count++;
     if (s_feature_event_active) {
         memcpy(s_feature_event.frames[s_feature_event_frame_count], frame, sizeof(s_feature_event.frames[0]));
+        if (s_feature_input_level_dbfs_x100 > s_feature_event.peak_level_dbfs_x100) {
+            s_feature_event.peak_level_dbfs_x100 = s_feature_input_level_dbfs_x100;
+        }
         s_feature_event_frame_count++;
         if (ACOUSTIC_FEATURE_EVENT_FRAME_COUNT == s_feature_event_frame_count) {
             s_feature_event_active = false;
@@ -155,6 +163,20 @@ static void audio_capture_task(void * context) {
             }
         }
 
+        double const block_rms = sqrt(square_sum / (double) sample_count);
+        if (!s_snapshot.valid) {
+            filtered_rms = block_rms;
+            filtered_peak = block_peak;
+        } else {
+            filtered_rms += 0.25 * (block_rms - filtered_rms);
+            filtered_peak *= 0.90;
+            if (block_peak > filtered_peak) {
+                filtered_peak = block_peak;
+            }
+        }
+        int16_t const level_dbfs_x100 = amplitude_to_dbfs_x100(filtered_rms);
+        s_feature_input_level_dbfs_x100 = level_dbfs_x100;
+
         for (size_t index = 0U; index < audio_frame_count; index++) {
             mono_samples[index] = samples[index * APP_AUDIO_CHANNEL_COUNT + APP_AUDIO_FEATURE_CHANNEL_INDEX];
         }
@@ -189,20 +211,8 @@ static void audio_capture_task(void * context) {
         portEXIT_CRITICAL(&s_snapshot_lock);
 #endif
 
-        double const block_rms = sqrt(square_sum / (double) sample_count);
-        if (!s_snapshot.valid) {
-            filtered_rms = block_rms;
-            filtered_peak = block_peak;
-        } else {
-            filtered_rms += 0.25 * (block_rms - filtered_rms);
-            filtered_peak *= 0.90;
-            if (block_peak > filtered_peak) {
-                filtered_peak = block_peak;
-            }
-        }
-
         portENTER_CRITICAL(&s_snapshot_lock);
-        s_snapshot.level_dbfs_x100 = amplitude_to_dbfs_x100(filtered_rms);
+        s_snapshot.level_dbfs_x100 = level_dbfs_x100;
         s_snapshot.peak_dbfs_x100 = amplitude_to_dbfs_x100(filtered_peak);
         s_snapshot.frame_count += (uint32_t) audio_frame_count;
         s_snapshot.feature_frame_count = s_generated_feature_frame_count;
@@ -243,10 +253,14 @@ esp_err_t audio_capture_feature_event_start(uint16_t event_id) {
     }
 
     uint32_t const first_frame = s_generated_feature_frame_count - pre_trigger_frames;
+    s_feature_event.peak_level_dbfs_x100 = INT16_MIN;
     for (uint32_t frame_index = 0U; frame_index < pre_trigger_frames; frame_index++) {
         size_t const ring_index =
             (size_t) ((first_frame + frame_index) % ACOUSTIC_FEATURE_EVENT_FRAME_COUNT);
         memcpy(s_feature_event.frames[frame_index], s_feature_ring[ring_index], sizeof(s_feature_event.frames[0]));
+        if (s_feature_level_ring[ring_index] > s_feature_event.peak_level_dbfs_x100) {
+            s_feature_event.peak_level_dbfs_x100 = s_feature_level_ring[ring_index];
+        }
     }
     s_feature_event.event_id = event_id;
     s_feature_event_frame_count = (uint16_t) pre_trigger_frames;
@@ -309,6 +323,10 @@ esp_err_t audio_capture_start(void) {
 
     log_mel_extractor_init(&s_log_mel_extractor);
     s_snapshot.log_mel_self_test_pass = log_mel_extractor_self_test(&s_log_mel_extractor);
+    for (size_t index = 0U; index < ACOUSTIC_FEATURE_EVENT_FRAME_COUNT; index++) {
+        s_feature_level_ring[index] = INT16_MIN;
+    }
+    s_feature_input_level_dbfs_x100 = INT16_MIN;
     i2s_chan_config_t const channel_config = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     ESP_RETURN_ON_ERROR(i2s_new_channel(&channel_config, NULL, &s_rx_channel), TAG, "I2S RX channel creation failed");
 
@@ -373,6 +391,11 @@ void audio_capture_get_snapshot(audio_capture_snapshot_t * snapshot) {
 }
 
 #if APP_AUDIO_DATASET_STREAM_ENABLE
+/** =================================================================*
+ * @brief 評価用PCM診断blockをキューから取得
+ * @param[out] block 取得したPCM block
+ * @return blockを取得できた場合true
+ * ================================================================= */
 bool audio_capture_pcm_block_take(audio_capture_pcm_block_t * block) {
     if (block == NULL) {
         return false;

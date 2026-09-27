@@ -52,7 +52,6 @@ LOCAL void sound_follow_detection_reset(void);              /* 音量・DoA履�
 LOCAL void sound_follow_doa_push(H angle_deg);              /* DoA履歴追加 */
 LOCAL BOOL sound_follow_doa_stable(H * p_mean_deg);         /* DoA安定性と平均算出 */
 LOCAL H sound_follow_moving_doa_select(H doa_deg, const sound_follow_input_t * p_input); /* 姿勢で移動中DoAを検証 */
-LOCAL H sound_follow_steering_from_doa(H doa_deg);          /* DoAから操舵角算出 */
 LOCAL W sound_follow_spin_target_from_doa(H doa_deg);       /* DoAから旋回目標ヨー算出 */
 LOCAL void sound_follow_motion_from_doa(H doa_deg);         /* DoAから操舵・走行方向を決定 */
 LOCAL void sound_follow_state_enter(sound_follow_state_t state); /* 状態遷移 */
@@ -122,8 +121,7 @@ LOCAL H sound_follow_moving_doa_select(H doa_deg, const sound_follow_input_t * p
 
 /** =================================================================*
  * @brief  DoAを車体座標へ変換
- * @details 正は右、負は左。四方実測で後方だけXVFの左右対応が
- *          前方と逆だったため、前方・後方を分けて較正する。
+ * @details 正は右、負は左。raw DoAを[-180,180)へ正規化し、時計回りを右正とする。
  * @param[in] doa_deg XVF3800の0～359度DoA
  * @return 車体正面基準の相対角度
  * ================================================================= */
@@ -275,27 +273,25 @@ LOCAL BOOL sound_follow_doa_stable(H * p_mean_deg) {
 
 /** =================================================================*
  * @brief  DoAから操舵角算出
+ * @details 正面の方位揺れでは直進し、許容幅の外でも操舵角を0度から連続的に増やす。
  * @param[in] doa_deg 車体座標の相対角度
  * @return 右正・左負の操舵角
  * ================================================================= */
-LOCAL H sound_follow_steering_from_doa(H doa_deg) {
-    if (sound_follow_abs_i16(doa_deg) <= CPU0_SOUND_FRONT_TOLERANCE_DEG) {
+EXPORT H sound_follow_steering_from_doa(H doa_deg) {
+    H const magnitude = sound_follow_abs_i16(doa_deg);
+    if (magnitude <= CPU0_SOUND_FRONT_TOLERANCE_DEG) {
         return 0;
     }
 
-    H steering = doa_deg;
+    H steering = (H) (magnitude - CPU0_SOUND_FRONT_TOLERANCE_DEG);
     if (steering > CPU0_SOUND_STEERING_MAX_DEG) {
         steering = CPU0_SOUND_STEERING_MAX_DEG;
-    } else if (steering < -CPU0_SOUND_STEERING_MAX_DEG) {
-        steering = -CPU0_SOUND_STEERING_MAX_DEG;
 #if (CPU0_SOUND_STEERING_MIN_DEG > 1)
-    } else if ((steering > 0) && (steering < CPU0_SOUND_STEERING_MIN_DEG)) {
+    } else if (steering < CPU0_SOUND_STEERING_MIN_DEG) {
         steering = CPU0_SOUND_STEERING_MIN_DEG;
-    } else if ((steering < 0) && (steering > -CPU0_SOUND_STEERING_MIN_DEG)) {
-        steering = -CPU0_SOUND_STEERING_MIN_DEG;
 #endif
     }
-    return steering;
+    return (doa_deg < 0) ? (H) -steering : steering;
 }
 
 /** =================================================================*

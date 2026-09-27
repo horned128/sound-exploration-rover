@@ -7,8 +7,9 @@
 #include "services/background_model.h"                      /* 固定乱数AEとRLSデコーダ */
 #include "task_acoustic_link.h"                             /* 完成特徴量パッチ取得 */
 #if (CPU0_USE_ACOUSTIC_EMBEDDING_TFLM != 0U)
-#include "ai/acoustic_embedding_identifier.h"              /* TFLM音響埋め込みCNN */
+#include "ai/acoustic_embedding_identifier.h"               /* TFLM音響埋め込みCNN */
 #endif
+#include <math.h>                                           /* 保存済みLimitの有限値検査 */
 #include <string.h>                                         /* 結果・背景デコーダコピー */
 
 #define CPU0_INFER_EVENT_FEATURE_READY     (1UL << 0)       /**< 完成特徴量の推論開始イベントビット */
@@ -68,8 +69,8 @@ EXPORT volatile UW g_task_infer_feature_generation;         /**< 最後に処理
 EXPORT volatile UW g_task_infer_inference_count;            /**< 音響推論実行回数 */
 EXPORT volatile UW g_task_infer_failure_count;              /**< 音響推論失敗回数 */
 EXPORT volatile UW g_task_infer_match_count;                /**< 音響見本一致回数 */
-EXPORT volatile UW g_task_infer_processing_last_ms;
-EXPORT volatile UW g_task_infer_processing_max_ms;
+EXPORT volatile UW g_task_infer_processing_last_ms;         /**< 直近の推論処理時間[ms] */
+EXPORT volatile UW g_task_infer_processing_max_ms;          /**< 起動後最大の推論処理時間[ms] */
 EXPORT volatile ER g_task_infer_last_kernel_error;          /**< 音響推論タスクの最終Kernelエラー */
 
 /** =================================================================*
@@ -134,7 +135,7 @@ EXPORT void task_infer_start_optional(void) {
     g_task_infer_processing_max_ms = 0U;
     g_task_infer_last_kernel_error = E_OK;
 
-    /* 任意機能の資源は依存順に生成し、途中失敗時は同じ順序の逆順で解放する。 */
+                                                            /* 任意機能の資源は依存順に生成し、途中失敗時は同じ順序の逆順で解放する。 */
     infer_mutex_id = tk_cre_mtx(&infer_mutex_config);
     if (infer_mutex_id <= 0) {
         g_task_infer_last_kernel_error = (ER) infer_mutex_id;
@@ -208,7 +209,7 @@ EXPORT ER task_infer_prototype_set(const prototype_storage_data_t * p_data, BOOL
         infer_bin_weights[b] = 1.0F;
     }
     if (storage_valid && (p_data->sample_count > 0U)) {
-        /* 旧MRAMに孤立見本が残っていても、実際に照合する4見本から重みを決める。 */
+                                                            /* 旧MRAMに孤立見本が残っていても、実際に照合する4見本から重みを決める。 */
         infer_target_peak_bin = acoustic_identifier_consensus_peak_bin((const B *) p_data->samples,
                                                                         p_data->sample_count);
         acoustic_identifier_build_weights(infer_target_peak_bin, infer_bin_weights);
@@ -398,10 +399,16 @@ EXPORT ER task_infer_prototype_telemetry_get(task_infer_prototype_telemetry_t * 
     p_telemetry->storage_valid = infer_storage_valid;
     p_telemetry->sample_count = infer_storage_data.sample_count;
     p_telemetry->target_peak_bin = infer_target_peak_bin;
-    /* 旧MRAMに広い値が保存されていても、画面には実際に使用する上限を出す。 */
-    p_telemetry->identifier_threshold =
-        (infer_storage_data.identifier_threshold > CPU0_ACOUSTIC_IDENTIFIER_THRESHOLD_MAX) ?
-            CPU0_ACOUSTIC_IDENTIFIER_THRESHOLD_MAX : infer_storage_data.identifier_threshold;
+                                                            /* 旧MRAM値も含め、画面には照合で実際に適用するしきい値を出す。 */
+    float identifier_threshold = infer_storage_data.identifier_threshold;
+    if ((identifier_threshold > 0.0F) &&
+        (identifier_threshold < CPU0_ACOUSTIC_IDENTIFIER_THRESHOLD_MIN)) {
+        identifier_threshold = CPU0_ACOUSTIC_IDENTIFIER_THRESHOLD_MIN;
+    }
+    if (identifier_threshold > CPU0_ACOUSTIC_IDENTIFIER_ACCEPTANCE_THRESHOLD_MAX) {
+        identifier_threshold = CPU0_ACOUSTIC_IDENTIFIER_ACCEPTANCE_THRESHOLD_MAX;
+    }
+    p_telemetry->identifier_threshold = identifier_threshold;
     return tk_unl_mtx(infer_mutex_id);
 }
 
@@ -429,35 +436,15 @@ LOCAL void task_infer_feature_process(void) {
     SYSTIM started = {0};
     (void) tk_get_otm(&started);
 
-    /* タスクスタックを圧迫せず、mutex保護下で完成結果を公開する作業領域。 */
+                                                            /* タスクスタックを圧迫せず、mutex保護下で完成結果を公開する作業領域。 */
     LOCAL task_infer_result_t next;
     task_infer_result_clear(&next);
     next.feature_generation = generation;
-    BOOL active_mse_found = FALSE;
-    for (UW frame = 0U; frame < CPU0_ACOUSTIC_EVENT_FRAME_COUNT; frame++) {
-        const B * const p_frame = &infer_feature_patch.frames[frame][0];
-        BOOL const active = acoustic_identifier_frame_is_active(p_frame);
-        float mse = 0.0F;
-        if (!background_model_observe(&infer_background_model, p_frame, active, &mse)) {
-            g_task_infer_failure_count++;
-            continue;
-        }
-        if (active && ((!active_mse_found) || (mse > next.event_mse))) {
-            next.event_mse = mse;
-            active_mse_found = TRUE;
-        }
-    }
+    next.event_level_valid = infer_feature_patch.event_level_valid;
+    next.event_peak_level_dbfs_x100 = infer_feature_patch.peak_level_dbfs_x100;
     next.summary_valid = acoustic_identifier_summary_create((const B *) infer_feature_patch.frames,
                                                              CPU0_ACOUSTIC_EVENT_FRAME_COUNT,
                                                              next.summary, &next.active_frame_count);
-    next.background_threshold_valid = background_model_mse_threshold(&infer_background_model,
-                                                                       &next.background_threshold);
-    if ((!next.background_threshold_valid) && infer_storage_valid) {
-        next.background_threshold = infer_storage_data.background_mse_threshold;
-        next.background_threshold_valid = TRUE;
-    }
-    next.background_anomaly = active_mse_found && next.background_threshold_valid &&
-                              (next.event_mse > next.background_threshold);
     acoustic_identifier_summary_classify(next.summary, next.summary_valid, next.active_frame_count,
                                          (const B *) infer_storage_data.samples,
                                          infer_storage_data.sample_count,
@@ -465,7 +452,7 @@ LOCAL void task_infer_feature_process(void) {
                                          infer_storage_data.identifier_threshold, &next.identifier);
     next.classifier_kind = CPU0_ACOUSTIC_CLASSIFIER_DSP_SUMMARY;
 #if (CPU0_USE_ACOUSTIC_EMBEDDING_TFLM != 0U)
-    /* TFLM音響埋め込みCNNによる高精度照合 (有効かつ登録済みかつパッチ有効時に適用) */
+                                                            /* TARGET世代を背景学習へ混ぜないよう、フレーム処理より先に識別結果を確定する。 */
     if (next.summary_valid && g_task_infer_tflm_available &&
         acoustic_embedding_identifier_extract((const B *) infer_feature_patch.frames, infer_current_embedding)) {
         if (infer_storage_valid && (infer_storage_data.sample_count > 0U) && infer_embedding_ready) {
@@ -483,6 +470,50 @@ LOCAL void task_infer_feature_process(void) {
         }
     }
 #endif
+    BOOL const target_event = (CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_TARGET == next.identifier.status);
+    next.background_threshold_valid = background_model_mse_threshold(&infer_background_model,
+                                                                        &next.background_threshold);
+    float const trained_background_threshold = infer_storage_data.background_mse_threshold;
+    BOOL const trained_background_threshold_valid = infer_storage_valid &&
+        isfinite(trained_background_threshold) && (trained_background_threshold > 0.0F);
+    if (next.background_threshold_valid && trained_background_threshold_valid &&
+        (next.background_threshold > trained_background_threshold)) {
+        /* Runtime adaptation may tighten the trained normal ceiling, but must not
+         * raise it and suppress later novelty events. */
+        next.background_threshold = trained_background_threshold;
+    } else if ((!next.background_threshold_valid) && trained_background_threshold_valid) {
+        next.background_threshold = trained_background_threshold;
+        next.background_threshold_valid = TRUE;
+    }
+
+    BOOL active_mse_found = FALSE;
+    for (UW frame = 0U; frame < CPU0_ACOUSTIC_EVENT_FRAME_COUNT; frame++) {
+        const B * const p_frame = &infer_feature_patch.frames[frame][0];
+        BOOL const active = acoustic_identifier_frame_is_active(p_frame);
+        float mse = 0.0F;
+        if (!background_model_mse(&infer_background_model, p_frame, &mse)) {
+            g_task_infer_failure_count++;
+            continue;
+        }
+        if (active && ((!active_mse_found) || (mse > next.event_mse))) {
+            next.event_mse = mse;
+            active_mse_found = TRUE;
+        }
+    }
+    next.background_anomaly = active_mse_found && next.background_threshold_valid &&
+                              (next.event_mse > next.background_threshold);
+    if (!target_event && !next.background_anomaly) {
+        /* 正常patchだけを背景RLS・Limit統計へ反映する。異常patchは識別TARGETになる前
+         * の初回学習中も含め、背景へ吸収しない。 */
+        for (UW frame = 0U; frame < CPU0_ACOUSTIC_EVENT_FRAME_COUNT; frame++) {
+            const B * const p_frame = &infer_feature_patch.frames[frame][0];
+            BOOL const active = acoustic_identifier_frame_is_active(p_frame);
+            float ignored_mse = 0.0F;
+            if (!background_model_observe(&infer_background_model, p_frame, active, &ignored_mse)) {
+                g_task_infer_failure_count++;
+            }
+        }
+    }
     if (CPU0_ACOUSTIC_IDENTIFIER_SUMMARY_TARGET == next.identifier.status) {
         g_task_infer_match_count++;
     }

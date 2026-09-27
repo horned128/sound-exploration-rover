@@ -212,7 +212,7 @@ size_t acoustic_protocol_encode_health(uint32_t sequence, uint32_t uptime_ms, co
 
 /** =================================================================*
  * @brief  log-mel特徴量符号化
- * @details メタデータ8 byteと2フレーム分のint8 melを固定72 byteで送る。
+ * @details メタデータ8 byte（イベントpeak levelを含む）と2フレーム分のint8 melを固定72 byteで送る。
  * @param[in] sequence 送信シーケンス
  * @param[in] uptime_ms ESP32起動後時間
  * @param[in] p_feature log-mel特徴量

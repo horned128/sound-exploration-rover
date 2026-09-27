@@ -136,7 +136,7 @@ class BackgroundModelState(ctypes.Structure):
         ("encoder_seed", ctypes.c_uint32),
         ("mse_count", ctypes.c_uint32),
         ("mse_mean", ctypes.c_float),
-        ("mse_m2", ctypes.c_float),
+        ("mse_variance", ctypes.c_float),
     ]
 
 
@@ -272,6 +272,8 @@ def library() -> ctypes.CDLL:
     handle.sound_follow_controller_init.restype = None
     handle.sound_follow_doa_to_relative.argtypes = [ctypes.c_uint16]
     handle.sound_follow_doa_to_relative.restype = ctypes.c_int16
+    handle.sound_follow_steering_from_doa.argtypes = [ctypes.c_int16]
+    handle.sound_follow_steering_from_doa.restype = ctypes.c_int16
     handle.sound_follow_controller_step.argtypes = [
         ctypes.POINTER(SoundFollowInput),
         ctypes.c_uint32,

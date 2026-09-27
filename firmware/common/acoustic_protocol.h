@@ -11,14 +11,14 @@
 
 #define ACOUSTIC_PROTOCOL_MAGIC_0          (0x53U)
 #define ACOUSTIC_PROTOCOL_MAGIC_1          (0x52U)
-#define ACOUSTIC_PROTOCOL_VERSION          (2U)
+#define ACOUSTIC_PROTOCOL_VERSION          (2U)             /**< wire formatの版数 */
 #define ACOUSTIC_PROTOCOL_HEADER_SIZE      (14U)
 #define ACOUSTIC_PROTOCOL_CRC_SIZE         (2U)
 #define ACOUSTIC_PROTOCOL_MAX_PAYLOAD_SIZE (96U)
 #define ACOUSTIC_PROTOCOL_MAX_FRAME_SIZE   \
     (ACOUSTIC_PROTOCOL_HEADER_SIZE + ACOUSTIC_PROTOCOL_MAX_PAYLOAD_SIZE + ACOUSTIC_PROTOCOL_CRC_SIZE)
 #define ACOUSTIC_PROTOCOL_DOA_INVALID         (0xFFFFU)
-#define ACOUSTIC_OBSERVATION_PAYLOAD_SIZE     (22U)
+#define ACOUSTIC_OBSERVATION_PAYLOAD_SIZE  (22U)            /**< 音響観測payload長[byte] */
 #define ACOUSTIC_HELLO_PAYLOAD_SIZE           (12U)
 #define ACOUSTIC_HEALTH_PAYLOAD_SIZE          (12U)
 #define ACOUSTIC_FEATURE_BIN_COUNT             (32U)
@@ -31,21 +31,24 @@
 #define ACOUSTIC_ROVER_TELEMETRY_PAYLOAD_SIZE (96U)
 #define ACOUSTIC_ACTUATOR_TELEMETRY_PAYLOAD_SIZE (24U)
 #define ACOUSTIC_POSE_TELEMETRY_PAYLOAD_SIZE (36U)
-#define ACOUSTIC_NAV_DIAGNOSTICS_PAYLOAD_SIZE (56U)
-#define ACOUSTIC_AI_LAB_SNAPSHOT_PAYLOAD_SIZE        (48U) /**< snapshot長[byte] */
-#define ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE              (64U) /**< chunkデータ長[byte] */
-#define ACOUSTIC_AI_LAB_SUMMARY_CHUNK_PAYLOAD_SIZE   (8U + ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE) /**< 要約chunk長 */
-#define ACOUSTIC_AI_LAB_PROFILE_CHUNK_PAYLOAD_SIZE   (8U + ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE) /**< 保存見本chunk長 */
-#define ACOUSTIC_AI_LAB_COMMAND_PAYLOAD_SIZE         (1U)  /**< 操作要求長[byte] */
-#define ACOUSTIC_AI_LAB_COMMAND_RESULT_PAYLOAD_SIZE  (4U)  /**< 操作結果長[byte] */
-#define ACOUSTIC_AI_LAB_MATCH_STATE_MASK             (0x03U) /**< snapshot v2 一致状態bit */
-#define ACOUSTIC_AI_LAB_MATCH_CONFIRMED              (0U)    /**< TARGET確定 */
-#define ACOUSTIC_AI_LAB_MATCH_UNCERTAIN              (1U)    /**< 期限付き猶予 */
-#define ACOUSTIC_AI_LAB_MATCH_EXPIRED                (2U)    /**< 一致期限切れ */
-#define ACOUSTIC_AI_LAB_MATCH_UNKNOWN                (3U)    /**< baseline制御では保持状態を提供しない */
-#define ACOUSTIC_AI_LAB_MATCH_STRONG_COUNT_SHIFT     (2U)    /**< snapshot v2 強不一致数shift */
-#define ACOUSTIC_AI_LAB_MATCH_STRONG_COUNT_MASK      (0xFCU) /**< snapshot v2 強不一致数mask */
-#define ACOUSTIC_AI_LAB_MATCH_AGE_INVALID            (0xFFFFU) /**< TARGET未確認の経過時間 */
+#define ACOUSTIC_NAV_DIAGNOSTICS_PAYLOAD_SIZE (56U)         /**< 音源ナビ診断payload長[byte] */
+#define ACOUSTIC_AI_LAB_SNAPSHOT_PAYLOAD_SIZE (48U)         /**< snapshot長[byte] */
+#define ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE    (64U)            /**< chunkデータ長[byte] */
+#define ACOUSTIC_AI_LAB_SUMMARY_CHUNK_PAYLOAD_SIZE (8U + ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE) /**< 要約chunk長 */
+#define ACOUSTIC_AI_LAB_PROFILE_CHUNK_PAYLOAD_SIZE (8U + ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE) /**< 保存見本chunk長 */
+#define ACOUSTIC_AI_LAB_COMMAND_PAYLOAD_SIZE (1U)           /**< 操作要求長[byte] */
+#define ACOUSTIC_AI_LAB_COMMAND_RESULT_PAYLOAD_SIZE (4U)    /**< 操作結果長[byte] */
+#define ACOUSTIC_FEATURE_EVENT_LEVEL_VALID_FLAG (1U << 7)   /**< flags内イベントpeak level有効 */
+#define ACOUSTIC_FEATURE_EVENT_LEVEL_CODE_MASK (0x7FU)      /**< 1 dB整数値 + 127 の範囲 */
+#define ACOUSTIC_FEATURE_EVENT_LEVEL_OFFSET_DB (127)        /**< int8 dBFS整数値を0..127へ移す */
+#define ACOUSTIC_AI_LAB_MATCH_STATE_MASK   (0x03U)          /**< snapshot v2 一致状態bit */
+#define ACOUSTIC_AI_LAB_MATCH_CONFIRMED    (0U)             /**< TARGET確定 */
+#define ACOUSTIC_AI_LAB_MATCH_UNCERTAIN    (1U)             /**< 期限付き猶予 */
+#define ACOUSTIC_AI_LAB_MATCH_EXPIRED      (2U)             /**< 一致期限切れ */
+#define ACOUSTIC_AI_LAB_MATCH_UNKNOWN      (3U)             /**< baseline制御では保持状態を提供しない */
+#define ACOUSTIC_AI_LAB_MATCH_STRONG_COUNT_SHIFT (2U)       /**< snapshot v2 強不一致数shift */
+#define ACOUSTIC_AI_LAB_MATCH_STRONG_COUNT_MASK (0xFCU)     /**< snapshot v2 強不一致数mask */
+#define ACOUSTIC_AI_LAB_MATCH_AGE_INVALID  (0xFFFFU)        /**< TARGET未確認の経過時間 */
 
 #define ACOUSTIC_POSE_FLAG_STATIONARY      (1U << 0)
 #define ACOUSTIC_POSE_FLAG_CALIBRATED      (1U << 1)
@@ -54,8 +57,8 @@
 #define ACOUSTIC_CAPABILITY_VAD            (1UL << 1)
 #define ACOUSTIC_CAPABILITY_LEVEL          (1UL << 2)
 #define ACOUSTIC_CAPABILITY_WIFI           (1UL << 3)
-#define ACOUSTIC_CAPABILITY_DOA_DIAGNOSTICS (1UL << 4)
-#define ACOUSTIC_CAPABILITY_FEATURE_SLOT1   (1UL << 5) /**< DSPはI2S右slot。CPU0 v5見本に必須 */
+#define ACOUSTIC_CAPABILITY_DOA_DIAGNOSTICS (1UL << 4)      /**< raw/filtered DoA診断を送信 */
+#define ACOUSTIC_CAPABILITY_FEATURE_SLOT1  (1UL << 5)       /**< DSPはI2S右slot。CPU0 v5見本に必須 */
 
 #define ACOUSTIC_AUDIO_FLAG_I2S_OVERRUN    (1U << 0)
 #define ACOUSTIC_AUDIO_FLAG_I2C_ERROR      (1U << 1)
@@ -75,42 +78,64 @@
 #define ACOUSTIC_TELEMETRY_STORAGE_RESULT_MASK (0x0FU)
 #define ACOUSTIC_TELEMETRY_STORAGE_VALID   (1U << 4)
 #define ACOUSTIC_TELEMETRY_LEARNING_MODE   (1U << 5)
-#define ACOUSTIC_TELEMETRY_DEBUG_MOTOR_RECORDING (1U << 6) /**< SW1録音走行（診断のみ） */
+#define ACOUSTIC_TELEMETRY_DEBUG_MOTOR_RECORDING (1U << 6)  /**< SW1録音走行（診断のみ） */
 
-#define ACOUSTIC_INFER_STATUS_MASK             (0x0FU)     /**< 認識判定状態 (0:INVALID..4:TARGET) */
-#define ACOUSTIC_INFER_CLASSIFIER_SHIFT        (4U)        /**< 分類器種別ビットシフト */
-#define ACOUSTIC_INFER_CLASSIFIER_MASK         (0x30U)     /**< 分類器種別マスク (2bit) */
-#define ACOUSTIC_INFER_CLASSIFIER_NONE         (0U)        /**< 未判定 */
-#define ACOUSTIC_INFER_CLASSIFIER_DSP_SUMMARY  (1U)        /**< 192次元要約・周波数ビン直接照合 */
-#define ACOUSTIC_INFER_CLASSIFIER_NN_EMBEDDING (2U)        /**< TFLM音響埋め込みCNN照合 */
-#define ACOUSTIC_INFER_TFLM_AVAILABLE_BIT      (1U << 6)   /**< TFLMランタイム初期化成功フラグ */
+#define ACOUSTIC_INFER_STATUS_MASK         (0x0FU)          /**< 認識判定状態 (0:INVALID..4:TARGET) */
+#define ACOUSTIC_INFER_CLASSIFIER_SHIFT    (4U)             /**< 分類器種別ビットシフト */
+#define ACOUSTIC_INFER_CLASSIFIER_MASK     (0x30U)          /**< 分類器種別マスク (2bit) */
+#define ACOUSTIC_INFER_CLASSIFIER_NONE     (0U)             /**< 未判定 */
+#define ACOUSTIC_INFER_CLASSIFIER_DSP_SUMMARY (1U)          /**< 192次元要約・周波数ビン直接照合 */
+#define ACOUSTIC_INFER_CLASSIFIER_NN_EMBEDDING (2U)         /**< TFLM音響埋め込みCNN照合 */
+#define ACOUSTIC_INFER_TFLM_AVAILABLE_BIT  (1U << 6)        /**< TFLMランタイム初期化成功フラグ */
 
+/** =================================================================*
+ * @brief 認識状態・分類器・TFLM状態を1 byteへ格納
+ * @param[in] status 認識状態
+ * @param[in] classifier_kind 分類器種別
+ * @param[in] tflm_available TFLM初期化成功状態
+ * @return bit fieldへ格納した状態
+ * ================================================================= */
 static inline uint8_t acoustic_infer_status_pack(uint8_t status, uint8_t classifier_kind, bool tflm_available) {
     return (uint8_t) ((status & ACOUSTIC_INFER_STATUS_MASK) |
                       ((classifier_kind & 0x03U) << ACOUSTIC_INFER_CLASSIFIER_SHIFT) |
                       (tflm_available ? ACOUSTIC_INFER_TFLM_AVAILABLE_BIT : 0U));
 }
 
+/** =================================================================*
+ * @brief packed値から認識状態を取得
+ * @param[in] packed wire formatの状態byte
+ * @return 認識状態
+ * ================================================================= */
 static inline uint8_t acoustic_infer_status_unpack_status(uint8_t packed) {
     return (uint8_t) (packed & ACOUSTIC_INFER_STATUS_MASK);
 }
 
+/** =================================================================*
+ * @brief packed値から分類器種別を取得
+ * @param[in] packed wire formatの状態byte
+ * @return 分類器種別
+ * ================================================================= */
 static inline uint8_t acoustic_infer_status_unpack_classifier(uint8_t packed) {
     return (uint8_t) ((packed & ACOUSTIC_INFER_CLASSIFIER_MASK) >> ACOUSTIC_INFER_CLASSIFIER_SHIFT);
 }
 
+/** =================================================================*
+ * @brief packed値からTFLM利用可能状態を取得
+ * @param[in] packed wire formatの状態byte
+ * @return TFLM初期化済みならtrue
+ * ================================================================= */
 static inline bool acoustic_infer_status_unpack_tflm_available(uint8_t packed) {
     return (packed & ACOUSTIC_INFER_TFLM_AVAILABLE_BIT) != 0U;
 }
 
-#define ACOUSTIC_NAV_FLAG_RAW_DOA_VALID       (1U << 0)
-#define ACOUSTIC_NAV_FLAG_FILTERED_DOA_VALID  (1U << 1)
-#define ACOUSTIC_NAV_FLAG_SOURCE_VALID        (1U << 2)
-#define ACOUSTIC_NAV_FLAG_GEOMETRY_VALID      (1U << 3)
-#define ACOUSTIC_NAV_FLAG_TARGET_VALID        (1U << 4)
-#define ACOUSTIC_NAV_FLAG_ARRIVAL_CANDIDATE   (1U << 5)
-#define ACOUSTIC_NAV_FLAG_ARRIVED             (1U << 6)
-#define ACOUSTIC_NAV_FLAG_MIN_TRANSLATION_TURN (1U << 7)
+#define ACOUSTIC_NAV_FLAG_RAW_DOA_VALID    (1U << 0)        /**< raw DoAが有効 */
+#define ACOUSTIC_NAV_FLAG_FILTERED_DOA_VALID (1U << 1)      /**< 循環平均DoAが有効 */
+#define ACOUSTIC_NAV_FLAG_SOURCE_VALID     (1U << 2)        /**< 音源位置を保持中 */
+#define ACOUSTIC_NAV_FLAG_GEOMETRY_VALID   (1U << 3)        /**< 今回の推定幾何が有効 */
+#define ACOUSTIC_NAV_FLAG_TARGET_VALID     (1U << 4)        /**< 追従用目標が有効 */
+#define ACOUSTIC_NAV_FLAG_ARRIVAL_CANDIDATE (1U << 5)       /**< 到着候補を検出 */
+#define ACOUSTIC_NAV_FLAG_ARRIVED          (1U << 6)        /**< 到着確認完了 */
+#define ACOUSTIC_NAV_FLAG_MIN_TRANSLATION_TURN (1U << 7)    /**< 最小並進回頭中 */
 
 typedef enum e_acoustic_message_type {
     ACOUSTIC_MESSAGE_HELLO = 0x01U,
@@ -123,7 +148,7 @@ typedef enum e_acoustic_message_type {
     ACOUSTIC_MESSAGE_ROVER_TELEMETRY = 0x20U,
     ACOUSTIC_MESSAGE_ACTUATOR_TELEMETRY = 0x21U,
     ACOUSTIC_MESSAGE_POSE_TELEMETRY = 0x22U,
-    ACOUSTIC_MESSAGE_NAV_DIAGNOSTICS = 0x23U,
+    ACOUSTIC_MESSAGE_NAV_DIAGNOSTICS = 0x23U,               /**< 音源位置・到着診断 */
     ACOUSTIC_MESSAGE_AI_LAB_SNAPSHOT = 0x30U,             /**< AIラボsnapshot */
     ACOUSTIC_MESSAGE_AI_LAB_SUMMARY_CHUNK = 0x31U,       /**< AIラボ要約chunk */
     ACOUSTIC_MESSAGE_AI_LAB_COMMAND = 0x32U,              /**< AIラボ操作要求 */
@@ -193,9 +218,47 @@ typedef struct st_acoustic_feature {
     uint16_t frame_index;
     uint16_t frame_count;
     uint8_t n_bins;
-    uint8_t flags;
+    uint8_t flags;                                          /**< bit7有効、bit0..6はイベントpeak dBFS整数値+127 */
     int8_t mel[ACOUSTIC_FEATURE_DATA_SIZE];
 } acoustic_feature_t;
+
+/** =================================================================*
+ * @brief イベントpeak dBFS値を特徴量flags byteへ圧縮
+ * @param[in] level_dbfs_x100 イベント内peak[dBFS x100]
+ * @return flags byte。未計測時は0
+ * ================================================================= */
+static inline uint8_t acoustic_feature_event_level_pack(int16_t level_dbfs_x100) {
+    if (INT16_MIN == level_dbfs_x100) {
+        return 0U;
+    }
+    int32_t level_db = (int32_t) level_dbfs_x100 / 100;
+    if ((level_dbfs_x100 < 0) && (0 != ((int32_t) level_dbfs_x100 % 100))) {
+        level_db--;
+    }
+    if (level_db < -127) {
+        level_db = -127;
+    } else if (level_db > 0) {
+        level_db = 0;
+    }
+    return (uint8_t) (ACOUSTIC_FEATURE_EVENT_LEVEL_VALID_FLAG |
+                      (uint8_t) (level_db + ACOUSTIC_FEATURE_EVENT_LEVEL_OFFSET_DB));
+}
+
+/** =================================================================*
+ * @brief 特徴量flags byteからイベントpeak dBFS値を復元
+ * @param[in] flags 特徴量flags byte
+ * @param[out] p_level_dbfs_x100 復元したイベントpeak[dBFS x100]
+ * @return level metadataが含まれる場合true
+ * ================================================================= */
+static inline bool acoustic_feature_event_level_unpack(uint8_t flags, int16_t * p_level_dbfs_x100) {
+    if ((NULL == p_level_dbfs_x100) || (0U == (flags & ACOUSTIC_FEATURE_EVENT_LEVEL_VALID_FLAG))) {
+        return false;
+    }
+    int32_t const level_db = (int32_t) (flags & ACOUSTIC_FEATURE_EVENT_LEVEL_CODE_MASK) -
+                            ACOUSTIC_FEATURE_EVENT_LEVEL_OFFSET_DB;
+    *p_level_dbfs_x100 = (int16_t) (level_db * 100);
+    return true;
+}
 
 typedef struct st_acoustic_rover_telemetry {
     uint8_t schema_version;
@@ -270,31 +333,31 @@ typedef struct st_acoustic_pose_telemetry {
 
 /**< 音源位置・到着・回避判断の診断情報。ROVER_TELEMETRYとは別フレームで送る。 */
 typedef struct st_acoustic_nav_diagnostics {
-    uint8_t schema_version;
-    uint8_t flags;
-    uint8_t doa_confidence;
-    uint8_t arrival_state;
-    uint32_t observation_sequence;
-    uint16_t raw_doa_deg;
-    uint16_t filtered_doa_deg;
-    int32_t rover_x_mm;
-    int32_t rover_y_mm;
-    int32_t rover_heading_mrad;
-    int32_t source_x_mm;
-    int32_t source_y_mm;
-    uint32_t source_range_mm;
-    int16_t source_bearing_deg;
-    uint8_t source_confidence;
-    uint8_t observation_count;
-    uint16_t localization_residual_mm;
-    uint16_t crossing_angle_deg;
-    uint16_t baseline_mm;
-    uint16_t source_position_shift_mm;
-    uint8_t arrival_confirm_count;
-    uint8_t sensor_rule;
-    uint8_t think_state;
-    uint8_t reserved;
-    uint32_t autonomous_backup_count;
+    uint8_t schema_version;                                 /**< 診断schema版数 */
+    uint8_t flags;                                          /**< 有効状態・行動bit */
+    uint8_t doa_confidence;                                 /**< DoA品質[0..100] */
+    uint8_t arrival_state;                                  /**< 音源到着判定段階 */
+    uint32_t observation_sequence;                          /**< 対象DoA観測sequence */
+    uint16_t raw_doa_deg;                                   /**< XVF3800 raw DoA[deg] */
+    uint16_t filtered_doa_deg;                              /**< 循環平均DoA[deg] */
+    int32_t rover_x_mm;                                     /**< 車体X座標[mm] */
+    int32_t rover_y_mm;                                     /**< 車体Y座標[mm] */
+    int32_t rover_heading_mrad;                             /**< 車体方位[mrad] */
+    int32_t source_x_mm;                                    /**< 音源X座標[mm] */
+    int32_t source_y_mm;                                    /**< 音源Y座標[mm] */
+    uint32_t source_range_mm;                               /**< 音源までの距離[mm] */
+    int16_t source_bearing_deg;                             /**< 車体正面基準の音源方位[deg] */
+    uint8_t source_confidence;                              /**< 音源位置品質[0..100] */
+    uint8_t observation_count;                              /**< 推定に使用した観測数 */
+    uint16_t localization_residual_mm;                      /**< 方位線残差RMS[mm] */
+    uint16_t crossing_angle_deg;                            /**< 最大方位交差角[deg] */
+    uint16_t baseline_mm;                                   /**< 観測履歴の最大基線[mm] */
+    uint16_t source_position_shift_mm;                      /**< 前回推定からの位置変化[mm] */
+    uint8_t arrival_confirm_count;                          /**< 到着確認済み観測数 */
+    uint8_t sensor_rule;                                    /**< 採用中のセンサー回避規則 */
+    uint8_t think_state;                                    /**< CPU0思考状態 */
+    uint8_t reserved;                                       /**< 将来拡張用 */
+    uint32_t autonomous_backup_count;                       /**< 自律後退検出累積数 */
 } acoustic_nav_diagnostics_t;
 
 /**< PC上の音響AIラボが継続記録する、CPU0推論の縮約snapshot */
@@ -329,29 +392,29 @@ typedef struct st_acoustic_ai_lab_snapshot {
 
 /**< AI Lab 192次元要約の64-byte transport chunk */
 typedef struct st_acoustic_ai_lab_summary_chunk {
-    uint32_t feature_generation;
-    uint8_t chunk_index;
-    uint8_t chunk_count;
-    uint8_t schema_version;
-    uint8_t cpu_drop_count;
-    int8_t data[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE];
+    uint32_t feature_generation;                            /**< 特徴量世代 */
+    uint8_t chunk_index;                                    /**< このchunkのindex */
+    uint8_t chunk_count;                                    /**< 世代全体のchunk数 */
+    uint8_t schema_version;                                 /**< 要約schema版数 */
+    uint8_t cpu_drop_count;                                 /**< CPU0側の累積破棄数 */
+    int8_t data[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE];           /**< 要約データ部分 */
 } acoustic_ai_lab_summary_chunk_t;
 
 /**< AI Lab 保存見本の64-byte transport chunk */
 typedef struct st_acoustic_ai_lab_profile_chunk {
-    uint32_t profile_generation;
-    uint8_t sample_index;
-    uint8_t chunk_index;
-    uint8_t chunk_count;
-    uint8_t sample_count;
-    int8_t data[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE];
+    uint32_t profile_generation;                            /**< 保存見本generation */
+    uint8_t sample_index;                                   /**< このchunkの見本番号 */
+    uint8_t chunk_index;                                    /**< 見本内のchunk index */
+    uint8_t chunk_count;                                    /**< 1見本あたりのchunk数 */
+    uint8_t sample_count;                                   /**< 保存見本数 */
+    int8_t data[ACOUSTIC_AI_LAB_CHUNK_DATA_SIZE];           /**< 保存見本データ部分 */
 } acoustic_ai_lab_profile_chunk_t;
 
-#define ACOUSTIC_AI_LAB_FLAG_LINK_READY          (1U << 0) /**< PC直結リンク確立済み */
-#define ACOUSTIC_AI_LAB_FLAG_SUMMARY_VALID       (1U << 1) /**< 要約が有効 */
-#define ACOUSTIC_AI_LAB_FLAG_BACKGROUND_ANOMALY  (1U << 2) /**< 背景異常を検出 */
-#define ACOUSTIC_AI_LAB_FLAG_LEARNING_ACTIVE     (1U << 3) /**< 現場学習中 */
-#define ACOUSTIC_AI_LAB_FLAG_STORAGE_VALID       (1U << 4) /**< 保存見本が有効 */
+#define ACOUSTIC_AI_LAB_FLAG_LINK_READY    (1U << 0)        /**< PC直結リンク確立済み */
+#define ACOUSTIC_AI_LAB_FLAG_SUMMARY_VALID (1U << 1)        /**< 要約が有効 */
+#define ACOUSTIC_AI_LAB_FLAG_BACKGROUND_ANOMALY (1U << 2)   /**< 背景異常を検出 */
+#define ACOUSTIC_AI_LAB_FLAG_LEARNING_ACTIVE (1U << 3)      /**< 現場学習中 */
+#define ACOUSTIC_AI_LAB_FLAG_STORAGE_VALID (1U << 4)        /**< 保存見本が有効 */
 
 typedef struct st_acoustic_frame {
     uint8_t version;
@@ -404,8 +467,8 @@ size_t acoustic_protocol_encode_pose_telemetry(uint32_t sequence, uint32_t uptim
                                                const acoustic_pose_telemetry_t * p_telemetry,
                                                uint8_t * p_output, size_t output_capacity);
 size_t acoustic_protocol_encode_nav_diagnostics(uint32_t sequence, uint32_t uptime_ms,
-                                                const acoustic_nav_diagnostics_t * p_diagnostics,
-                                                uint8_t * p_output, size_t output_capacity);
+                                                 const acoustic_nav_diagnostics_t * p_diagnostics,
+                                                 uint8_t * p_output, size_t output_capacity); /* 音源ナビ診断符号化 */
 size_t acoustic_protocol_encode_ai_lab_snapshot(uint32_t sequence, uint32_t uptime_ms,
                                                 const acoustic_ai_lab_snapshot_t * p_snapshot,
                                                 uint8_t * p_output, size_t output_capacity); /* AIラボsnapshot */
@@ -430,7 +493,7 @@ bool acoustic_protocol_decode_actuator_telemetry(const acoustic_frame_t * p_fram
 bool acoustic_protocol_decode_pose_telemetry(const acoustic_frame_t * p_frame,
                                              acoustic_pose_telemetry_t * p_telemetry);
 bool acoustic_protocol_decode_nav_diagnostics(const acoustic_frame_t * p_frame,
-                                              acoustic_nav_diagnostics_t * p_diagnostics);
+                                               acoustic_nav_diagnostics_t * p_diagnostics); /* 音源ナビ診断復号 */
 bool acoustic_protocol_decode_ai_lab_snapshot(const acoustic_frame_t * p_frame,
                                               acoustic_ai_lab_snapshot_t * p_snapshot); /* AIラボsnapshot復号 */
 bool acoustic_protocol_decode_ai_lab_summary_chunk(const acoustic_frame_t * p_frame,

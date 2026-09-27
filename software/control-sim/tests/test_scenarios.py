@@ -124,7 +124,7 @@ def test_committed_avoidance_keeps_the_clear_sound_side_after_heading_change() -
 
 def test_escape_prefers_the_sound_side_when_it_is_narrower_but_still_clear() -> None:
     controller = Controller()
-    # 右は左より狭いが、旋回掃引に必要な380mmを満たす。音源が右なら
+    # 右は左より狭いが、旋回掃引に必要な100mmを満たす。音源が右なら
     # 反対側の壁沿いへ逃げず、後退後も右へ抜ける方向を保つ。
     first = controller.step((900, 450, 430), target=35)
     assert first.steering_deg > 0
@@ -191,7 +191,7 @@ def test_backup_uses_sound_direction_when_escape_sides_are_tied() -> None:
     assert output.left_rpm == output.right_rpm == 0
 
 
-def test_backup_does_not_turn_toward_a_narrower_sound_side() -> None:
+def test_backup_keeps_sound_direction_until_target_side_has_100mm_clearance() -> None:
     controller = Controller()
     for _ in range(2):
         output = controller.step((240, 120, 80), target=30)
@@ -200,7 +200,12 @@ def test_backup_does_not_turn_toward_a_narrower_sound_side() -> None:
     for _ in range(7):
         output = controller.step((240, 300, 80), target=30)
 
-    assert output.rule == PIVOT_LEFT
+    assert output.rule == BACKUP
+    assert output.left_rpm == output.right_rpm < 0
+
+    for _ in range(7):
+        output = controller.step((240, 300, 100), target=30)
+    assert output.rule == PIVOT_RIGHT
     assert output.left_rpm == output.right_rpm == 0
 
 

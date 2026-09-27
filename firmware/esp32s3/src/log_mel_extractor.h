@@ -44,7 +44,7 @@ void log_mel_extractor_process_window(log_mel_extractor_t * extractor,
 void log_mel_extractor_process_window_pair(log_mel_extractor_t * extractor,
                                            int32_t const samples[LOG_MEL_WINDOW_SAMPLES],
                                            int8_t centered[LOG_MEL_BIN_COUNT],
-                                           int8_t absolute[LOG_MEL_BIN_COUNT]);
+                                           int8_t absolute[LOG_MEL_BIN_COUNT]); /* centered/absolute特徴量を抽出 */
 size_t log_mel_extractor_feed(log_mel_extractor_t * extractor, int32_t const * samples, size_t sample_count,
                               log_mel_frame_callback_t callback, void * context); /* PCMストリーム投入 */
 

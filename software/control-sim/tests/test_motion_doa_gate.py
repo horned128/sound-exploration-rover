@@ -34,11 +34,11 @@ def step(raw_doa_deg: int, heading_mrad: int) -> tuple[SoundFollowInput, int]:
 
 
 def test_left_front_source_rejects_doa_that_moves_further_left_during_left_turn() -> None:
-    """09:39:08の15→61度は左回頭と矛盾する。正しい343度で更新する。"""
+    """左前DoAの-15→-61度は左回頭と矛盾する。正しい+17度で更新する。"""
     trace = [(SoundFollowInput(link_ready=1, motion_allowed=1), 500)]
-    trace.extend(step(15, 0) for _ in range(16))
-    trace.extend(step(61, -170) for _ in range(5))
-    trace.extend(step(343, -740) for _ in range(5))
+    trace.extend(step(345, 0) for _ in range(16))
+    trace.extend(step(299, -170) for _ in range(5))
+    trace.extend(step(17, -740) for _ in range(5))
 
     outputs = sound_follow_trace(trace)
     assert outputs[16].state == 3
@@ -56,7 +56,7 @@ def test_heading_wrap_does_not_turn_a_consistent_doa_into_a_jump() -> None:
 
     outputs = sound_follow_trace(trace)
     assert outputs[-1].state == 3
-    assert outputs[-1].target_bearing_deg == 15
+    assert outputs[-1].target_bearing_deg == -15
 
 
 def test_transient_pose_loss_keeps_the_last_target_bearing() -> None:
@@ -75,4 +75,4 @@ def test_transient_pose_loss_keeps_the_last_target_bearing() -> None:
 
     outputs = sound_follow_trace(trace)
     assert outputs[-1].state == 3
-    assert outputs[-1].target_bearing_deg == -15
+    assert outputs[-1].target_bearing_deg == 15

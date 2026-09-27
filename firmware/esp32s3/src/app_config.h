@@ -23,17 +23,17 @@
 #define APP_AUDIO_STALE_TIMEOUT_MS         (100U)
 /* I2S右slotの処理済みPCMは実測のTARGET+TVで現行C照合を改善。
  * 音種は固定せず、現場の5見本で照合する。既存保存見本は再登録が必要。 */
-#define APP_AUDIO_FEATURE_CHANNEL_INDEX    (1U)
+#define APP_AUDIO_FEATURE_CHANNEL_INDEX    (1U)             /**< log-mel抽出に使うI2S slot index */
 
-#define APP_OBSERVATION_PERIOD_MS          (20U)
-#define APP_DOA_FILTER_WINDOW              (5U)
+#define APP_OBSERVATION_PERIOD_MS          (20U)            /**< XVF3800観測・送信周期[ms] */
+#define APP_DOA_FILTER_WINDOW              (5U)             /**< 循環平均するDoA観測数 */
 #define APP_HEALTH_PERIOD_MS               (1000U)
 #define APP_HELLO_PERIOD_MS                (1000U)
 #define APP_XVF_I2C_TIMEOUT_MS             (100U)
 #define APP_USB_TX_TIMEOUT_MS              (20U)
 
-/* log-melイベント。CPU0の音源追従開始しきい値と同じdBFS基準を用いる。 */
-#define APP_FEATURE_TRIGGER_LEVEL_DBFS_X100 (-4500)
+/* 静かな背景もAEへ渡し、デジタル無音に近い微小値だけ除外する。 */
+#define APP_FEATURE_TRIGGER_LEVEL_DBFS_X100 (-6000)
 #define APP_FEATURE_PRE_TRIGGER_FRAMES     (30U)
 #define APP_FEATURE_POST_TRIGGER_FRAMES    (50U)
 #define APP_FEATURE_PACKET_PERIOD_MS       (20U)
@@ -50,9 +50,9 @@
 #define APP_UDP_TELEMETRY_PERIOD_MS        (250U)
 #define APP_TELEMETRY_USB_POLL_MS          (20U)
 /* 評価収録時のみ1。通常の走行ファームではPCM UDP診断を停止する。 */
-#define APP_AUDIO_DATASET_STREAM_ENABLE    (0U)
+#define APP_AUDIO_DATASET_STREAM_ENABLE    (0U)             /**< PCM診断UDP送信の有効化 */
 /* 評価収録時のみ1。channel 0の既存DSPは変えない。 */
-#define APP_AUDIO_STEREO_DIAGNOSTIC_ENABLE  (0U)
+#define APP_AUDIO_STEREO_DIAGNOSTIC_ENABLE (0U)             /**< I2S右slot診断の有効化 */
 
 #define APP_AUDIO_TASK_STACK_SIZE          (6144U)
 #define APP_FRONTEND_TASK_STACK_SIZE       (4096U)
