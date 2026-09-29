@@ -6,12 +6,24 @@ Sound Exploration ROVer（SEROV）は、現場で登録した音を識別して�
 
 ローバ本体には動作確認済みのファームウェアと鳴子の学習見本を保存して発送しました。通常の動作確認にPCやスマートフォンは不要です。操作手順は[実機評価手順](EVALUATION.md)をご覧ください。
 
+## 審査対象のファームウェア
+
+審査対象は、EK-RA8P1の両コアでμT-Kernel 3.0を動かす次の2つのプロジェクトです。
+
+| コア | プロジェクト | 主な担当 |
+|---|---|---|
+| CPU0（Cortex-M85） | [`firmware/ra8p1/SoundExplorationRover_CPU0/`](../../firmware/ra8p1/SoundExplorationRover_CPU0/) | 音の識別、進路判断、センサー取得 |
+| CPU1（Cortex-M33） | [`firmware/ra8p1/SoundExplorationRover_CPU1/`](../../firmware/ra8p1/SoundExplorationRover_CPU1/) | モーター・サーボの駆動、安全監視 |
+
+発送した実機に書き込んだ版のコミットとビルド手順は[プログラムとビルド](SOURCE_AND_BUILD.md)に記載しています。
+
+## 資料一覧
+
 | 資料 | 内容 |
 |---|---|
 | [作品の特長と全体構成](../../README.md) | デュアルコアOS、デュアルAI、現場学習とシステムの流れ |
 | [実機評価手順](EVALUATION.md) | 同梱物、起動、四方向の追従、障害物回避、任意の再学習、充電 |
-| [紹介スライド（PowerPoint）](serov-contest-2026-submission.pptx) | 作品の概要と実機検証 |
-| [紹介スライド（PDF）](serov-contest-2026-view.pdf) | ブラウザで閲覧するための版。動画URLをクリックできます |
+| [紹介スライド](serov-contest-2026-view.pdf) | 3ページ目にシステム・実機の1枚図を収録。実機動画のURLをクリックできます |
 | [配置図](assets/test-map.png) | プランターを使う試験配置。距離は目安 |
 | [プログラムとビルド](SOURCE_AND_BUILD.md) | ソースコード、ビルド、シミュレーション試験への入口 |
 

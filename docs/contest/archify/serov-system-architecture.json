@@ -1,0 +1,196 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "SEROV システム構成",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1340,
+      820
+    ]
+  },
+  "components": [
+    {
+      "id": "microphones",
+      "type": "external",
+      "label": "4マイク・XVF3800",
+      "sublabel": "音源方位 / VAD",
+      "pos": [
+        40,
+        286
+      ],
+      "size": [
+        190,
+        92
+      ]
+    },
+    {
+      "id": "frontend",
+      "type": "frontend",
+      "label": "XIAO ESP32-S3",
+      "sublabel": "音の特徴 / USB CDC",
+      "pos": [
+        280,
+        286
+      ],
+      "size": [
+        190,
+        92
+      ]
+    },
+    {
+      "id": "cpu0",
+      "type": "backend",
+      "label": "RA8P1 CPU0",
+      "sublabel": "音の照合・進路判断 / 50 ms",
+      "pos": [
+        530,
+        286
+      ],
+      "size": [
+        200,
+        92
+      ]
+    },
+    {
+      "id": "cpu1",
+      "type": "security",
+      "label": "RA8P1 CPU1",
+      "sublabel": "駆動・安全監視 / 1 ms",
+      "pos": [
+        790,
+        286
+      ],
+      "size": [
+        200,
+        92
+      ]
+    },
+    {
+      "id": "actuators",
+      "type": "external",
+      "label": "4サーボ・6輪",
+      "sublabel": "操舵・走行",
+      "pos": [
+        1050,
+        286
+      ],
+      "size": [
+        200,
+        92
+      ]
+    },
+    {
+      "id": "sensors",
+      "type": "external",
+      "label": "距離×3・姿勢",
+      "sublabel": "VL53L1X / BMI270",
+      "pos": [
+        530,
+        520
+      ],
+      "size": [
+        200,
+        92
+      ]
+    },
+    {
+      "id": "diagnostics",
+      "type": "external",
+      "label": "診断PC",
+      "sublabel": "Wi-Fi UDP 表示",
+      "pos": [
+        280,
+        70
+      ],
+      "size": [
+        190,
+        92
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "RA8P1・両コアでμT-Kernel 3.0",
+      "wraps": [
+        "cpu0",
+        "cpu1"
+      ],
+      "pad": 34
+    }
+  ],
+  "connections": [
+    {
+      "id": "audio-to-frontend",
+      "from": "microphones",
+      "to": "frontend",
+      "label": "I2S / I2C",
+      "variant": "emphasis"
+    },
+    {
+      "id": "frontend-to-cpu0",
+      "from": "frontend",
+      "to": "cpu0",
+      "label": "USB HS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "cpu0-to-cpu1",
+      "from": "cpu0",
+      "to": "cpu1",
+      "label": "IPC 指令",
+      "variant": "emphasis"
+    },
+    {
+      "id": "cpu1-to-actuators",
+      "from": "cpu1",
+      "to": "actuators",
+      "label": "PWM",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sensors-to-cpu0",
+      "from": "sensors",
+      "to": "cpu0",
+      "label": "GPIO I2C",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "frontend-to-diagnostics",
+      "from": "frontend",
+      "to": "diagnostics",
+      "label": "UDP 診断",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "音を選ぶ",
+      "items": [
+        "本体SW1で現場の音を5件登録",
+        "音源方位と192次元の音響見本を照合"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "進路を決める",
+      "items": [
+        "音源方位・距離・姿勢をCPU0で統合",
+        "制御MLPと安全ルールで障害物を回避"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "安全に動かす",
+      "items": [
+        "CPU1が1 ms周期で4サーボと左右駆動を制御",
+        "指令途絶と制御タスク停止を監視"
+      ]
+    }
+  ]
+}

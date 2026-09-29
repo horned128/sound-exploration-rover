@@ -42,14 +42,7 @@ SW1を約2秒長押しすると見本の収集が始まり、有効な見本が5
 
 ## システム全体像
 
-```mermaid
-flowchart LR
-    MIC["4マイク・XVF3800<br/>音の方向"] --> ESP["ESP32-S3<br/>音の特徴を作る"]
-    ESP -->|USB| CPU0["RA8P1 CPU0 / μT-Kernel<br/>音の照合・進路判断"]
-    SENSOR["距離センサ ×3・姿勢センサ"] --> CPU0
-    CPU0 -->|IPC| CPU1["RA8P1 CPU1 / μT-Kernel<br/>駆動・安全停止"]
-    CPU1 --> ACT["操舵サーボ ×4・駆動輪 ×6"]
-```
+![1枚図](docs/contest/assets/serov-one-page.png)
 
 XVF3800が音源の方向を求め、ESP32-S3が音の特徴を抽出します。CPU0は音響情報と距離・姿勢を使って進路を決め、CPU1へ駆動指令を送ります。車体には[Papaya Pathfinder](hardware/papaya-pathfinder/README.md)のロッカーボギー式6輪機構を採用しました。
 
@@ -59,9 +52,13 @@ XVF3800が音源の方向を求め、ESP32-S3が音の特徴を抽出します�
 
 [![アプリ側の11タスクと、音の取得から走行までの流れ](docs/firmware/active-tasks.png)](docs/firmware/active-tasks.png)
 
-[draw.ioで編集できる元図](docs/firmware/active-tasks.drawio)
+`task_infer`は現場で登録した音を見本照合します。音響用ニューラルネットワークは、実機の走行音や反響がある環境で誤検知が増えたため、提出版では無効にしました。（[参考](docs/firmware/edgeai/control_mlp_avoidance.md)）
 
-`task_infer`は現場で登録した音を見本照合します。音響用ニューラルネットワークは、実機の走行音や反響がある環境で誤検知が増えたため、提出版では無効にしました。`task_think`は別のTFLM制御モデルで進路を決めます。`wifi_telemetry`は診断用で、起動できなくても走行処理は続きます。各タスクの実装は[CPU0](firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/)・[CPU1](firmware/ra8p1/SoundExplorationRover_CPU1/src/tasks/)・[ESP32-S3](firmware/esp32s3/src/)にあります。
+`task_think`は障害物回避用のTFLM制御モデルで進路を決めます。
+
+`wifi_telemetry`は診断用で、起動できなくても走行処理は続きます。
+
+各タスクの実装は[CPU0](firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/)・[CPU1](firmware/ra8p1/SoundExplorationRover_CPU1/src/tasks/)・[ESP32-S3](firmware/esp32s3/src/)にあります。
 
 ## 実機で確認したこと
 
