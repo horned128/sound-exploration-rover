@@ -1,95 +1,102 @@
 # Sound Exploration ROVer（SEROV）
 
-TRONプログラミングコンテスト2026に向けて開発する、音源探索ローバー **Sound Exploration ROVer（SEROV）** のモノレポです。
+**現場で覚えた音を聞き分け、その方向へ進み、障害物を避けるμT-Kernel 3.0ローバ。**
 
-- [Sound Exploration ROVer（SEROV）](#sound-exploration-roverserov)
-  - [取得方法](#取得方法)
-  - [プロジェクト構成](#プロジェクト構成)
-  - [ハードウェア](#ハードウェア)
-    - [Papaya追加機構](#papaya追加機構)
-    - [アクチュエータ](#アクチュエータ)
-  - [ファームウェア](#ファームウェア)
-  - [サードパーティライセンス (Third-Party Notices)](#サードパーティライセンス-third-party-notices)
-    - [Bosch Sensortec BMI270 SensorAPI](#bosch-sensortec-bmi270-sensorapi)
+**デュアルコアOS**（RA8P1の両コアでμT-Kernel 3.0）、**デュアルAI**（音の見本照合とTFLMの走行制御）、**現場学習**（SW1で音を登録）が特長です。
 
-## 取得方法
+![実機のSEROV](docs/contest/assets/rover-angle.jpg)
 
-このリポジトリは、GitサブモジュールとGit LFSを含めて次のように取得します。
+TRONプログラミングコンテスト2026の審査用に、実機を発送済みです。鳴子の学習から追従までと、プランターへの非接触回避を実機で確認しました。工場などで異常音を探す用途は、今後の展開として想定しています。
 
-```bash
-git clone --recurse-submodules <repository-url>
-cd sound-exploration-rover
-git lfs pull
-```
+- [応募資料・実機評価手順](docs/contest/README.md)
+- [ソースの取得と再現方法](docs/contest/SOURCE_AND_BUILD.md)
 
-既存のクローンでGitサブモジュールを取得する場合は、次を実行します。
+## ローバが音を追うまで
 
-```bash
-git submodule update --init --recursive
-git lfs pull
-```
+1. **音を覚える：** 本体のSW1で鳴子を登録します。電源を切っても学習した見本は残ります。
+2. **音を選び、方向を知る：** 4つのマイクで音源の方位を求め、保存した見本と照合します。
+3. **進路を決めて走る：** 音源方位と距離・姿勢の情報から進路を決め、6輪で走ります。
 
-STEPファイルとSTLファイルはGit LFSの対象です。Gitサブモジュールは上流ブランチを直接追跡せず、親リポジトリが指定するコミットへ固定します。
+## 技術上の3つの特長
 
-## プロジェクト構成
+### デュアルコアOS：二つのコアでμT-Kernel 3.0を動かす
 
-```text
-sound-exploration-rover/
-├── docs/                       ドキュメント類
-├── firmware/
-│   ├── common/                 MCU間で共有する通信protocol
-│   ├── ra8p1/                  EK-RA8P1用e² studioワークスペース
-│   └── esp32s3/                XIAO ESP32S3用ESP-IDF project
-└── hardware/
-    ├── actuator/               使用アクチュエータの仕様
-    ├── papaya-addon/
-    │   ├── step/               編集用のSTEPデータ
-    │   └── stl/                造形用のSTLデータ
-    └── papaya-pathfinder/      Papaya Pathfinderの3Dモデル（Gitサブモジュール）
-```
+RA8P1のCortex-M85（CPU0）とCortex-M33（CPU1）で、μT-Kernel 3.0をそれぞれ動かします。CPU0は50 ms周期で追従と回避を判断し、CPU1は1 ms周期で駆動を制御します。
 
-`hardware/papaya-pathfinder/`は、Gitサブモジュールを初期化すると作成されます。
+CPU0は4つのサーボ角度と2つのモーター出力を一組の指令として送ります。CPU1は指令が1.5秒途絶れると停止します。
 
-## ハードウェア
+### デュアルAI：音の見本照合とTFLMの走行制御を組み合わせる
 
-ベース車体には、オープンソースのロッカーボギー型ローバーPapaya Pathfinderを採用しています。公開されている3Dモデルを造形し、EK-RA8P1とマイクアレイを搭載するための追加機構を独自に設計しています。
+ここでいうデュアルAIは、追う音を選ぶ見本照合と、進路を決める制御MLPの二方式を指します。
 
-### Papaya追加機構
-
-`hardware/papaya-addon/`には、EK-RA8P1とマイクアレイをPapaya車体へ搭載する追加機構を格納しています。
-
-- `step/`には、形状編集、干渉確認、組付け設計に使用するデータを格納します。
-- `stl/`には、3Dプリント用メッシュを格納します。
-- 同じ部品は、STEPとSTLでファイル名を一致させます。
-
-上流のPapaya Pathfinderが提供する標準車体と3Dモデルは、`hardware/papaya-pathfinder/`から参照します。独自設計は`hardware/papaya-addon/`へ分離して管理します。
-
-### アクチュエータ
-
-使用するモーターとサーボの購入仕様、販売ページ、参考仕様は、[アクチュエータ仕様一覧](hardware/actuator/README.md)にまとめています。
-
-## ファームウェア
-
-I2Cセンサー（VL53L1X 3台、TCA9548A、BMI270）と障害物回避の導入・FSP生成・確認手順は、[I2Cセンサー・ルールベース走行](docs/firmware/SENSOR_AUTONOMY.md)を参照してください。
-
-通常の編集、ビルド、書き込み、デバッグは、リポジトリ直下の`SoundExplorationRover.code-workspace`をVS Codeで開いて行います。FSP Solution、ピン、クロック、スタックを変更するときは`firmware/ra8p1/`をe² studioのワークスペースとして使用します。
-
-詳細な設計書・開発手順・コーディング規約は[docs](docs/README.md)へ集約しています。VS Codeの初期設定とCPU0/CPU1/XIAOの操作は[VS Code統合開発手順](docs/firmware/VSCODE_WORKFLOW.md)を参照してください。全体の責務、CPU0/CPU1タスク、IPC、アクチュエータは[ローバー ファームウェア設計書](docs/firmware/ARCHITECTURE.md)、ReSpeaker/XIAOのUSB接続、protocol、DoA校正、音源追従の検証順は[ReSpeaker統合設計](docs/firmware/RESPEAKER_INTEGRATION.md)を参照してください。従来の配線とアクチュエータ単体確認は[EK-RA8P1 アクチュエータ制御](firmware/ra8p1/README.md)に残しています。
-
-| プロジェクト | 内容 |
+| 役割 | 提出版で動く方式 |
 |---|---|
-| `SoundExplorationRover` | マルチコア構成をまとめるソリューション |
-| `SoundExplorationRover_CPU0` | CPU0向けプロジェクト |
-| `SoundExplorationRover_CPU1` | CPU1向けプロジェクト |
-| `esp32s3` | XVF3800連携、USB CDC音響frontend |
+| **追う音を選ぶ** | ESP32-S3が作った音の特徴をCPU0で192次元に要約し、現場で登録した見本と照合します。主な周波数帯も確かめます。 |
+| **進路を決める** | `software/control-sim`で学習した3,880バイトの制御モデルを、CPU0上のTensorFlow Lite Microで実行します。音源方位と距離センサなどから車輪の向きと速度を求めます。 |
 
-共有する`.project`、`.cproject`、FSP設定、ソースコードはGit管理の対象です。`.metadata/`、`Debug/`、`Release/`、`build/`、起動設定、ログ、ELFなどのローカル生成物は管理しません。
+制御モデルの判断に、センサ値の確認と障害物回避のルールを組み合わせます。音響用のニューラルネットワークは[実機検証の結果](docs/firmware/validation/ACOUSTIC_TFLM_INTEGRATION_FINDINGS.md)、提出版では無効にしています。
 
-## サードパーティライセンス (Third-Party Notices)
+### 現場で学習した音を保持する
 
-本プロジェクトでは、以下のサードパーティ製データおよびソフトウェアを利用しています。
+SW1を約2秒長押しすると見本の収集が始まり、有効な見本が5件集まった後にもう一度長押しするとCode MRAMへ保存します。PCや再ビルドを使わずに目標音を切り替えられます。新しい学習を始めると以前の見本は消えるため、審査では[鳴子の試験を先に行う手順](docs/contest/EVALUATION.md)にしています。
 
-### Bosch Sensortec BMI270 SensorAPI
+## システム全体像
+
+```mermaid
+flowchart LR
+    MIC["4マイク・XVF3800<br/>音の方向"] --> ESP["ESP32-S3<br/>音の特徴を作る"]
+    ESP -->|USB| CPU0["RA8P1 CPU0 / μT-Kernel<br/>音の照合・進路判断"]
+    SENSOR["距離センサ ×3・姿勢センサ"] --> CPU0
+    CPU0 -->|IPC| CPU1["RA8P1 CPU1 / μT-Kernel<br/>駆動・安全停止"]
+    CPU1 --> ACT["操舵サーボ ×4・駆動輪 ×6"]
+```
+
+XVF3800が音源の方向を求め、ESP32-S3が音の特徴を抽出します。CPU0は音響情報と距離・姿勢を使って進路を決め、CPU1へ駆動指令を送ります。車体には[Papaya Pathfinder](hardware/papaya-pathfinder/README.md)のロッカーボギー式6輪機構を採用しました。
+
+## 機能説明：動いているタスク
+
+次の図には、提出時の設定で起動するアプリ側のタスクをすべて載せています。実線は走行の主な流れ、点線は監視・診断です。
+
+[![アプリ側の11タスクと、音の取得から走行までの流れ](docs/firmware/active-tasks.png)](docs/firmware/active-tasks.png)
+
+[draw.ioで編集できる元図](docs/firmware/active-tasks.drawio)
+
+`task_infer`は現場で登録した音を見本照合します。音響用ニューラルネットワークは、実機の走行音や反響がある環境で誤検知が増えたため、提出版では無効にしました。`task_think`は別のTFLM制御モデルで進路を決めます。`wifi_telemetry`は診断用で、起動できなくても走行処理は続きます。各タスクの実装は[CPU0](firmware/ra8p1/SoundExplorationRover_CPU0/src/tasks/)・[CPU1](firmware/ra8p1/SoundExplorationRover_CPU1/src/tasks/)・[ESP32-S3](firmware/esp32s3/src/)にあります。
+
+## 実機で確認したこと
+
+| 確認内容 | 根拠 |
+|---|---|
+| 電源投入、鳴子の現場学習、保存、音の検知と追従 | [チュートリアル動画](https://youtu.be/HlEqVrhAsqA) |
+| プランターを避け、鳴子へ接触せずに進む | [主試験Bの動画](https://youtube.com/shorts/4OGVpEJQ6OY?si=xfHyg3C4lrh2D03t) |
+
+音源への到着を自動判定して停止する機能や、工場などでの運用は今回の実機評価に含めていません。
+
+## 審査時に試せる四方向試験
+
+発送済みの鳴子を前・右・後ろ・左から鳴らす[主試験A](docs/contest/EVALUATION.md#3-主試験a四方向からの鳴子)の手順を用意しました。この試験の動画は撮影していません。
+
+## ソースと詳細資料
+
+| 見たい内容 | 入口 |
+|---|---|
+| 審査員向けの操作・充電・動画・紹介スライド | [提出資料一覧](docs/contest/README.md) |
+| 実機確認済みコミット、取得・ビルド・書き込み | [ソースの取得と再現](docs/contest/SOURCE_AND_BUILD.md) |
+| CPU0・CPU1・ESP32-S3の設計 | [ファームウェア設計書](docs/firmware/ARCHITECTURE.md) |
+| 制御モデルの学習とPC上の試験 | [control-sim](software/control-sim/README.md) |
+| ローバの仕組みを順に読む | [総合教科書](docs/textbook/index.html) |
+
+## ライセンス
+
+独自のソースコードは[MIT License](LICENSE)で公開します。第三者のコードと車体設計には、それぞれのライセンスが適用されます。主な資材の参照先は[ソースの取得と再現](docs/contest/SOURCE_AND_BUILD.md#ライセンス)にまとめています。
+
+---
+
+## サードパーティライセンス
+
+<details>
+<summary>Bosch Sensortec BMI270 SensorAPI</summary>
+
 `firmware/ra8p1/SoundExplorationRover_CPU0/src/drivers/bmi270.c` contains the `bmi270_maximum_fifo_config_file` configuration image from the Bosch Sensortec BMI270 SensorAPI v2.86.1.
 
 Source: https://github.com/boschsensortec/BMI270_SensorAPI
@@ -118,3 +125,4 @@ LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
 ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+</details>
